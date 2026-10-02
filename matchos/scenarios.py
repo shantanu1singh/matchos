@@ -26,7 +26,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Two even sides. Moments appear only when the run of play earns them.",
         start_minute=0,
         warmup_from_minute=0,
-        default_speed=20,
+        default_speed=1,
         score_red=0,
         score_blue=0,
     ),
@@ -36,7 +36,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Blue start with a high press. From 55' their line drops and Red begin to play through it.",
         start_minute=50,
         warmup_from_minute=42,
-        default_speed=20,
+        default_speed=1,
         score_red=1,
         score_blue=1,
     ),
@@ -46,7 +46,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Red send on a quicker wide player at 65'. The feed is not told that this matters.",
         start_minute=62,
         warmup_from_minute=55,
-        default_speed=20,
+        default_speed=1,
         score_red=1,
         score_blue=1,
     ),
@@ -56,7 +56,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Red trail 0–2 at 75', change shape, and are given two real chances late.",
         start_minute=74,
         warmup_from_minute=70,
-        default_speed=20,
+        default_speed=1,
         score_red=0,
         score_blue=2,
     ),
@@ -66,7 +66,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="Blue go down to ten. The remaining block has to cover more grass.",
         start_minute=32,
         warmup_from_minute=25,
-        default_speed=20,
+        default_speed=1,
         score_red=0,
         score_blue=0,
     ),
@@ -76,7 +76,7 @@ SCENARIOS: dict[str, Scenario] = {
         description="No scripted story. The seed alone decides the match.",
         start_minute=0,
         warmup_from_minute=0,
-        default_speed=20,
+        default_speed=1,
         score_red=0,
         score_blue=0,
     ),
@@ -134,10 +134,10 @@ def style_for(scenario_id: str, minute: float, team: TeamId) -> dict[str, float]
 def progression_bias(scenario_id: str, minute: float, attacking: TeamId) -> float:
     """Extra weight on passes that break the first line. 0 is neutral."""
     if scenario_id == "press_collapse" and attacking == "RED":
-        if minute < 55:
+        if minute < 57:
             return -0.35
-        t = min(1.0, (minute - 55.0) / 2.5)
-        return -0.35 + 1.15 * t
+        t = min(1.0, (minute - 57.0) / 1.5)
+        return -0.35 + 1.25 * t
     if scenario_id == "red_card" and attacking == "RED" and minute >= 36:
         return 0.45
     if scenario_id == "substitute_impact" and attacking == "RED" and minute >= 66:

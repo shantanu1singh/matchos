@@ -30,7 +30,7 @@ python -m matchos
 
 Open http://localhost:8000.
 
-The default lab match is `press_collapse` with seed `47129` at 20×. Blue’s press starts high. From 55' the block drops and Red play through it. MatchOS is not told the scenario name.
+The default lab match is `press_collapse` with seed `47129` at 1×. Blue’s press starts high. From 55' the block drops and Red play through it. MatchOS is not told the scenario name.
 
 ## Viewer modes
 

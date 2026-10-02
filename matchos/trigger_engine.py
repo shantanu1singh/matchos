@@ -17,8 +17,16 @@ class TriggerEngine:
             bypass = deltas.get(f"{team}_press_bypass_delta")
             sample = sample_sizes.get(team, 0)
             rate = sample_sizes.get(f"{team}_rate", 0.0)
-            # A press story needs a real jump and a high current rate, not a flicker.
-            if bypass is not None and bypass >= 0.25 and sample >= 5 and rate >= 0.68:
+            # A press collapse needs a real jump, a high current rate, and a block that has actually dropped.
+            line_drop = deltas.get(f"{team}_line_delta_m")
+            if (
+                bypass is not None
+                and bypass >= 0.25
+                and sample >= 5
+                and rate >= 0.68
+                and line_drop is not None
+                and line_drop <= -5
+            ):
                 reasons.append(f"{team}_press_bypass")
             entries = deltas.get(f"{team}_entries_delta", 0.0)
             if entries >= 5 and sample_sizes.get(f"{team}_possession", 0.0) >= 0.62:

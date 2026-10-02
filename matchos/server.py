@@ -112,7 +112,7 @@ async def match_socket(websocket: WebSocket) -> None:
                 session = MatchSession(
                     scenario_id=str(message.get("scenario") or "press_collapse"),
                     seed=int(message.get("seed") or 47129),
-                    speed=int(message.get("speed") or 20),
+                    speed=int(message.get("speed") or 1),
                     viewer=viewer,
                 )
                 await session.warmup()

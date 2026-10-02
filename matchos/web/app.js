@@ -3,12 +3,11 @@ const state = {
   scenarios: [],
   scenario: "press_collapse",
   seed: 47129,
-  speed: 20,
+  speed: 1,
   running: false,
   viewer: { persona: "casual", team_id: "BLUE", language: "en", player_id: "red_7" },
   frame: null,
   prev: null,
-  events: [],
   moment: null,
   overlay: null,
   whyOpen: false,
@@ -48,13 +47,17 @@ function onMessage(message) {
     return;
   }
   if (message.type === "frame") {
+    const now = performance.now();
     state.prev = state.frame;
+    state.prevAt = state.frameAt || now;
+    const stamp = (frame) => (frame && frame.action ? frame.action.started_ms : null);
+    const nextAction = stamp(message.frame);
+    const prevAction = stamp(state.frame);
     state.frame = message.frame;
+    state.frameAt = now;
+    if (!state.prev || state.frame.timestamp_ms < state.prev.timestamp_ms || nextAction !== prevAction) state.trail = [];
     state.pulse = message.state;
     const arrivals = message.events || [];
-    const now = performance.now();
-    state.events.push(...arrivals.map((item) => ({ ...item, shown: now })));
-    state.events = state.events.filter((item) => item.type === "PASS" || item.type === "SHOT" || item.type === "CARRY").slice(-3);
     if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
     renderPulse();
     updateScore();
@@ -262,22 +265,71 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 }
 
+function watchVisible() {
+  const panel = document.getElementById("panel-watch");
+  return Boolean(panel && !panel.classList.contains("hidden"));
+}
+
 function resize() {
+  if (!watchVisible()) return;
   const rect = pitch.parentElement.getBoundingClientRect();
+  if (rect.width < 80 || rect.height < 80) return;
   const ratio = window.devicePixelRatio || 1;
-  pitch.width = Math.max(640, rect.width) * ratio;
-  pitch.height = Math.max(480, rect.height) * ratio;
+  const width = Math.round(rect.width * ratio);
+  const height = Math.round(rect.height * ratio);
+  if (pitch.width !== width || pitch.height !== height) {
+    pitch.width = width;
+    pitch.height = height;
+  }
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 }
 
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function viewModel() {
+  const curr = state.frame;
+  if (!curr) return null;
+  const prev = state.prev;
+  if (!prev || !state.frameAt || curr.timestamp_ms < prev.timestamp_ms) {
+    return { ball: curr.ball, ballZ: curr.ball_z || 0, players: curr.players, action: curr.action };
+  }
+  const gap = Math.min(400, Math.max(80, state.frameAt - (state.prevAt || state.frameAt)));
+  const t = Math.max(0, Math.min(1, (performance.now() - state.frameAt) / gap));
+  const earlier = new Map(prev.players.map((player) => [player.player_id, player]));
+  const players = curr.players.map((player) => {
+    const from = earlier.get(player.player_id);
+    if (!from) return player;
+    return { ...player, x: lerp(from.x, player.x, t), y: lerp(from.y, player.y, t) };
+  });
+  const sameFlight = curr.action && prev.action && curr.action.started_ms === prev.action.started_ms;
+  const ball = curr.action && !sameFlight
+    ? curr.ball
+    : { x: lerp(prev.ball.x, curr.ball.x, t), y: lerp(prev.ball.y, curr.ball.y, t) };
+  const ballZ = curr.action && !sameFlight ? (curr.ball_z || 0) : lerp(prev.ball_z || 0, curr.ball_z || 0, t);
+  return { ball, ballZ, players, action: curr.action || null };
+}
+
 function draw() {
+  try {
+    paint();
+  } finally {
+    requestAnimationFrame(draw);
+  }
+}
+
+function paint() {
+  if (!watchVisible()) return;
   const rect = pitch.parentElement.getBoundingClientRect();
   const width = rect.width;
   const height = rect.height;
+  if (width < 80 || height < 80) return;
   ctx.clearRect(0, 0, width, height);
   const pad = 28;
   const pitchW = width - pad * 2;
   const pitchH = height - pad * 2;
+  if (pitchW < 40 || pitchH < 40) return;
   for (let i = 0; i < 12; i += 1) {
     ctx.fillStyle = i % 2 === 0 ? "#146845" : "#18784e";
     ctx.fillRect(pad + (pitchW / 12) * i, pad, pitchW / 12 + 0.5, pitchH);
@@ -294,38 +346,97 @@ function draw() {
   ctx.beginPath();
   ctx.arc(x(52.5), y(34), (9.15 / 105) * pitchW, 0, Math.PI * 2);
   ctx.stroke();
-  box(x, y, 0);
-  box(x, y, 1);
-  drawEvents(x, y);
-  if (state.frame) drawPlayers(x, y);
-  requestAnimationFrame(draw);
+  box(x, y);
+  const view = viewModel();
+  if (view) {
+    drawTrail(x, y, view);
+    drawAction(x, y, view);
+    drawPlayers(x, y, view);
+  }
 }
 
-function box(x, y, side) {
-  const spots = side === 0
-    ? [[0, 13.84, 16.5, 40.32], [0, 24.84, 5.5, 18.32]]
-    : [[88.5, 13.84, 16.5, 40.32], [99.5, 24.84, 5.5, 18.32]];
+function box(x, y) {
+  const spots = [
+    [0, 13.84, 16.5, 40.32],
+    [0, 24.84, 5.5, 18.32],
+    [88.5, 13.84, 16.5, 40.32],
+    [99.5, 24.84, 5.5, 18.32],
+  ];
+  const scaleX = (x(105) - x(0)) / 105;
+  const scaleY = (y(68) - y(0)) / 68;
   spots.forEach(([mx, my, w, h]) => {
-    ctx.strokeRect(x(mx), y(my), (w / 105) * (x(105) - x(0)), (h / 68) * (y(68) - y(0)));
+    ctx.strokeRect(x(mx), y(my), w * scaleX, h * scaleY);
   });
 }
 
-function drawEvents(x, y) {
-  state.events.forEach((event) => {
-    if (!event.location || !event.end_location) return;
-    if (event.type !== "PASS" && event.type !== "SHOT" && event.type !== "CARRY") return;
-    ctx.beginPath();
-    ctx.moveTo(x(event.location.x), y(event.location.y));
-    ctx.lineTo(x(event.end_location.x), y(event.end_location.y));
-    ctx.strokeStyle = event.team_id === "RED" ? "rgba(255,93,82,0.85)" : "rgba(91,147,255,0.9)";
-    ctx.lineWidth = event.type === "SHOT" ? 2.4 : 1.4;
-    ctx.stroke();
-  });
+function rememberTrail(ball, action) {
+  if (action) {
+    state.trail = [];
+    return;
+  }
+  if (!state.trail) state.trail = [];
+  const last = state.trail[state.trail.length - 1];
+  if (!last || Math.hypot(ball.x - last.x, ball.y - last.y) > 0.45) {
+    state.trail.push({ x: ball.x, y: ball.y });
+    if (state.trail.length > 12) state.trail.shift();
+  }
 }
 
-function drawPlayers(xOf, yOf) {
+function drawTrail(x, y, view) {
+  rememberTrail(view.ball, view.action);
+  const trail = state.trail || [];
+  if (trail.length < 2) return;
+  ctx.beginPath();
+  trail.forEach((point, index) => {
+    if (index === 0) ctx.moveTo(x(point.x), y(point.y));
+    else ctx.lineTo(x(point.x), y(point.y));
+  });
+  ctx.strokeStyle = "rgba(247,244,234,0.35)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawAction(x, y, view) {
+  const action = view.action;
+  if (!action || !action.start || !action.end) return;
+  const dx = action.end.x - action.start.x;
+  const dy = action.end.y - action.start.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const along = Math.max(0, Math.min(1, ((view.ball.x - action.start.x) * dx + (view.ball.y - action.start.y) * dy) / len2));
+  const sx = x(action.start.x);
+  const sy = y(action.start.y);
+  const ex = x(action.end.x);
+  const ey = y(action.end.y);
+  const bx = x(action.start.x + dx * along);
+  const by = y(action.start.y + dy * along);
+  const colour = action.team_id === "RED" ? "rgba(255,93,82," : "rgba(91,147,255,";
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.setLineDash([6, 7]);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(ex, ey);
+  ctx.strokeStyle = `${colour}0.45)`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(sx, sy);
+  ctx.lineTo(bx, by);
+  ctx.strokeStyle = `${colour}0.95)`;
+  ctx.lineWidth = action.kind === "SHOT" ? 2.8 : 2.3;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(ex, ey, 4.5, 0, Math.PI * 2);
+  ctx.strokeStyle = `${colour}0.9)`;
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawPlayers(xOf, yOf, view) {
   const highlights = new Set(state.moment?.highlight_player_ids || []);
-  state.frame.players.forEach((player) => {
+  view.players.forEach((player) => {
     const x = xOf(player.x);
     const y = yOf(player.y);
     if (highlights.has(player.player_id)) {
@@ -348,12 +459,21 @@ function drawPlayers(xOf, yOf) {
     ctx.textBaseline = "middle";
     ctx.fillText(String(player.number), x, y + 0.5);
   });
-  const ball = state.frame.ball;
+  const lift = Math.max(0, view.ballZ) * 7;
+  const bx = xOf(view.ball.x);
+  const by = yOf(view.ball.y) - lift;
+  if (lift > 1) {
+    ctx.beginPath();
+    ctx.ellipse(xOf(view.ball.x), yOf(view.ball.y), 5, 2.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fill();
+  }
   ctx.beginPath();
-  ctx.arc(xOf(ball.x), yOf(ball.y), 5.5, 0, Math.PI * 2);
+  ctx.arc(bx, by, 5.5, 0, Math.PI * 2);
   ctx.fillStyle = "#f7f4ea";
   ctx.fill();
   ctx.strokeStyle = "#1b1b1b";
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 }
 
@@ -363,7 +483,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.add("active");
     document.querySelectorAll(".panel").forEach((panel) => panel.classList.add("hidden"));
     document.getElementById(`panel-${tab.dataset.tab}`).classList.remove("hidden");
-    resize();
+    if (tab.dataset.tab === "watch") requestAnimationFrame(resize);
   });
 });
 
@@ -382,12 +502,16 @@ document.getElementById("pause").addEventListener("click", () => {
   document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
 });
 
-document.getElementById("speeds").innerHTML = [1, 2, 5, 20].map((speed) => `<button type="button" data-speed="${speed}" class="${speed === 20 ? "on" : ""}">${speed}×</button>`).join("");
+function markSpeed(speed) {
+  document.querySelectorAll("#speeds button").forEach((item) => item.classList.toggle("on", Number(item.dataset.speed) === speed));
+}
+
+document.getElementById("speeds").innerHTML = [1, 2, 5, 20].map((speed) => `<button type="button" data-speed="${speed}" class="${speed === 1 ? "on" : ""}">${speed}×</button>`).join("");
 document.getElementById("speeds").addEventListener("click", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
   state.speed = Number(button.dataset.speed);
-  document.querySelectorAll("#speeds button").forEach((item) => item.classList.toggle("on", item === button));
+  markSpeed(state.speed);
   send({ type: "speed", speed: state.speed });
   setLive(`Live · ${state.speed}×`);
 });
@@ -396,6 +520,8 @@ document.getElementById("lab-form").addEventListener("submit", (event) => {
   event.preventDefault();
   state.seed = document.getElementById("seed").value;
   state.speed = Number(document.getElementById("lab-speed").value);
+  markSpeed(state.speed);
+  state.trail = [];
   state.moment = null;
   state.overlay = null;
   state.candidates = [];
