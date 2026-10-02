@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MatchOS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@360;500;640&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <span class="mark">MO</span>
+          <div>
+            <strong>MatchOS</strong>
+            <em>Verified match intelligence</em>
+          </div>
+        </div>
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="watch" role="tab">Watch</button>
+          <button class="tab" data-tab="producer" role="tab">Producer</button>
+          <button class="tab" data-tab="lab" role="tab">Lab</button>
+        </nav>
+        <div class="live-pill" id="live-pill">Connecting</div>
+      </header>
+
+      <section class="panel" id="panel-watch">
+        <div class="stage">
+          <div class="scorebug">
+            <div class="side red"><span>RED</span><b id="score-red">0</b></div>
+            <div class="clock" id="clock">00:00</div>
+            <div class="side blue"><b id="score-blue">0</b><span>BLUE</span></div>
+          </div>
+          <canvas id="pitch"></canvas>
+          <div class="goal-flash" id="goal-flash">Goal</div>
+        </div>
+        <aside class="rail">
+          <div class="rail-head">
+            <span>Live insight</span>
+            <b id="latency">—</b>
+          </div>
+          <article class="card empty" id="insight">
+            <p class="kicker">Waiting for the match</p>
+            <h2>The feed is live. Insights appear only when they can be proved.</h2>
+            <p class="body">Same events drive the pitch and MatchOS.</p>
+          </article>
+          <div class="why hidden" id="why"></div>
+          <div class="pulse" id="pulse"></div>
+          <div class="controls">
+            <label>Viewer
+              <select id="persona">
+                <option value="casual">Casual</option>
+                <option value="analyst">Analyst</option>
+                <option value="fan">Home fan</option>
+                <option value="player">Player</option>
+                <option value="broadcaster">Broadcaster</option>
+              </select>
+            </label>
+            <label>Team
+              <select id="team">
+                <option value="BLUE">Blue</option>
+                <option value="RED">Red</option>
+              </select>
+            </label>
+            <label>Language
+              <select id="language">
+                <option value="en">English</option>
+                <option value="hi">Hindi</option>
+              </select>
+            </label>
+            <label>Player
+              <select id="player"></select>
+            </label>
+            <div class="transport">
+              <button id="pause" type="button">Pause</button>
+              <div class="speeds" id="speeds"></div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="panel hidden" id="panel-producer">
+        <div class="producer">
+          <div class="candidate-list" id="candidates"></div>
+          <div class="candidate-detail" id="candidate-detail">
+            <p class="kicker">Current moment</p>
+            <h2>Nothing has cleared the producer yet.</h2>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel hidden" id="panel-lab">
+        <div class="lab">
+          <div>
+            <p class="kicker">Scenario</p>
+            <div class="scenario-grid" id="scenarios"></div>
+          </div>
+          <form id="lab-form" class="lab-form">
+            <label>Seed
+              <input id="seed" type="number" value="47129" min="1" />
+            </label>
+            <label>Speed
+              <select id="lab-speed">
+                <option>1</option>
+                <option>2</option>
+                <option>5</option>
+                <option selected>20</option>
+              </select>
+            </label>
+            <button type="submit">Generate match</button>
+            <p class="note">The simulator changes the world. MatchOS is not told which story to find. The same seed replays the same match.</p>
+          </form>
+        </div>
+      </section>
+    </div>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
