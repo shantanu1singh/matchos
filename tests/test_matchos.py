@@ -152,9 +152,9 @@ def test_trigger_requires_sample_size() -> None:
     engine = TriggerEngine()
     sim = MatchSimulator(seed=1, scenario_id="balanced")
     tick = sim.step(100)
-    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4}, {"blue": 2})
+    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 2, "blue_rate": 0.71})
     assert fired.fired is False
-    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4}, {"blue": 6, "blue_rate": 0.71})
+    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 6, "blue_rate": 0.71})
     assert fired.fired is True
 
 

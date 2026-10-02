@@ -83,6 +83,17 @@ class TrackingPlayer(BaseModel):
     on_pitch: bool = True
 
 
+class BallAction(BaseModel):
+    """The pass, shot, or carry the ball is travelling on."""
+
+    kind: Literal["PASS", "SHOT", "CARRY"]
+    team_id: TeamId
+    start: Point
+    end: Point
+    started_ms: int
+    duration_ms: int
+
+
 class TrackingFrame(BaseModel):
     match_id: str
     timestamp_ms: int
@@ -93,6 +104,7 @@ class TrackingFrame(BaseModel):
     possession_team: TeamId
     score_red: int
     score_blue: int
+    action: BallAction | None = None
 
 
 class LineSample(BaseModel):
