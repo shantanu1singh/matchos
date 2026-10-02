@@ -94,6 +94,7 @@ class BallAction(BaseModel):
     end: Point
     started_ms: int
     duration_ms: int
+    receiver_id: str | None = None
 
 
 class TrackingFrame(BaseModel):

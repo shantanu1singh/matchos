@@ -267,6 +267,7 @@ class MatchSimulator:
             end=flight.end,
             started_ms=flight.started_ms,
             duration_ms=flight.duration_ms,
+            receiver_id=flight.receiver_id,
         )
 
     def _line_sample(self) -> LineSample:
@@ -863,7 +864,17 @@ class MatchSimulator:
         rival = self._slot_nearest(other(carrier.team_id), spot)
         start = Point(x=self.ball.x, y=self.ball.y)
         won = self.rng.random() < 0.48 + carrier.dribbling * 0.2
-        event = self._emit("DUEL", carrier.team_id if won else other(carrier.team_id), carrier.player_id if won else rival, rival, "WON" if won else "LOST", start, start)
+        winner = carrier.player_id if won else rival
+        loser = rival if won else carrier.player_id
+        event = self._emit(
+            "DUEL",
+            carrier.team_id if won else other(carrier.team_id),
+            winner,
+            loser,
+            "WON",
+            start,
+            start,
+        )
         if not won and rival:
             self.possession = other(carrier.team_id)
             self.possession_id += 1

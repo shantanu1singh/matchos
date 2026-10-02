@@ -15,6 +15,7 @@ const state = {
   selected: 0,
   pulse: null,
   provider: "",
+  raw: [],
 };
 
 const pitch = document.getElementById("pitch");
@@ -59,6 +60,9 @@ function onMessage(message) {
     state.pulse = message.state;
     const arrivals = message.events || [];
     if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
+    const shown = arrivals.filter((item) => RAW_TYPES.has(item.type));
+    if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
+    renderRaw();
     renderPulse();
     updateScore();
     fillPlayers();
@@ -101,7 +105,72 @@ function onMessage(message) {
   }
 }
 
+const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
+
+function shirt(id) {
+  if (!id || !String(id).includes("_")) return "";
+  const [team, number] = String(id).split("_");
+  return `${team.toUpperCase()} ${number}`;
+}
+
+function xy(point) {
+  if (!point || point.x == null || point.y == null) return "";
+  return `${Number(point.x).toFixed(1)},${Number(point.y).toFixed(1)}`;
+}
+
+function clockOf(ms) {
+  const minute = String(Math.floor(ms / 60000)).padStart(2, "0");
+  const second = String(Math.floor((ms / 1000) % 60)).padStart(2, "0");
+  return `${minute}:${second}`;
+}
+
+function eventLine(event) {
+  const who = shirt(event.player_id) || event.team_id || "";
+  const target = event.target_player_id ? ` → ${shirt(event.target_player_id)}` : "";
+  const outcome = event.outcome ? `  ${event.outcome}` : "";
+  const from = xy(event.location);
+  const to = xy(event.end_location);
+  const path = from && to ? `<span class="path">${escapeHtml(`${from} → ${to}`)}</span>` : "";
+  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}`)}${path}`;
+}
+
+function playerPoint(id) {
+  const players = state.frame && state.frame.players;
+  if (!players || !id) return null;
+  const player = players.find((item) => item.player_id === id);
+  return player ? { x: player.x, y: player.y } : null;
+}
+
+function metres(a, b) {
+  if (!a || !b || a.x == null || b.x == null) return null;
+  return Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
+}
+
+function renderRaw() {
+  const log = document.getElementById("raw-log");
+  const anim = document.getElementById("raw-anim");
+  if (!log || !anim) return;
+  const rows = state.raw.slice(-5).reverse();
+  log.innerHTML = rows.length
+    ? rows.map((event, index) => `<li class="${index === 0 ? "now" : ""}">${eventLine(event)}</li>`).join("")
+    : "<li>Waiting for the first event</li>";
+  const action = state.frame && state.frame.action;
+  if (!action) {
+    anim.textContent = "Animation  no ball flight";
+    return;
+  }
+  const runner = playerPoint(action.receiver_id);
+  const gap = metres(runner, action.end);
+  const meets = action.receiver_id
+    ? ` · meets ${shirt(action.receiver_id)}${runner ? ` now ${xy(runner)}` : ""}${gap == null ? "" : ` · ${gap.toFixed(1)}m from end`}`
+    : "";
+  const ball = state.frame.ball ? ` · ball now ${xy(state.frame.ball)}` : "";
+  anim.textContent = `Animation  ${action.kind}  ${xy(action.start)} → ${xy(action.end)}${meets}${ball}`;
+}
+
 function startMatch() {
+  state.raw = [];
+  renderRaw();
   send({
     type: "start",
     scenario: state.scenario,
@@ -377,6 +446,7 @@ function draw() {
 
 function paint() {
   if (!watchVisible()) return;
+  resize();
   const rect = pitch.parentElement.getBoundingClientRect();
   const width = rect.width;
   const height = rect.height;
