@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
@@ -222,6 +223,27 @@ def test_workflow_airs_press_breakdown() -> None:
     assert enrichment is not None
     assert enrichment.overlay.source == "agent"
     assert prose_is_faithful(enrichment.enrichment_text, moment)
+
+
+def test_movement_does_not_teleport() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    prev_ball = (sim.ball.x, sim.ball.y)
+    prev_players = {pid: (player.x, player.y) for pid, player in sim.players.items() if player.on_pitch}
+    worst_ball = 0.0
+    worst_player = 0.0
+    for _ in range(100):
+        sim._advance(50)
+        worst_ball = max(worst_ball, math.hypot(sim.ball.x - prev_ball[0], sim.ball.y - prev_ball[1]))
+        prev_ball = (sim.ball.x, sim.ball.y)
+        for pid, player in sim.players.items():
+            if not player.on_pitch or pid not in prev_players:
+                prev_players[pid] = (player.x, player.y)
+                continue
+            ox, oy = prev_players[pid]
+            worst_player = max(worst_player, math.hypot(player.x - ox, player.y - oy))
+            prev_players[pid] = (player.x, player.y)
+    assert worst_player < 0.9, worst_player
+    assert worst_ball < 1.5, worst_ball
 
 
 def _debug_state(engine: StateEngine) -> str:

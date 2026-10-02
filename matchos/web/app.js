@@ -288,27 +288,83 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function viewModel() {
+function hermite(p0, p1, v0, v1, t, dt) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (2 * t3 - 3 * t2 + 1) * p0 + (t3 - 2 * t2 + t) * v0 * dt + (-2 * t3 + 3 * t2) * p1 + (t3 - t2) * v1 * dt;
+}
+
+function sampleFrame() {
   const curr = state.frame;
   if (!curr) return null;
   const prev = state.prev;
   if (!prev || !state.frameAt || curr.timestamp_ms < prev.timestamp_ms) {
-    return { ball: curr.ball, ballZ: curr.ball_z || 0, players: curr.players, action: curr.action };
+    return { ball: curr.ball, ballZ: curr.ball_z || 0, players: curr.players, action: curr.action, step: 0 };
   }
-  const gap = Math.min(400, Math.max(80, state.frameAt - (state.prevAt || state.frameAt)));
+  const step = curr.timestamp_ms - prev.timestamp_ms;
+  const gap = Math.min(240, Math.max(60, state.frameAt - (state.prevAt || state.frameAt)));
   const t = Math.max(0, Math.min(1, (performance.now() - state.frameAt) / gap));
+  const simDt = step / 1000;
+  const curve = simDt > 0.04 && simDt < 0.28;
   const earlier = new Map(prev.players.map((player) => [player.player_id, player]));
   const players = curr.players.map((player) => {
     const from = earlier.get(player.player_id);
     if (!from) return player;
-    return { ...player, x: lerp(from.x, player.x, t), y: lerp(from.y, player.y, t) };
+    if (!curve) return { ...player, x: lerp(from.x, player.x, t), y: lerp(from.y, player.y, t) };
+    return {
+      ...player,
+      x: hermite(from.x, player.x, from.vx || 0, player.vx || 0, t, simDt),
+      y: hermite(from.y, player.y, from.vy || 0, player.vy || 0, t, simDt),
+    };
   });
   const sameFlight = curr.action && prev.action && curr.action.started_ms === prev.action.started_ms;
-  const ball = curr.action && !sameFlight
-    ? curr.ball
-    : { x: lerp(prev.ball.x, curr.ball.x, t), y: lerp(prev.ball.y, curr.ball.y, t) };
-  const ballZ = curr.action && !sameFlight ? (curr.ball_z || 0) : lerp(prev.ball_z || 0, curr.ball_z || 0, t);
-  return { ball, ballZ, players, action: curr.action || null };
+  const ball = sameFlight || !curve
+    ? { x: lerp(prev.ball.x, curr.ball.x, t), y: lerp(prev.ball.y, curr.ball.y, t) }
+    : {
+        x: hermite(prev.ball.x, curr.ball.x, prev.ball_vx || 0, curr.ball_vx || 0, t, simDt),
+        y: hermite(prev.ball.y, curr.ball.y, prev.ball_vy || 0, curr.ball_vy || 0, t, simDt),
+      };
+  const ballZ = lerp(prev.ball_z || 0, curr.ball_z || 0, t);
+  return { ball, ballZ, players, action: curr.action || null, step };
+}
+
+function glideView(sample) {
+  if (!sample) return null;
+  const now = performance.now();
+  const dt = Math.min(0.05, Math.max(0.001, (now - (state.paintAt || now)) / 1000));
+  state.paintAt = now;
+  const restart = sample.step < 0 || (state.smooth && state.frame && state.smoothClock > state.frame.timestamp_ms);
+  if (!state.smooth || restart || sample.step > 250) {
+    state.smooth = {
+      ball: { ...sample.ball },
+      ballZ: sample.ballZ,
+      players: new Map(sample.players.map((player) => [player.player_id, { x: player.x, y: player.y }])),
+    };
+    state.smoothClock = state.frame ? state.frame.timestamp_ms : 0;
+    return sample;
+  }
+  const gain = 1 - Math.exp(-14 * dt);
+  const ball = state.smooth.ball;
+  ball.x += (sample.ball.x - ball.x) * gain;
+  ball.y += (sample.ball.y - ball.y) * gain;
+  state.smooth.ballZ += (sample.ballZ - state.smooth.ballZ) * gain;
+  const players = sample.players.map((player) => {
+    let followed = state.smooth.players.get(player.player_id);
+    if (!followed) {
+      followed = { x: player.x, y: player.y };
+      state.smooth.players.set(player.player_id, followed);
+      return player;
+    }
+    followed.x += (player.x - followed.x) * gain;
+    followed.y += (player.y - followed.y) * gain;
+    return { ...player, x: followed.x, y: followed.y };
+  });
+  state.smoothClock = state.frame.timestamp_ms;
+  return { ball: { x: ball.x, y: ball.y }, ballZ: state.smooth.ballZ, players, action: sample.action };
+}
+
+function viewModel() {
+  return glideView(sampleFrame());
 }
 
 function draw() {
