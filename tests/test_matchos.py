@@ -128,9 +128,18 @@ def test_workflow_stays_quiet_without_a_trigger() -> None:
 def test_scripted_stories_emit_real_events() -> None:
     comeback = MatchSimulator(seed=47129, scenario_id="late_comeback")
     comeback.collect_warmup()
+    scripted: list[str] = []
     while comeback.clock_ms < 89 * 60_000:
-        comeback.step(5_000)
-    assert (comeback.score_red, comeback.score_blue) == (2, 2)
+        tick = comeback.step(5_000)
+        scripted.extend(
+            event.player_id or ""
+            for event in tick.events
+            if event.type == "SHOT" and event.outcome == "GOAL" and event.qualifiers.get("scripted")
+        )
+    # Red's two scripted chances still land. Open play after the restart can add a goal.
+    assert scripted == ["red_9", "red_7"]
+    assert comeback.score_red == 2
+    assert comeback.score_blue >= 2
 
     impact = MatchSimulator(seed=11, scenario_id="substitute_impact")
     impact.collect_warmup()

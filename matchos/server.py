@@ -132,8 +132,15 @@ async def match_socket(websocket: WebSocket) -> None:
             elif kind == "control" and session is not None:
                 action = message.get("action")
                 if action == "pause":
+                    # Finish the tick already in flight. Cancelling it leaves the
+                    # workflow mid-run, and the next resume cannot start.
                     session.running = False
-                    await stop()
+                    if task is not None:
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        task = None
                     await send(
                         {
                             "type": "status",

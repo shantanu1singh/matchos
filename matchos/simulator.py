@@ -199,6 +199,8 @@ class MatchSimulator:
         self._move_ball(dt_s)
         if self.carry_target is not None and self.clock_ms >= self.carry_until_ms:
             self.carry_target = None
+        if self.flight is None and (self.carrier_id is None or self.carrier_id not in self.players or not self.players[self.carrier_id].on_pitch):
+            self.carrier_id = self._nearest(self.possession, self.ball)
         if self.flight is None and self.clock_ms >= self.carry_until_ms and self.clock_ms >= self.next_action_ms and self._in_control():
             events.extend(self._act())
         return events
@@ -481,13 +483,39 @@ class MatchSimulator:
         self.ball_vy *= 0.2
         self.ball_z = 0.0
         if flight.kind == "SHOT":
+            if self.carrier_id is None:
+                self._kickoff()
             return
         if flight.success and flight.receiver_id and flight.receiver_id in self.players and self.players[flight.receiver_id].on_pitch:
             self.carrier_id = flight.receiver_id
             self.possession = flight.team_id
             self.next_action_ms = max(self.next_action_ms, self.clock_ms + 480)
             return
+        if flight.receiver_id and flight.receiver_id in self.players and self.players[flight.receiver_id].on_pitch:
+            winner = self.players[flight.receiver_id]
+            self.possession = winner.team_id
+            self.possession_id += 1
+            self.carrier_id = winner.player_id
+            self.next_action_ms = self.clock_ms + int(self.rng.randint(400, 900))
+            return
         self._turnover(flight.end, flight.team_id)
+
+    def _kickoff(self) -> None:
+        """A goal leaves the ball in the net. The restart is a kickoff at the centre."""
+        self.ball = Point(x=52.5, y=34.0)
+        self.ball_vx = 0.0
+        self.ball_vy = 0.0
+        self.ball_z = 0.0
+        self.carrier_id = self._nearest(self.possession, self.ball)
+        if self.carrier_id is None:
+            return
+        taker = self.players[self.carrier_id]
+        taker.x, taker.y = 52.5, 36.2
+        taker.vx = taker.vy = 0.0
+        taker.hx = 1.0 if taker.team_id == "RED" else -1.0
+        taker.hy = 0.0
+        self.ball = self._ideal_ball(taker)
+        self.next_action_ms = self.clock_ms + 700
 
     def _turnover(self, spot: Point, previous: TeamId) -> None:
         self.possession = other(previous)
@@ -570,6 +598,16 @@ class MatchSimulator:
         success_p = self._pass_success(carrier, target, length, pressure, qual, long_ball, end)
         success = self.rng.random() < success_p
         outcome = "COMPLETE" if success else ("OUT" if self.rng.random() < 0.25 else "INCOMPLETE")
+        flight_end = end
+        claimant = target.player_id
+        challenge = self._lane_challenge(start, end, carrier.team_id) if outcome == "INCOMPLETE" else None
+        if challenge is not None:
+            flight_end, claimant = challenge
+        elif outcome == "INCOMPLETE":
+            # Nobody is on the pass, so the teammate it was played to takes it.
+            claimant = target.player_id
+        out_point = Point(x=clamp(end.x, 0, 105), y=0.2 if end.y < 34 else 67.8)
+        shown_end = out_point if outcome == "OUT" else flight_end
         event = self._emit(
             "PASS",
             carrier.team_id,
@@ -577,7 +615,7 @@ class MatchSimulator:
             target.player_id if success or outcome == "INCOMPLETE" else None,
             outcome,
             start,
-            end if outcome != "OUT" else Point(x=clamp(end.x, 0, 105), y=0.2 if end.y < 34 else 67.8),
+            shown_end,
             {
                 **qual,
                 "length_m": round(length, 1),
@@ -589,36 +627,60 @@ class MatchSimulator:
             },
         )
         events = [event]
-        flight_end = event.end_location or end
-        flight_length = distance(start, flight_end)
+        flight_length = distance(start, shown_end)
         pace = 11.0 if not long_ball else 14.0
         duration = int(max(720, min(2800, flight_length / pace * 1000)))
+        if challenge is not None:
+            runner = self.players[claimant]
+            run_s = distance(Point(x=runner.x, y=runner.y), flight_end) / 4.6 + 0.45
+            duration = int(max(duration, min(2400, run_s * 1000)))
         if outcome == "OUT":
-            self.flight = Flight(start, flight_end, self.clock_ms, duration, "PASS", carrier.team_id, None, False)
+            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, None, False)
             self.carrier_id = None
             return events
-        if success:
-            self.flight = Flight(start, end, self.clock_ms, duration, "PASS", carrier.team_id, target.player_id, True)
-            self.carrier_id = None
-            return events
-        # Incomplete: sometimes a recorded interception.
-        if self.rng.random() < 0.7:
-            interceptor = self._nearest(other(carrier.team_id), end)
+        caught = outcome == "INCOMPLETE" and self.rng.random() < 0.7 and challenge is not None
+        if caught:
             events.append(
                 self._emit(
                     "INTERCEPTION",
                     other(carrier.team_id),
-                    interceptor,
+                    claimant,
                     None,
                     "WON",
-                    end,
-                    end,
+                    flight_end,
+                    flight_end,
                     {"related": event.id},
                 )
             )
-        self.flight = Flight(start, end, self.clock_ms, duration, "PASS", carrier.team_id, None, False)
+        if success:
+            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, target.player_id, True)
+        elif challenge is None:
+            # The pass was not cut out. The teammate it was aimed at takes the ball.
+            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, target.player_id, False)
+        else:
+            self.flight = Flight(start, flight_end, self.clock_ms, duration, "PASS", carrier.team_id, claimant, False)
         self.carrier_id = None
         return events
+
+    def _lane_challenge(self, start: Point, end: Point, attacking: TeamId) -> tuple[Point, str] | None:
+        """Where a defender can step into this pass. None if the lane is clear."""
+        dx, dy = end.x - start.x, end.y - start.y
+        length2 = dx * dx + dy * dy
+        if length2 < 36:
+            return None
+        best: tuple[float, SimPlayer, Point] | None = None
+        for player in self._on_pitch(other(attacking)):
+            if player.role == "GK":
+                continue
+            t = ((player.x - start.x) * dx + (player.y - start.y) * dy) / length2
+            t = clamp(t, 0.22, 0.86)
+            point = Point(x=start.x + dx * t, y=start.y + dy * t)
+            dist = math.hypot(player.x - point.x, player.y - point.y)
+            if best is None or dist < best[0]:
+                best = (dist, player, point)
+        if best is None or best[0] > 7.5:
+            return None
+        return best[2], best[1].player_id
 
     def _select_target(self, carrier: SimPlayer, long_ball: bool) -> SimPlayer | None:
         mates = [p for p in self._on_pitch(carrier.team_id) if p.player_id != carrier.player_id and p.role != "GK"]
