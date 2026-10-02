@@ -1,7 +1,10 @@
-"""Believable event-and-tracking simulator. Not a physics engine.
+"""Event generator plus an animation planner.
 
-A seeded possession policy emits MatchEvents. A tracking layer moves 22 dots
-toward formation anchors so the same feed can drive a tactical board.
+The seeded possession policy is the source of truth: it decides who passes to
+whom, and whether that pass is complete. It reads the formation, not the
+drift of the dots. The animation planner then moves the named players and the
+ball so the pitch shows that event. Everyone else eases toward a
+formation-relative spot.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from matchos.animation import plan_arrival
 from matchos.pitch import (
     ANCHORS,
     DEF_ROLES,
@@ -97,6 +101,7 @@ class MatchSimulator:
     carry_target: Point | None = None
     carry_until_ms: int = 0
     next_action_ms: int = 400
+    focus: dict[str, tuple[float, float]] = field(default_factory=dict)
     sequence: int = 0
     live: bool = False
     done_scripts: set[str] = field(default_factory=set)
@@ -128,7 +133,7 @@ class MatchSimulator:
         self.score_blue = self.scenario.score_blue
         self.clock_ms = int(self.scenario.warmup_from_minute * 60_000)
         self.possession = "RED" if self.rng.random() < 0.5 else "BLUE"
-        self.carrier_id = self._nearest(self.possession, Point(x=52.5, y=34.0))
+        self.carrier_id = self._slot_nearest(self.possession, Point(x=52.5, y=34.0))
         if self.carrier_id:
             carrier = self.players[self.carrier_id]
             self.ball = self._ideal_ball(carrier)
@@ -200,8 +205,10 @@ class MatchSimulator:
         if self.carry_target is not None and self.clock_ms >= self.carry_until_ms:
             self.carry_target = None
         if self.flight is None and (self.carrier_id is None or self.carrier_id not in self.players or not self.players[self.carrier_id].on_pitch):
-            self.carrier_id = self._nearest(self.possession, self.ball)
-        if self.flight is None and self.clock_ms >= self.carry_until_ms and self.clock_ms >= self.next_action_ms and self._in_control():
+            self.carrier_id = self._slot_nearest(self.possession, self.ball)
+        # The next event waits until the previous one has been shown. The dots
+        # do not choose it; they only have to finish arriving.
+        if self.flight is None and self.clock_ms >= self.carry_until_ms and self.clock_ms >= self.next_action_ms and self._arrival_done():
             events.extend(self._act())
         return events
 
@@ -314,27 +321,38 @@ class MatchSimulator:
         flight = self.flight
         pushes = self._separation_velocity()
         for player in self._on_pitch():
+            focused = self.focus.get(player.player_id)
             collecting = player.player_id == self.carrier_id and flight is None and not self._touching(player)
-            if flight is not None and flight.kind == "PASS" and player.player_id == flight.receiver_id:
+            if flight is not None and player.player_id == flight.receiver_id:
                 tx, ty = flight.end.x, flight.end.y
-                top = 6.2 + player.speed * 2.0
+                remain = max(0.22, (flight.started_ms + flight.duration_ms - self.clock_ms) / 1000.0)
+                top = min(7.2, max(4.2, math.hypot(tx - player.x, ty - player.y) / remain))
+                self._steer(player, tx, ty, dt_s, top, 0.0, 0.0, arrive=True)
+                continue
             elif collecting:
                 tx, ty = self.ball.x, self.ball.y
-                top = 6.6 + player.speed * 1.4
+                top = 6.2
+                self.focus.pop(player.player_id, None)
+            elif focused is not None:
+                tx, ty = focused
+                top = 6.4
             elif player.player_id == self.carrier_id and self.carry_target is not None and self.clock_ms < self.carry_until_ms:
                 tx, ty = self.carry_target.x, self.carry_target.y
-                top = 5.2
+                top = 5.0
             else:
                 tx, ty = self._target(player)
-                top = 3.5 + player.speed * 3.1
+                top = 4.2 + player.speed * 0.8
                 if player.player_id == self.carrier_id and flight is None:
                     top = min(top, 4.4)
             if player.role == "GK":
                 top = min(top, 4.0)
-            push_x, push_y = pushes.get(player.player_id, (0.0, 0.0))
+            if player.player_id in self.focus or (flight is not None and player.player_id == flight.receiver_id):
+                push_x, push_y = 0.0, 0.0
+            else:
+                push_x, push_y = pushes.get(player.player_id, (0.0, 0.0))
             self._steer(player, tx, ty, dt_s, top, push_x, push_y)
 
-    def _steer(self, player: SimPlayer, tx: float, ty: float, dt_s: float, top: float, push_x: float, push_y: float) -> None:
+    def _steer(self, player: SimPlayer, tx: float, ty: float, dt_s: float, top: float, push_x: float, push_y: float, arrive: bool = False) -> None:
         """Accelerate toward a point. Direction changes take time, the way a player actually turns."""
         dx, dy = tx - player.x, ty - player.y
         dist = math.hypot(dx, dy)
@@ -342,7 +360,8 @@ class MatchSimulator:
             desired_vx, desired_vy = push_x, push_y
             face_x, face_y = player.hx, player.hy
         else:
-            cruise = min(top, max(1.15, dist * 1.7))
+            # A player sent to meet the ball keeps their pace until they are on it.
+            cruise = top if arrive else min(top, max(1.15, dist * 1.7))
             desired_vx = dx / dist * cruise + push_x
             desired_vy = dy / dist * cruise + push_y
             face_x, face_y = dx, dy
@@ -417,11 +436,53 @@ class MatchSimulator:
     def _touching(self, player: SimPlayer) -> bool:
         return math.hypot(player.x - self.ball.x, player.y - self.ball.y) < 2.6
 
-    def _in_control(self) -> bool:
-        if self.flight is not None or not self.carrier_id or self.carrier_id not in self.players:
-            return False
-        carrier = self.players[self.carrier_id]
-        return carrier.on_pitch and self._touching(carrier)
+    def _arrival_done(self) -> bool:
+        """The last event has been shown, so another one may be generated."""
+        if self.carrier_id is None or self.carrier_id not in self.players:
+            return True
+        return self._touching(self.players[self.carrier_id])
+
+    def _slot(self, player: SimPlayer) -> Point:
+        x, y = self._target(player)
+        return Point(x=x, y=y)
+
+    def _slot_nearest(self, team: TeamId, spot: Point) -> str | None:
+        choices = self._on_pitch(team)
+        if not choices:
+            return None
+        return min(choices, key=lambda p: (self._slot(p).x - spot.x) ** 2 + (self._slot(p).y - spot.y) ** 2).player_id
+
+    def _realize(
+        self,
+        runner_id: str | None,
+        start: Point,
+        desired: Point,
+        kind: str,
+        team: TeamId,
+        success: bool,
+        pace: float,
+        *,
+        pull: bool = True,
+        max_s: float = 2.7,
+    ) -> Flight:
+        """Send the ball to a point, and the named player to that same point."""
+        if runner_id and runner_id in self.players:
+            runner = self.players[runner_id]
+            end_x, end_y, duration = plan_arrival(
+                runner.x, runner.y, desired.x, desired.y, start.x, start.y, pace, pull=pull, max_s=max_s
+            )
+            self.focus[runner_id] = (end_x, end_y)
+        else:
+            runner_id = None
+            end_x, end_y, duration = plan_arrival(
+                start.x, start.y, desired.x, desired.y, start.x, start.y, pace, pull=False, max_s=max_s
+            )
+        end = Point(x=clamp(end_x, 0.4, 104.6), y=clamp(end_y, 0.4, 67.6))
+        if runner_id:
+            self.focus[runner_id] = (end.x, end.y)
+        self.flight = Flight(start, end, self.clock_ms, duration, kind, team, runner_id, success)
+        self.carrier_id = None
+        return self.flight
 
     def _move_ball(self, dt_s: float) -> None:
         if self.flight is not None:
@@ -478,6 +539,7 @@ class MatchSimulator:
 
     def _land(self, flight: Flight) -> None:
         self.flight = None
+        self.focus.clear()
         self.ball = flight.end
         self.ball_vx *= 0.2
         self.ball_vy *= 0.2
@@ -486,58 +548,56 @@ class MatchSimulator:
             if self.carrier_id is None:
                 self._kickoff()
             return
-        if flight.success and flight.receiver_id and flight.receiver_id in self.players and self.players[flight.receiver_id].on_pitch:
+        if flight.kind == "RESTART" and flight.receiver_id in self.players:
             self.carrier_id = flight.receiver_id
             self.possession = flight.team_id
-            self.next_action_ms = max(self.next_action_ms, self.clock_ms + 480)
+            self.next_action_ms = self.clock_ms + 500
             return
         if flight.receiver_id and flight.receiver_id in self.players and self.players[flight.receiver_id].on_pitch:
             winner = self.players[flight.receiver_id]
-            self.possession = winner.team_id
-            self.possession_id += 1
+            if winner.team_id != flight.team_id or not flight.success:
+                self.possession = winner.team_id
+                self.possession_id += 1
+                self.next_action_ms = self.clock_ms + int(self.rng.randint(400, 900))
+            else:
+                self.possession = flight.team_id
+                self.next_action_ms = max(self.next_action_ms, self.clock_ms + 480)
             self.carrier_id = winner.player_id
-            self.next_action_ms = self.clock_ms + int(self.rng.randint(400, 900))
             return
         self._turnover(flight.end, flight.team_id)
 
     def _kickoff(self) -> None:
-        """A goal leaves the ball in the net. The restart is a kickoff at the centre."""
-        self.ball = Point(x=52.5, y=34.0)
+        """A goal leaves the ball in the net. A named player restarts from the centre."""
         self.ball_vx = 0.0
         self.ball_vy = 0.0
         self.ball_z = 0.0
-        self.carrier_id = self._nearest(self.possession, self.ball)
-        if self.carrier_id is None:
+        taker_id = f"{self.possession.lower()}_8"
+        if taker_id not in self.players or not self.players[taker_id].on_pitch:
+            taker_id = self._slot_nearest(self.possession, Point(x=52.5, y=34.0))
+        if taker_id is None:
             return
-        taker = self.players[self.carrier_id]
-        taker.x, taker.y = 52.5, 36.2
-        taker.vx = taker.vy = 0.0
-        taker.hx = 1.0 if taker.team_id == "RED" else -1.0
-        taker.hy = 0.0
-        self.ball = self._ideal_ball(taker)
-        self.next_action_ms = self.clock_ms + 700
+        start = Point(x=self.ball.x, y=self.ball.y)
+        flight = self._realize(taker_id, start, Point(x=52.5, y=34.0), "RESTART", self.possession, True, 12.0, pull=False, max_s=4.5)
+        self.next_action_ms = self.clock_ms + flight.duration_ms + 500
 
     def _turnover(self, spot: Point, previous: TeamId) -> None:
         self.possession = other(previous)
         self.possession_id += 1
-        self.carrier_id = self._nearest(self.possession, spot)
+        self.carrier_id = self._slot_nearest(self.possession, spot)
+        if self.carrier_id:
+            self.focus[self.carrier_id] = (spot.x, spot.y)
         self.next_action_ms = self.clock_ms + int(self.rng.randint(400, 900))
-
-    def _nearest(self, team: TeamId, spot: Point) -> str | None:
-        choices = self._on_pitch(team)
-        if not choices:
-            return None
-        return min(choices, key=lambda p: (p.x - spot.x) ** 2 + (p.y - spot.y) ** 2).player_id
 
     def _act(self) -> list[MatchEvent]:
         if self.carrier_id is None or not self.players[self.carrier_id].on_pitch:
-            self.carrier_id = self._nearest(self.possession, self.ball)
+            self.carrier_id = self._slot_nearest(self.possession, self.ball)
         if self.carrier_id is None:
             return []
+        self.focus.clear()
         carrier = self.players[self.carrier_id]
         events: list[MatchEvent] = []
         if self._pressers(carrier) >= 2 and self.clock_ms - self.last_pressure_ms > 2500:
-            events.append(self._emit("PRESSURE", other(carrier.team_id), self._nearest(other(carrier.team_id), self.ball), None, "APPLIED"))
+            events.append(self._emit("PRESSURE", other(carrier.team_id), self._slot_nearest(other(carrier.team_id), self._slot(carrier)), None, "APPLIED"))
             self.last_pressure_ms = self.clock_ms
         kind = self._choose_action(carrier)
         if kind == "SHOT":
@@ -556,7 +616,7 @@ class MatchSimulator:
         return events
 
     def _choose_action(self, carrier: SimPlayer) -> str:
-        ax = attack_x(carrier.team_id, carrier.x)
+        ax = attack_x(carrier.team_id, self._slot(carrier).x)
         style = self._style(carrier.team_id)
         weights = {
             "PASS": 0.60,
@@ -598,16 +658,19 @@ class MatchSimulator:
         success_p = self._pass_success(carrier, target, length, pressure, qual, long_ball, end)
         success = self.rng.random() < success_p
         outcome = "COMPLETE" if success else ("OUT" if self.rng.random() < 0.25 else "INCOMPLETE")
-        flight_end = end
-        claimant = target.player_id
-        challenge = self._lane_challenge(start, end, carrier.team_id) if outcome == "INCOMPLETE" else None
+        runner_id = target.player_id
+        desired = end
+        challenge = self._named_interceptor(start, end, carrier.team_id) if outcome == "INCOMPLETE" else None
         if challenge is not None:
-            flight_end, claimant = challenge
-        elif outcome == "INCOMPLETE":
-            # Nobody is on the pass, so the teammate it was played to takes it.
-            claimant = target.player_id
-        out_point = Point(x=clamp(end.x, 0, 105), y=0.2 if end.y < 34 else 67.8)
-        shown_end = out_point if outcome == "OUT" else flight_end
+            desired, runner_id = challenge
+        pace = 12.0 if not long_ball else 14.0
+        if outcome == "OUT":
+            desired = Point(x=clamp(end.x, 0.4, 104.6), y=0.4 if end.y < 34 else 67.6)
+            runner_id = self._slot_nearest(other(carrier.team_id), desired)
+            flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, False, pace, pull=False, max_s=3.2)
+        else:
+            flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, success, pace)
+        shown_end = flight.end
         event = self._emit(
             "PASS",
             carrier.team_id,
@@ -622,65 +685,47 @@ class MatchSimulator:
                 "long_ball": long_ball,
                 "pressure": round(pressure, 2),
                 "entered_final_third": (not in_final_third(carrier.team_id, start.x))
-                and in_final_third(carrier.team_id, end.x)
+                and in_final_third(carrier.team_id, shown_end.x)
                 and success,
             },
         )
         events = [event]
-        flight_length = distance(start, shown_end)
-        pace = 11.0 if not long_ball else 14.0
-        duration = int(max(720, min(2800, flight_length / pace * 1000)))
-        if challenge is not None:
-            runner = self.players[claimant]
-            run_s = distance(Point(x=runner.x, y=runner.y), flight_end) / 4.6 + 0.45
-            duration = int(max(duration, min(2400, run_s * 1000)))
-        if outcome == "OUT":
-            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, None, False)
-            self.carrier_id = None
-            return events
         caught = outcome == "INCOMPLETE" and self.rng.random() < 0.7 and challenge is not None
         if caught:
             events.append(
                 self._emit(
                     "INTERCEPTION",
                     other(carrier.team_id),
-                    claimant,
+                    runner_id,
                     None,
                     "WON",
-                    flight_end,
-                    flight_end,
+                    shown_end,
+                    shown_end,
                     {"related": event.id},
                 )
             )
-        if success:
-            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, target.player_id, True)
-        elif challenge is None:
-            # The pass was not cut out. The teammate it was aimed at takes the ball.
-            self.flight = Flight(start, shown_end, self.clock_ms, duration, "PASS", carrier.team_id, target.player_id, False)
-        else:
-            self.flight = Flight(start, flight_end, self.clock_ms, duration, "PASS", carrier.team_id, claimant, False)
-        self.carrier_id = None
         return events
 
-    def _lane_challenge(self, start: Point, end: Point, attacking: TeamId) -> tuple[Point, str] | None:
-        """Where a defender can step into this pass. None if the lane is clear."""
+    def _named_interceptor(self, start: Point, end: Point, attacking: TeamId) -> tuple[Point, str] | None:
+        """The defender whose shape stands on this pass. None if the lane is clear."""
         dx, dy = end.x - start.x, end.y - start.y
         length2 = dx * dx + dy * dy
         if length2 < 36:
             return None
-        best: tuple[float, SimPlayer, Point] | None = None
+        best: tuple[float, str, Point] | None = None
         for player in self._on_pitch(other(attacking)):
             if player.role == "GK":
                 continue
-            t = ((player.x - start.x) * dx + (player.y - start.y) * dy) / length2
-            t = clamp(t, 0.22, 0.86)
+            slot = self._slot(player)
+            t = ((slot.x - start.x) * dx + (slot.y - start.y) * dy) / length2
+            t = clamp(t, 0.28, 0.82)
             point = Point(x=start.x + dx * t, y=start.y + dy * t)
-            dist = math.hypot(player.x - point.x, player.y - point.y)
+            dist = math.hypot(slot.x - point.x, slot.y - point.y)
             if best is None or dist < best[0]:
-                best = (dist, player, point)
-        if best is None or best[0] > 7.5:
+                best = (dist, player.player_id, point)
+        if best is None or best[0] > 8.0:
             return None
-        return best[2], best[1].player_id
+        return best[2], best[1]
 
     def _select_target(self, carrier: SimPlayer, long_ball: bool) -> SimPlayer | None:
         mates = [p for p in self._on_pitch(carrier.team_id) if p.player_id != carrier.player_id and p.role != "GK"]
@@ -690,18 +735,19 @@ class MatchSimulator:
             return None
         bias = progression_bias(self.scenario_id, self.minute(), carrier.team_id)
         defending = other(carrier.team_id)
-        players = self._tracking()
-        line = first_line_x(players, defending)
+        line = first_line_x(self._shape_tracking(), defending)
+        origin = self._slot(carrier)
         scored: list[tuple[float, SimPlayer]] = []
         for mate in mates:
-            forward = attack_x(carrier.team_id, mate.x) - attack_x(carrier.team_id, carrier.x)
-            length = math.hypot(mate.x - carrier.x, mate.y - carrier.y)
+            slot = self._slot(mate)
+            forward = attack_x(carrier.team_id, slot.x) - attack_x(carrier.team_id, origin.x)
+            length = math.hypot(slot.x - origin.x, slot.y - origin.y)
             if length < 4 or length > (48 if long_ball else 36):
                 continue
             score = 0.25 + max(0.0, forward) * 1.4
             score -= abs(length - (28 if long_ball else 16)) * 0.03
-            score -= self._nearby_opponents(Point(x=mate.x, y=mate.y), 6.0) * 0.18
-            breaks = (mate.x > line + 3 and carrier.team_id == "RED") or (mate.x < line - 3 and carrier.team_id == "BLUE")
+            score -= self._nearby_slots(slot, 6.0) * 0.18
+            breaks = (slot.x > line + 3 and carrier.team_id == "RED") or (slot.x < line - 3 and carrier.team_id == "BLUE")
             if breaks:
                 score += bias
             if self.scenario_id == "press_collapse" and mate.player_id == "red_7" and self.minute() >= 57:
@@ -727,11 +773,12 @@ class MatchSimulator:
         return len(weights) - 1
 
     def _receive_point(self, target: SimPlayer, team: TeamId) -> Point:
-        # A step toward goal from the receiver's current spot, so passes look progressive.
-        nudge = 3.5 if team == "RED" else -3.5
+        """Where that player should receive it, taken from their shape, not their dot."""
+        slot = self._slot(target)
+        nudge = 5.0 if team == "RED" else -5.0
         return Point(
-            x=clamp(target.x + nudge + self.rng.uniform(-1.5, 1.5), 1.5, 103.5),
-            y=clamp(target.y + self.rng.uniform(-2.0, 2.0), 2.0, 66.0),
+            x=clamp(slot.x + nudge + self.rng.uniform(-1.2, 1.2), 2.0, 103.0),
+            y=clamp(slot.y + self.rng.uniform(-1.4, 1.4), 3.0, 65.0),
         )
 
     def _pass_success(
@@ -745,8 +792,8 @@ class MatchSimulator:
         end: Point,
     ) -> float:
         distance_mod = 1.05 - min(0.55, length / 70.0)
-        angle_mod = 0.85 + 0.15 * (1.0 - min(1.0, abs(carrier.y - target.y) / 40.0))
-        availability = 1.0 - min(0.45, self._nearby_opponents(Point(x=target.x, y=target.y), 5.5) * 0.15)
+        angle_mod = 0.85 + 0.15 * (1.0 - min(1.0, abs(self._slot(carrier).y - self._slot(target).y) / 40.0))
+        availability = 1.0 - min(0.45, self._nearby_slots(self._slot(target), 5.5) * 0.15)
         pressure_mod = 1.0 - 0.45 * pressure
         p = carrier.passing * distance_mod * angle_mod * availability * pressure_mod
         if long_ball:
@@ -804,24 +851,24 @@ class MatchSimulator:
             self.carry_until_ms = self.clock_ms + duration
             self.carrier_id = carrier.player_id
         else:
-            tackler = self._nearest(other(carrier.team_id), end_point)
+            tackler = self._slot_nearest(other(carrier.team_id), end_point)
             events.append(self._emit("DUEL", other(carrier.team_id), tackler, carrier.player_id, "WON", end_point, end_point))
-            # The ball spills toward the tackle and the new owner has to run onto it.
-            spill = math.hypot(end_point.x - self.ball.x, end_point.y - self.ball.y) or 1.0
-            self.ball_vx = (end_point.x - self.ball.x) / spill * 7.5
-            self.ball_vy = (end_point.y - self.ball.y) / spill * 7.5
             self.carry_target = None
             self.carry_until_ms = 0
-            self._turnover(Point(x=self.ball.x, y=self.ball.y), carrier.team_id)
+            self._realize(tackler, Point(x=self.ball.x, y=self.ball.y), end_point, "PASS", other(carrier.team_id), False, 9.0)
         return events
 
     def _duel(self, carrier: SimPlayer) -> list[MatchEvent]:
-        rival = self._nearest(other(carrier.team_id), Point(x=carrier.x, y=carrier.y))
-        start = Point(x=carrier.x, y=carrier.y)
+        spot = self._slot(carrier)
+        rival = self._slot_nearest(other(carrier.team_id), spot)
+        start = Point(x=self.ball.x, y=self.ball.y)
         won = self.rng.random() < 0.48 + carrier.dribbling * 0.2
         event = self._emit("DUEL", carrier.team_id if won else other(carrier.team_id), carrier.player_id if won else rival, rival, "WON" if won else "LOST", start, start)
-        if not won:
-            self._turnover(start, carrier.team_id)
+        if not won and rival:
+            self.possession = other(carrier.team_id)
+            self.possession_id += 1
+            self.carrier_id = rival
+            self.focus[rival] = (start.x, start.y)
         return [event]
 
     def _shot(self, carrier: SimPlayer) -> list[MatchEvent]:
@@ -848,8 +895,13 @@ class MatchSimulator:
         )
         events = [event]
         duration = int(max(480, min(1600, distance_m / 16 * 1000)))
-        self.flight = Flight(start, end if on_target else Point(x=goal_x, y=clamp(aim_y + 8, 1, 67)), self.clock_ms, duration, "SHOT", carrier.team_id, None, False)
+        shot_end = end if on_target else Point(x=goal_x, y=clamp(aim_y + 8, 1, 67))
+        self.flight = Flight(start, shot_end, self.clock_ms, duration, "SHOT", carrier.team_id, None, False)
         self.carrier_id = None
+        if not is_goal:
+            keeper = "blue_1" if carrier.team_id == "RED" else "red_1"
+            if keeper in self.players and self.players[keeper].on_pitch:
+                self.focus[keeper] = (shot_end.x, shot_end.y)
         if is_goal:
             if carrier.team_id == "RED":
                 self.score_red += 1
@@ -863,7 +915,7 @@ class MatchSimulator:
             keeper = "blue_1" if carrier.team_id == "RED" else "red_1"
             self.possession = other(carrier.team_id)
             self.possession_id += 1
-            self.carrier_id = keeper if self.players[keeper].on_pitch else self._nearest(self.possession, end)
+            self.carrier_id = keeper if keeper in self.players and self.players[keeper].on_pitch else self._slot_nearest(self.possession, end)
             self.next_action_ms = self.clock_ms + duration + 400
         return events
 
@@ -943,9 +995,8 @@ class MatchSimulator:
     def _script_goal(self, scorer_id: str) -> list[MatchEvent]:
         scorer = self.players[scorer_id]
         scorer.on_pitch = True
-        start = Point(x=92.0 if scorer.team_id == "RED" else 13.0, y=34.0)
+        start = Point(x=self.ball.x, y=self.ball.y)
         end = Point(x=105.0 if scorer.team_id == "RED" else 0.0, y=34.0)
-        scorer.x, scorer.y = start.x, start.y
         self.possession = scorer.team_id
         self.carrier_id = None
         event = self._emit(
@@ -968,8 +1019,25 @@ class MatchSimulator:
         self.next_action_ms = self.clock_ms + 1200
         return [event]
 
+    def _shape_tracking(self) -> list[TrackingPlayer]:
+        rows = []
+        for player in self._on_pitch():
+            slot = self._slot(player)
+            rows.append(
+                TrackingPlayer(
+                    player_id=player.player_id,
+                    team_id=player.team_id,
+                    number=player.number,
+                    role=player.role,
+                    x=round(slot.x, 2),
+                    y=round(slot.y, 2),
+                    on_pitch=True,
+                )
+            )
+        return rows
+
     def _geometry(self, attacking: TeamId) -> dict[str, object]:
-        players = self._tracking()
+        players = self._shape_tracking()
         defending = other(attacking)
         return {
             "defending_team": defending,
@@ -979,21 +1047,20 @@ class MatchSimulator:
         }
 
     def _pressure_modifier(self, carrier: SimPlayer) -> float:
-        near = self._nearby_opponents(Point(x=carrier.x, y=carrier.y), 7.0)
+        near = self._nearby_slots(self._slot(carrier), 7.0)
         base = min(1.0, near / 3.0)
         press = self._style(other(carrier.team_id))["press"]
         return clamp(base * (0.55 + press * 0.6), 0.0, 1.0)
 
-    def _nearby_opponents(self, spot: Point, radius: float) -> int:
-        team = self.possession
+    def _nearby_slots(self, spot: Point, radius: float) -> int:
         return sum(
             1
-            for player in self._on_pitch(other(team))
-            if math.hypot(player.x - spot.x, player.y - spot.y) <= radius
+            for player in self._on_pitch(other(self.possession))
+            if math.hypot(self._slot(player).x - spot.x, self._slot(player).y - spot.y) <= radius
         )
 
     def _pressers(self, carrier: SimPlayer) -> int:
-        return self._nearby_opponents(Point(x=carrier.x, y=carrier.y), 8.0)
+        return self._nearby_slots(self._slot(carrier), 8.0)
 
     def _emit(
         self,
