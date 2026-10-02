@@ -1,0 +1,409 @@
+const state = {
+  ws: null,
+  scenarios: [],
+  scenario: "press_collapse",
+  seed: 47129,
+  speed: 20,
+  running: false,
+  viewer: { persona: "casual", team_id: "BLUE", language: "en", player_id: "red_7" },
+  frame: null,
+  prev: null,
+  events: [],
+  moment: null,
+  overlay: null,
+  whyOpen: false,
+  candidates: [],
+  selected: 0,
+  pulse: null,
+  provider: "",
+};
+
+const pitch = document.getElementById("pitch");
+const ctx = pitch.getContext("2d");
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  state.ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.ws.onopen = () => setLive("Live");
+  state.ws.onclose = () => setLive("Reconnecting");
+  state.ws.onmessage = (event) => onMessage(JSON.parse(event.data));
+}
+
+function send(payload) {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(payload));
+}
+
+function onMessage(message) {
+  if (message.type === "hello") {
+    state.scenarios = message.scenarios;
+    renderScenarios();
+    startMatch();
+    return;
+  }
+  if (message.type === "status") {
+    state.running = message.running;
+    state.provider = message.languageProvider || state.provider;
+    document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
+    setLive(state.running ? `Live · ${state.speed}×` : "Paused");
+    return;
+  }
+  if (message.type === "frame") {
+    state.prev = state.frame;
+    state.frame = message.frame;
+    state.pulse = message.state;
+    const arrivals = message.events || [];
+    const now = performance.now();
+    state.events.push(...arrivals.map((item) => ({ ...item, shown: now })));
+    state.events = state.events.filter((item) => item.type === "PASS" || item.type === "SHOT" || item.type === "CARRY").slice(-3);
+    if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
+    renderPulse();
+    updateScore();
+    fillPlayers();
+    return;
+  }
+  if (message.type === "moment") {
+    pushCandidate(message.result);
+    if (message.result.producer && message.result.producer.action === "AIR") {
+      state.moment = message.result.moment;
+      state.overlay = message.result.overlay;
+      state.whyOpen = false;
+      const timings = message.result.timings_ms || {};
+      const fast = Math.round(timings.fast || timings.template || 0);
+      document.getElementById("latency").textContent = fast ? `fast ${fast} ms` : "fast";
+      renderInsight(true);
+    }
+    renderCandidates();
+    return;
+  }
+  if (message.type === "enrichment") {
+    const overlay = message.result.overlay;
+    const moment = message.result.moment;
+    const momentId = moment && moment.id;
+    window.setTimeout(() => {
+      if (!state.moment || state.moment.id !== momentId) return;
+      state.overlay = overlay;
+      renderInsight(false);
+    }, 700);
+    return;
+  }
+  if (message.type === "reframe") {
+    state.overlay = message.overlay;
+    if (message.moment) state.moment = message.moment;
+    renderInsight(true);
+    return;
+  }
+  if (message.type === "trace") {
+    pushCandidate(message.result);
+    renderCandidates();
+  }
+}
+
+function startMatch() {
+  send({
+    type: "start",
+    scenario: state.scenario,
+    seed: Number(state.seed),
+    speed: Number(state.speed),
+    viewer: state.viewer,
+  });
+}
+
+function setLive(text) {
+  document.getElementById("live-pill").textContent = text;
+}
+
+function updateScore() {
+  if (!state.frame) return;
+  document.getElementById("score-red").textContent = state.frame.score_red;
+  document.getElementById("score-blue").textContent = state.frame.score_blue;
+  const minute = String(Math.floor(state.frame.timestamp_ms / 60000)).padStart(2, "0");
+  const second = String(Math.floor(state.frame.timestamp_ms / 1000) % 60).padStart(2, "0");
+  document.getElementById("clock").textContent = `${minute}:${second}`;
+}
+
+function renderInsight(fresh) {
+  const card = document.getElementById("insight");
+  const overlay = state.overlay;
+  const moment = state.moment;
+  if (!overlay || !moment) return;
+  card.classList.remove("empty");
+  if (fresh) card.classList.add("swap");
+  const graphic = overlay.graphic
+    ? `<div class="graphic">
+        <div>CONF ${overlay.graphic.confidence}</div>
+        <div>TTL ${overlay.graphic.ttl_sec}s · ${overlay.graphic.priority}</div>
+        <button class="air" type="button">Put on air</button>
+      </div>`
+    : "";
+  card.innerHTML = `
+    <p class="kicker">${escapeHtml(overlay.kicker)} · ${escapeHtml(overlay.source)}</p>
+    <h2>${escapeHtml(overlay.headline)}</h2>
+    <p class="body">${escapeHtml(overlay.body)}</p>
+    ${graphic}`;
+  const air = card.querySelector(".air");
+  if (air) air.addEventListener("click", () => { air.textContent = "On air"; });
+  renderWhy();
+}
+
+function renderWhy() {
+  const host = document.getElementById("why");
+  const moment = state.moment;
+  if (!moment) {
+    host.classList.add("hidden");
+    return;
+  }
+  host.classList.remove("hidden");
+  const stats = (state.overlay?.stats || []).map((stat) => `<div class="stat"><span>${escapeHtml(stat.label)}</span><span>${escapeHtml(stat.value)}</span></div>`).join("");
+  const evidence = state.whyOpen
+    ? `<ul class="evidence">${(moment.evidence_detail || []).map((item) => `<li>${String(item.minute).padStart(2, "0")}:${String(item.second).padStart(2, "0")} ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)}</li>`).join("")}</ul>`
+    : "";
+  host.innerHTML = `<button class="why-toggle" type="button">Why?</button>${state.whyOpen ? stats + evidence : ""}`;
+  host.querySelector("button").addEventListener("click", () => {
+    state.whyOpen = !state.whyOpen;
+    renderWhy();
+  });
+}
+
+function renderPulse() {
+  const host = document.getElementById("pulse");
+  const pulse = state.pulse;
+  if (!pulse || state.viewer.persona === "casual") {
+    host.innerHTML = "";
+    return;
+  }
+  const blue = pulse.blue || {};
+  const bypass = blue.press_bypass_rate == null ? "—" : `${Math.round(blue.press_bypass_rate * 100)}%`;
+  const line = blue.defensive_line_m == null ? "—" : `${blue.defensive_line_m.toFixed(1)}m`;
+  host.innerHTML = `<span>Blue bypass ${bypass}</span><span>Blue line ${line}</span><span>Red possession ${Math.round((pulse.red.possession_last5 || 0) * 100)}%</span>`;
+}
+
+function pushCandidate(result) {
+  state.candidates.unshift(result);
+  state.candidates = state.candidates.slice(0, 30);
+  state.selected = 0;
+}
+
+function renderCandidates() {
+  const list = document.getElementById("candidates");
+  if (!state.candidates.length) {
+    list.innerHTML = `<div class="candidate"><strong>No candidates yet</strong><em>Triggers that reach the decision call show up here.</em></div>`;
+    return;
+  }
+  list.innerHTML = state.candidates.map((result, index) => {
+    const frame = result.moment?.frame || result.decision?.primary_frame || "QUIET";
+    const action = result.producer?.action || "TRACE";
+    const confidence = result.decision ? result.decision.primary_frame_confidence.toFixed(2) : "—";
+    return `<button class="candidate ${index === state.selected ? "on" : ""}" data-index="${index}" type="button">
+      <span class="tag">${confidence} · ${action}</span>
+      <strong>${frame.replaceAll("_", " ")}</strong>
+      <em>${escapeHtml(result.producer?.reason || result.verification?.reason || "")}</em>
+    </button>`;
+  }).join("");
+  list.querySelectorAll(".candidate").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selected = Number(button.dataset.index);
+      renderCandidates();
+    });
+  });
+  renderDetail();
+}
+
+function renderDetail() {
+  const host = document.getElementById("candidate-detail");
+  const result = state.candidates[state.selected];
+  if (!result) return;
+  const decision = result.decision;
+  const rawChecks = result.verification?.checks || result.moment?.checks || [];
+  const checks = rawChecks.filter((check) => (result.verification?.verified ? check.passed : true)).map((check) =>
+    `<div class="check ${check.passed ? "pass" : "fail"}"><span>${escapeHtml(check.name)}</span><b>${check.passed ? "PASS" : "FAIL"} · ${escapeHtml(check.detail)}</b></div>`
+  ).join("");
+  const bars = decision
+    ? Object.entries(decision.frame_scores).map(([name, value]) => `<div class="stat"><span>${name}</span><span>${Math.round(value * 100)}%</span></div>`).join("")
+    : "";
+  host.innerHTML = `
+    <p class="kicker">${escapeHtml(result.kind)} · ${escapeHtml(decision?.provider || "")}</p>
+    <h2>${escapeHtml((result.moment?.frame || decision?.primary_frame || "No moment").replaceAll("_", " "))}</h2>
+    <p class="body">${escapeHtml(result.producer?.reason || result.verification?.reason || "Trigger did not continue.")}</p>
+    ${bars}
+    ${checks}`;
+}
+
+function renderScenarios() {
+  const host = document.getElementById("scenarios");
+  host.innerHTML = state.scenarios.map((scenario) => `
+    <button class="scenario ${scenario.id === state.scenario ? "on" : ""}" type="button" data-id="${scenario.id}">
+      <strong>${escapeHtml(scenario.label)}</strong>
+      <span>${escapeHtml(scenario.description)}</span>
+    </button>`).join("");
+  host.querySelectorAll(".scenario").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.scenario = button.dataset.id;
+      renderScenarios();
+    });
+  });
+}
+
+function fillPlayers() {
+  const select = document.getElementById("player");
+  if (!state.frame || select.options.length) return;
+  const players = [...state.frame.players].sort((a, b) => a.team_id.localeCompare(b.team_id) || a.number - b.number);
+  select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number}</option>`).join("");
+  select.value = state.viewer.player_id;
+}
+
+function flashGoal() {
+  const node = document.getElementById("goal-flash");
+  node.classList.remove("show");
+  void node.offsetWidth;
+  node.classList.add("show");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+}
+
+function resize() {
+  const rect = pitch.parentElement.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  pitch.width = Math.max(640, rect.width) * ratio;
+  pitch.height = Math.max(480, rect.height) * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+
+function draw() {
+  const rect = pitch.parentElement.getBoundingClientRect();
+  const width = rect.width;
+  const height = rect.height;
+  ctx.clearRect(0, 0, width, height);
+  const pad = 28;
+  const pitchW = width - pad * 2;
+  const pitchH = height - pad * 2;
+  for (let i = 0; i < 12; i += 1) {
+    ctx.fillStyle = i % 2 === 0 ? "#146845" : "#18784e";
+    ctx.fillRect(pad + (pitchW / 12) * i, pad, pitchW / 12 + 0.5, pitchH);
+  }
+  const x = (metres) => pad + (metres / 105) * pitchW;
+  const y = (metres) => pad + (metres / 68) * pitchH;
+  ctx.strokeStyle = "rgba(255,255,255,0.82)";
+  ctx.lineWidth = 1.6;
+  ctx.strokeRect(pad, pad, pitchW, pitchH);
+  ctx.beginPath();
+  ctx.moveTo(x(52.5), pad);
+  ctx.lineTo(x(52.5), pad + pitchH);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x(52.5), y(34), (9.15 / 105) * pitchW, 0, Math.PI * 2);
+  ctx.stroke();
+  box(x, y, 0);
+  box(x, y, 1);
+  drawEvents(x, y);
+  if (state.frame) drawPlayers(x, y);
+  requestAnimationFrame(draw);
+}
+
+function box(x, y, side) {
+  const spots = side === 0
+    ? [[0, 13.84, 16.5, 40.32], [0, 24.84, 5.5, 18.32]]
+    : [[88.5, 13.84, 16.5, 40.32], [99.5, 24.84, 5.5, 18.32]];
+  spots.forEach(([mx, my, w, h]) => {
+    ctx.strokeRect(x(mx), y(my), (w / 105) * (x(105) - x(0)), (h / 68) * (y(68) - y(0)));
+  });
+}
+
+function drawEvents(x, y) {
+  state.events.forEach((event) => {
+    if (!event.location || !event.end_location) return;
+    if (event.type !== "PASS" && event.type !== "SHOT" && event.type !== "CARRY") return;
+    ctx.beginPath();
+    ctx.moveTo(x(event.location.x), y(event.location.y));
+    ctx.lineTo(x(event.end_location.x), y(event.end_location.y));
+    ctx.strokeStyle = event.team_id === "RED" ? "rgba(255,93,82,0.85)" : "rgba(91,147,255,0.9)";
+    ctx.lineWidth = event.type === "SHOT" ? 2.4 : 1.4;
+    ctx.stroke();
+  });
+}
+
+function drawPlayers(xOf, yOf) {
+  const highlights = new Set(state.moment?.highlight_player_ids || []);
+  state.frame.players.forEach((player) => {
+    const x = xOf(player.x);
+    const y = yOf(player.y);
+    if (highlights.has(player.player_id)) {
+      ctx.beginPath();
+      ctx.arc(x, y, 16, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(230,195,106,0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fillStyle = player.team_id === "RED" ? "#ff5d52" : "#5b93ff";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.stroke();
+    ctx.fillStyle = "#08110d";
+    ctx.font = "700 10px Outfit, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(player.number), x, y + 0.5);
+  });
+  const ball = state.frame.ball;
+  ctx.beginPath();
+  ctx.arc(xOf(ball.x), yOf(ball.y), 5.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#f7f4ea";
+  ctx.fill();
+  ctx.strokeStyle = "#1b1b1b";
+  ctx.stroke();
+}
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+    tab.classList.add("active");
+    document.querySelectorAll(".panel").forEach((panel) => panel.classList.add("hidden"));
+    document.getElementById(`panel-${tab.dataset.tab}`).classList.remove("hidden");
+    resize();
+  });
+});
+
+["persona", "team", "language", "player"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", (event) => {
+    const map = { persona: "persona", team: "team_id", language: "language", player: "player_id" };
+    state.viewer[map[id]] = event.target.value;
+    send({ type: "viewer", viewer: state.viewer });
+    renderPulse();
+  });
+});
+
+document.getElementById("pause").addEventListener("click", () => {
+  send({ type: "control", action: state.running ? "pause" : "resume" });
+  state.running = !state.running;
+  document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
+});
+
+document.getElementById("speeds").innerHTML = [1, 2, 5, 20].map((speed) => `<button type="button" data-speed="${speed}" class="${speed === 20 ? "on" : ""}">${speed}×</button>`).join("");
+document.getElementById("speeds").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  state.speed = Number(button.dataset.speed);
+  document.querySelectorAll("#speeds button").forEach((item) => item.classList.toggle("on", item === button));
+  send({ type: "speed", speed: state.speed });
+  setLive(`Live · ${state.speed}×`);
+});
+
+document.getElementById("lab-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.seed = document.getElementById("seed").value;
+  state.speed = Number(document.getElementById("lab-speed").value);
+  state.moment = null;
+  state.overlay = null;
+  state.candidates = [];
+  document.querySelector(".tab[data-tab='watch']").click();
+  startMatch();
+});
+
+window.addEventListener("resize", resize);
+resize();
+requestAnimationFrame(draw);
+connect();
