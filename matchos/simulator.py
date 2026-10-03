@@ -661,7 +661,7 @@ class MatchSimulator:
             "CARRY": 0.16 + carrier.dribbling * 0.08,
             "LONG_BALL": 0.06 + style["directness"] * 0.08,
             "DUEL": 0.05,
-            "FOUL": 0.025 + min(0.035, self._pressers(carrier) * 0.012),
+            "FOUL": (0.025 + min(0.035, self._pressers(carrier) * 0.012)) if self.scenario_id in {"balanced", "random"} else 0.0,
             "SHOT": 0.02,
         }
         if ax > 0.72:
@@ -703,7 +703,13 @@ class MatchSimulator:
             carrier.team_id == "BLUE" and target.x < defending_line - 1.2
         )
         forward_pass = attack_x(carrier.team_id, end.x) > attack_x(carrier.team_id, start.x) + 0.05
-        offside = beyond_line and forward_pass and attack_x(carrier.team_id, target.x) > 0.52 and self.rng.random() < 0.32
+        offside = (
+            self.scenario_id in {"balanced", "random"}
+            and beyond_line
+            and forward_pass
+            and attack_x(carrier.team_id, target.x) > 0.52
+            and self.rng.random() < 0.32
+        )
         if offside:
             defending = other(carrier.team_id)
             whistle = Point(x=target.x, y=target.y)
