@@ -25,6 +25,9 @@ EventType = Literal[
     "CLEARANCE",
     "FOUL",
     "CARD",
+    "OFFSIDE",
+    "FREE_KICK",
+    "PENALTY",
     "SUBSTITUTION",
     "FORMATION_CHANGE",
 ]
