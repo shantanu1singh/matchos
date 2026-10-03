@@ -1204,6 +1204,9 @@ class MatchSimulator:
             corner_spot = Point(x=104.6 if carrier.team_id == "RED" else 0.4, y=corner_y)
             taker = self._nearest_actual(carrier.team_id, corner_spot)
             self._schedule_restart("CORNER", carrier.team_id, corner_spot, taker)
+            if keeper in self.players and self.players[keeper].on_pitch:
+                keeper_x = 103.2 if carrier.team_id == "RED" else 1.8
+                self.focus[keeper] = (keeper_x, clamp(end.y, 27.5, 40.5))
             events.append(
                 self._emit(
                     "CORNER",
