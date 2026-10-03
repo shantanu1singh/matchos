@@ -805,7 +805,8 @@ class MatchSimulator:
             restart_team = other(carrier.team_id)
             runner_id = self._nearest_actual(restart_team, desired)
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, False, pace, pull=False, max_s=3.2)
-            self._schedule_restart("THROW_IN", restart_team, flight.end, runner_id)
+            if self.scenario_id in {"balanced", "random"}:
+                self._schedule_restart("THROW_IN", restart_team, flight.end, runner_id)
         else:
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, success, pace)
         shown_end = flight.end
