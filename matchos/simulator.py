@@ -602,6 +602,7 @@ class MatchSimulator:
         self.focus.clear()
         self.carry_target = None
         self.carry_until_ms = 0
+        self.pending_penalty_taker = None
         self.ball = centre
         self.ball_vx = 0.0
         self.ball_vy = 0.0
