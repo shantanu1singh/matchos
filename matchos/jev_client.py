@@ -27,7 +27,7 @@ QUESTIONS = {
 
 
 class DecisionClient(Protocol):
-    async def decide(self, state: MatchState, reasons: list[str]) -> MomentDecision: ...
+    async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision: ...
 
 
 def _sigmoid(value: float) -> float:
@@ -43,10 +43,10 @@ class LocalJevClient:
 
     provider = "local-jev"
 
-    async def decide(self, state: MatchState, reasons: list[str]) -> MomentDecision:
+    async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision:
         started = time.perf_counter()
         deltas = state.deltas
-        scores = _frame_scores(state, reasons)
+        scores = _frame_scores(state, reasons, focus_player_id)
         public = {key: value for key, value in scores.items() if not key.startswith("_")}
         primary = max(public, key=public.get)
         confidence = scores[primary]
@@ -60,8 +60,9 @@ class LocalJevClient:
         player_id = None
         team_id = None
         if primary == "PLAYER_IMPACT":
-            player_id = "red_7"
-            team_id = "RED"
+            player_id = focus_player_id
+            focus = state.players.get(focus_player_id or "")
+            team_id = focus.team_id if focus is not None else None
         elif primary == "SUBSTITUTE_IMPACT":
             player_id = "red_17"
             team_id = "RED"
@@ -98,13 +99,14 @@ class HttpJevClient:
         self.timeout_s = timeout_s
         self._fallback = LocalJevClient()
 
-    async def decide(self, state: MatchState, reasons: list[str]) -> MomentDecision:
+    async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision:
         payload = {
             "state": state.deltas,
             "context": {
                 "minute": state.minute,
                 "score": [state.score_red, state.score_blue],
                 "reasons": reasons,
+                "focusPlayerId": focus_player_id,
             },
             "questions": QUESTIONS,
         }
@@ -117,9 +119,14 @@ class HttpJevClient:
                 response = await client.post(f"{self.base_url}/decide", json=payload, headers=headers)
                 response.raise_for_status()
                 body = response.json()
-            return _parse_remote(body, (time.perf_counter() - started) * 1000)
+            decision = _parse_remote(body, (time.perf_counter() - started) * 1000)
+            if decision.primary_frame == "PLAYER_IMPACT" and not decision.player_id:
+                decision.player_id = focus_player_id
+                focus = state.players.get(focus_player_id or "")
+                decision.team_id = focus.team_id if focus is not None else decision.team_id
+            return decision
         except (httpx.HTTPError, KeyError, TypeError, ValueError):
-            decision = await self._fallback.decide(state, reasons)
+            decision = await self._fallback.decide(state, reasons, focus_player_id)
             decision.provider = "local-jev-fallback"
             return decision
 
@@ -131,7 +138,7 @@ def build_decision_client() -> DecisionClient:
     return HttpJevClient(base, os.getenv("JEV_API_KEY"))
 
 
-def _frame_scores(state: MatchState, reasons: list[str]) -> dict[str, float]:
+def _frame_scores(state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> dict[str, float]:
     deltas = state.deltas
     blue_bypass = deltas.get("blue_press_bypass_delta", 0.0)
     red_bypass = deltas.get("red_press_bypass_delta", 0.0)
@@ -151,7 +158,7 @@ def _frame_scores(state: MatchState, reasons: list[str]) -> dict[str, float]:
         + _sigmoid((max(deltas.get("blue_entries_delta", 0), deltas.get("red_entries_delta", 0)) - 3) / 1.4) * 0.55
     )
 
-    focus = state.players.get("red_7")
+    focus = state.players.get(focus_player_id or "")
     player = 0.0
     if focus is not None:
         player = _clamp((focus.between_lines_last8 - 2) / 5.0)
