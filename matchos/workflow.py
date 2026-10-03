@@ -114,7 +114,14 @@ class TriggerExecutor(Executor):
     async def evaluate(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
         started = time.perf_counter()
         state = packet.state or self.services.state_engine.state
-        focus = state.players.get("red_7")
+        focus_id = packet.viewer.player_id
+        focus = state.players.get(focus_id)
+        focus_delta = 0.0
+        if focus is not None:
+            previous_rate = focus.between_lines_prev30 / 30.0 if focus.between_lines_prev30 else 0.0
+            recent_rate = focus.between_lines_last8 / 8.0
+            focus_delta = ((recent_rate - previous_rate) / previous_rate) if previous_rate > 0 else float(focus.between_lines_last8)
+            state.deltas["focus_player_involvement_delta"] = round(focus_delta, 3)
         samples = {
             "red": state.red.press_bypass_sample,
             "blue": state.blue.press_bypass_sample,
@@ -122,7 +129,7 @@ class TriggerExecutor(Executor):
             "blue_rate": state.blue.press_bypass_rate or 0.0,
             "red_possession": state.red.possession_last5,
             "blue_possession": state.blue.possession_last5,
-            "red_7_between": focus.between_lines_last8 if focus else 0,
+            "focus_between": focus.between_lines_last8 if focus else 0,
         }
         packet.trigger = self.services.trigger_engine.evaluate(packet.tick, state.deltas, samples)
         packet.timings_ms["trigger"] = (time.perf_counter() - started) * 1000
@@ -147,7 +154,7 @@ class JevDecisionExecutor(Executor):
     async def decide(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
         state = packet.state or self.services.state_engine.state
         reasons = packet.trigger.reasons if packet.trigger else []
-        packet.decision = await self.services.decisions.decide(state, reasons)
+        packet.decision = await self.services.decisions.decide(state, reasons, packet.viewer.player_id)
         packet.timings_ms["decision"] = packet.decision.latency_ms
         await ctx.send_message(packet)
 

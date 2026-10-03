@@ -7,7 +7,7 @@ import math
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
-from matchos.schemas import MatchEvent, MomentDecision, ViewerProfile
+from matchos.schemas import MatchEvent, MatchState, MomentDecision, PlayerRollup, ViewerProfile
 from matchos.simulator import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.trigger_engine import TriggerEngine
@@ -199,6 +199,47 @@ def test_all_lab_scenarios_keep_tracking_coherent() -> None:
                 previous[pid] = (player.x, player.y)
 
 
+def test_player_decision_uses_the_selected_player() -> None:
+    from matchos.jev_client import LocalJevClient
+
+    state = MatchState(
+        match_id="m-player-focus",
+        timestamp_ms=30 * 60_000,
+        period=1,
+        minute=30,
+        second=0,
+        score_red=0,
+        score_blue=0,
+        possession_team="BLUE",
+        players={
+            "blue_9": PlayerRollup(
+                team_id="BLUE",
+                number=9,
+                between_lines_last8=5,
+                between_lines_prev30=2,
+            )
+        },
+    )
+
+    decision = asyncio.run(LocalJevClient().decide(state, ["player_involvement"], "blue_9"))
+    assert decision.primary_frame == "PLAYER_IMPACT"
+    assert decision.player_id == "blue_9"
+    assert decision.team_id == "BLUE"
+
+
+def test_selected_player_can_fire_the_player_trigger() -> None:
+    engine = TriggerEngine()
+    sim = MatchSimulator(seed=1, scenario_id="balanced")
+    tick = sim.step(100)
+    fired = engine.evaluate(
+        tick,
+        {"focus_player_involvement_delta": 1.0},
+        {"focus_between": 4},
+    )
+    assert fired.fired is True
+    assert "player_involvement" in fired.reasons
+
+
 def test_trigger_requires_sample_size() -> None:
     engine = TriggerEngine()
     sim = MatchSimulator(seed=1, scenario_id="balanced")
@@ -347,6 +388,170 @@ def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
     assert sim.flight is None
     assert sim.carrier_id is not None
     assert abs(sim.ball.x - 52.5) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
+
+
+def test_foul_creates_a_free_kick_and_can_show_a_yellow_card() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 52.0, 34.0
+    sim.ball = Point(x=52.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    # Force the optional card branch.
+    sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
+    events = sim._foul(carrier)
+    types = [event.type for event in events]
+
+    assert "FOUL" in types
+    assert "FREE_KICK" in types
+    card = next(event for event in events if event.type == "CARD")
+    assert card.qualifiers.get("card") == "yellow"
+    assert sim.possession == "RED"
+
+
+def test_foul_requires_a_nearby_defender() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 52.0, 34.0
+    sim.ball = Point(x=52.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+    for player in sim.players.values():
+        if player.team_id == "BLUE":
+            player.x, player.y = 90.0, 60.0
+
+    events = sim._foul(carrier)
+
+    assert not any(event.type == "FOUL" for event in events)
+
+
+def test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot() -> None:
+    sim = MatchSimulator(seed=4, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 94.0, 34.0
+    carrier.vx = carrier.vy = 0.0
+    sim.ball = Point(x=94.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.random = lambda: 0.9  # type: ignore[method-assign]
+    events = sim._foul(carrier)
+    assert any(event.type == "PENALTY" for event in events)
+    assert sim.pending_penalty_taker == carrier.player_id
+    assert abs(sim.ball.x - 94.0) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
+
+    shot = sim._take_penalty()
+    assert len(shot) == 1
+    assert shot[0].type == "SHOT"
+    assert shot[0].qualifiers.get("penalty") is True
+
+
+def test_forward_pass_can_generate_offside_and_free_kick_events() -> None:
+    sim = MatchSimulator(seed=5, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 60.0, 34.0
+    carrier.vx = carrier.vy = 0.0
+    sim.ball = Point(x=60.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    for player in sim.players.values():
+        if player.team_id == "RED" and player.player_id not in {"red_8", "red_9"}:
+            player.x, player.y = 15.0, 60.0
+            player.vx = player.vy = 0.0
+        elif player.team_id == "BLUE" and player.role != "GK":
+            player.x = 75.0
+            player.vx = player.vy = 0.0
+    target = sim.players["red_9"]
+    target.x, target.y = 90.0, 34.0
+    target.vx = target.vy = 0.0
+
+    sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
+    events = sim._pass(carrier, long_ball=False)
+
+    assert any(event.type == "OFFSIDE" for event in events)
+    assert any(event.type == "FREE_KICK" and event.qualifiers.get("reason") == "OFFSIDE" for event in events)
+
+
+def test_pass_out_creates_throw_in_and_restarts_with_opponent() -> None:
+    sim = MatchSimulator(seed=6, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    target = sim.players["red_7"]
+    carrier.x, carrier.y = 42.0, 34.0
+    target.x, target.y = 55.0, 10.0
+    sim.ball = Point(x=42.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim._select_target = lambda _carrier, _long_ball: target  # type: ignore[method-assign]
+    sim._pass_success = lambda *_args, **_kwargs: 0.0  # type: ignore[method-assign]
+    rolls = iter([0.9, 0.0])
+    sim.rng.random = lambda: next(rolls)  # type: ignore[method-assign]
+
+    events = sim._pass(carrier, long_ball=False)
+    throw_in = next(event for event in events if event.type == "THROW_IN")
+    assert throw_in.team_id == "BLUE"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "THROW_IN"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "BLUE"
+    assert sim.carrier_id is not None
+    assert sim.ball.y in {0.4, 67.6}
+
+
+def test_saved_wide_shot_can_create_corner_restart() -> None:
+    sim = MatchSimulator(seed=8, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 92.0, 34.0
+    sim.ball = Point(x=92.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.uniform = lambda _a, _b: 3.5  # type: ignore[method-assign]
+    sim.rng.random = lambda: 0.2  # type: ignore[method-assign]
+
+    events = sim._shot(carrier)
+    corner = next(event for event in events if event.type == "CORNER")
+    assert corner.team_id == "RED"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "CORNER"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "RED"
+    assert sim.ball.x > 104.0
+    assert sim.ball.y in {0.4, 67.6}
+
+
+def test_off_target_shot_creates_goal_kick_restart() -> None:
+    sim = MatchSimulator(seed=9, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 82.0, 34.0
+    sim.ball = Point(x=82.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.uniform = lambda _a, _b: 0.0  # type: ignore[method-assign]
+    sim.rng.random = lambda: 0.99  # type: ignore[method-assign]
+
+    events = sim._shot(carrier)
+    goal_kick = next(event for event in events if event.type == "GOAL_KICK")
+    assert goal_kick.team_id == "BLUE"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "GOAL_KICK"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "BLUE"
+    assert abs(sim.ball.x - 99.5) < 0.01
     assert abs(sim.ball.y - 34.0) < 0.01
 
 
