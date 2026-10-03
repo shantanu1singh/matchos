@@ -461,7 +461,7 @@ def test_forward_pass_can_generate_offside_and_free_kick_events() -> None:
 
 
 def test_pass_out_creates_throw_in_and_restarts_with_opponent() -> None:
-    sim = MatchSimulator(seed=6, scenario_id="press_collapse")
+    sim = MatchSimulator(seed=6, scenario_id="balanced")
     carrier = sim.players["red_8"]
     target = sim.players["red_7"]
     carrier.x, carrier.y = 42.0, 34.0
