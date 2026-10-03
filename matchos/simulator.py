@@ -1005,7 +1005,7 @@ class MatchSimulator:
         self.possession = carrier.team_id
         self.carrier_id = carrier.player_id
 
-        if in_box(carrier.team_id, carrier.x):
+        if in_box(carrier.team_id, carrier.x) and 24.84 <= carrier.y <= 43.16:
             penalty_spot = Point(x=94.0 if carrier.team_id == "RED" else 11.0, y=34.0)
             self.ball = penalty_spot
             self.focus.clear()
