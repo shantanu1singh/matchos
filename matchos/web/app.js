@@ -19,6 +19,7 @@ const state = {
   playerRosterKey: "",
   eventQueue: [],
   eventShowing: false,
+  eventTimer: null,
 };
 
 const pitch = document.getElementById("pitch");
@@ -187,6 +188,8 @@ function resetUiState() {
   state.playerRosterKey = "";
   state.eventQueue = [];
   state.eventShowing = false;
+  if (state.eventTimer) window.clearTimeout(state.eventTimer);
+  state.eventTimer = null;
   const eventFlash = document.getElementById("event-flash");
   eventFlash.className = "event-flash";
   document.getElementById("event-flash-title").textContent = "";
@@ -432,9 +435,10 @@ function showNextMatchEvent() {
   detail.textContent = descriptor.detail;
   void node.offsetWidth;
   node.classList.add("show");
-  window.setTimeout(() => {
+  state.eventTimer = window.setTimeout(() => {
     node.classList.remove("show");
     state.eventShowing = false;
+    state.eventTimer = null;
     showNextMatchEvent();
   }, state.speed >= 5 ? 700 : 1300);
 }
