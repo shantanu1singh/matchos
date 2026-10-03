@@ -707,17 +707,10 @@ class MatchSimulator:
             defending = other(carrier.team_id)
             whistle = Point(x=target.x, y=target.y)
             receiver = self._nearest_actual(defending, whistle)
-            self.possession = defending
-            self.possession_id += 1
-            self.ball = whistle
-            self.ball_vx = self.ball_vy = 0.0
-            self.ball_z = 0.0
-            self.flight = None
-            self.carrier_id = receiver
-            self.focus.clear()
-            if receiver:
-                self.focus[receiver] = (whistle.x, whistle.y)
-            self.next_action_ms = self.clock_ms + 900
+            pace = 12.0 if not long_ball else 14.0
+            flight = self._realize(receiver, start, whistle, "PASS", carrier.team_id, False, pace, max_s=2.4)
+            whistle = flight.end
+            self.next_action_ms = self.clock_ms + flight.duration_ms + 900
             pass_event = self._emit(
                 "PASS",
                 carrier.team_id,
