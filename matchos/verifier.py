@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from matchos.pitch import event_label, pass_bypassed
+from matchos.pitch import event_label, pass_bypassed, shirt
 from matchos.schemas import (
     Check,
     EvidenceItem,
@@ -178,9 +178,10 @@ class Verifier:
         return self._moment(state, decision, "RED_CARD", "RED_CARD", card.team_id, card.player_id, facts, [card], [card.player_id] if card.player_id else []), checks
 
     def _player(self, state: MatchState, decision: MomentDecision) -> tuple[VerifiedMoment | None, list[Check]]:
-        player = state.players.get("red_7")
+        focus_id = decision.player_id or ""
+        player = state.players.get(focus_id)
         if player is None:
-            return None, [Check(name="player_known", passed=False, detail="No rollup for the focus player.")]
+            return None, [Check(name="player_known", passed=False, detail="No rollup for the selected player.")]
         rate_up = player.between_lines_last8 >= 4 and player.between_lines_last8 >= max(2, player.between_lines_prev30 // 2)
         checks = [
             Check(
@@ -193,7 +194,7 @@ class Verifier:
             return None, checks
         now = state.timestamp_ms
         evidence = self.state_engine.evidence(
-            lambda event: event.type == "PASS" and event.outcome == "COMPLETE" and event.target_player_id == "red_7",
+            lambda event: event.type == "PASS" and event.outcome == "COMPLETE" and event.target_player_id == focus_id,
             now - 8 * 60_000,
             now,
             limit=6,
@@ -201,15 +202,26 @@ class Verifier:
         checks.append(Check(name="evidence_events", passed=len(evidence) >= 2, detail=f"{len(evidence)} receptions"))
         if len(evidence) < 2:
             return None, checks
+        label = shirt(focus_id) or focus_id
         facts = {
-            "player": "RED 7",
-            "playerId": "red_7",
+            "player": label,
+            "playerId": focus_id,
             "betweenLinesLast8": player.between_lines_last8,
             "betweenLinesPrev30": player.between_lines_prev30,
             "finalThirdReceptionsLast8": player.final_third_receptions_last8,
             "finalThirdReceptionsPrev30": player.final_third_receptions_prev30,
         }
-        return self._moment(state, decision, "PLAYER_STORY", "PLAYER_IMPACT", "RED", "red_7", facts, evidence, ["red_7"]), checks
+        return self._moment(
+            state,
+            decision,
+            "PLAYER_STORY",
+            "PLAYER_IMPACT",
+            player.team_id,
+            focus_id,
+            facts,
+            evidence,
+            [focus_id],
+        ), checks
 
     def _sub(self, state: MatchState, decision: MomentDecision) -> tuple[VerifiedMoment | None, list[Check]]:
         player = state.players.get("red_17")
