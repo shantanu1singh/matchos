@@ -357,6 +357,7 @@ function fillPlayers() {
     const available = players.some((player) => player.player_id === wanted);
     if (!available && players.length) {
       state.viewer.player_id = players[0].player_id;
+      if (state.viewer.persona === "player") send({ type: "viewer", viewer: state.viewer });
     }
     select.value = state.viewer.player_id;
   }
