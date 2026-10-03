@@ -17,6 +17,8 @@ const state = {
   provider: "",
   raw: [],
   playerRosterKey: "",
+  eventQueue: [],
+  eventShowing: false,
 };
 
 const pitch = document.getElementById("pitch");
@@ -60,7 +62,7 @@ function onMessage(message) {
     if (!state.prev || state.frame.timestamp_ms < state.prev.timestamp_ms || nextAction !== prevAction) state.trail = [];
     state.pulse = message.state;
     const arrivals = message.events || [];
-    showImportantMatchEvent(arrivals);
+    queueImportantMatchEvents(arrivals);
     const shown = arrivals.filter((item) => RAW_TYPES.has(item.type));
     if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
     renderRaw();
@@ -183,6 +185,8 @@ function resetUiState() {
   state.selected = 0;
   state.pulse = null;
   state.playerRosterKey = "";
+  state.eventQueue = [];
+  state.eventShowing = false;
   const eventFlash = document.getElementById("event-flash");
   eventFlash.className = "event-flash";
   document.getElementById("event-flash-title").textContent = "";
@@ -385,21 +389,7 @@ function updateViewerHelp() {
   }
 }
 
-function matchEventDescriptor(events) {
-  const priority = (event) => {
-    if (event.type === "SHOT" && event.outcome === "GOAL") return 100;
-    if (event.type === "PENALTY") return 90;
-    if (event.type === "SHOT" && event.qualifiers?.penalty) return 88;
-    if (event.type === "CARD" && String(event.qualifiers?.card || event.outcome).toLowerCase() === "red") return 85;
-    if (event.type === "CARD") return 80;
-    if (event.type === "OFFSIDE") return 70;
-    if (event.type === "FOUL") return 60;
-    if (event.type === "FREE_KICK") return 50;
-    if (event.type === "SUBSTITUTION") return 40;
-    return 0;
-  };
-  const event = [...events].sort((a, b) => priority(b) - priority(a))[0];
-  if (!event || priority(event) === 0) return null;
+function describeMatchEvent(event) {
   const player = shirt(event.player_id);
   if (event.type === "SHOT" && event.outcome === "GOAL") {
     return { title: "GOAL", detail: player ? `${player} scores` : `${event.team_id} score`, kind: "goal" };
@@ -420,9 +410,20 @@ function matchEventDescriptor(events) {
   return null;
 }
 
-function showImportantMatchEvent(events) {
-  const descriptor = matchEventDescriptor(events);
-  if (!descriptor) return;
+function queueImportantMatchEvents(events) {
+  events.forEach((event) => {
+    const descriptor = describeMatchEvent(event);
+    if (descriptor) state.eventQueue.push(descriptor);
+  });
+  // Protect accelerated Lab playback from building an unbounded visual backlog.
+  state.eventQueue = state.eventQueue.slice(-8);
+  showNextMatchEvent();
+}
+
+function showNextMatchEvent() {
+  if (state.eventShowing || !state.eventQueue.length) return;
+  const descriptor = state.eventQueue.shift();
+  state.eventShowing = true;
   const node = document.getElementById("event-flash");
   const title = document.getElementById("event-flash-title");
   const detail = document.getElementById("event-flash-detail");
@@ -431,6 +432,11 @@ function showImportantMatchEvent(events) {
   detail.textContent = descriptor.detail;
   void node.offsetWidth;
   node.classList.add("show");
+  window.setTimeout(() => {
+    node.classList.remove("show");
+    state.eventShowing = false;
+    showNextMatchEvent();
+  }, state.speed >= 5 ? 700 : 1300);
 }
 
 function escapeHtml(value) {
