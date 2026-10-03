@@ -109,7 +109,7 @@ function onMessage(message) {
   }
 }
 
-const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "OFFSIDE", "FREE_KICK", "PENALTY", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
+const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "OFFSIDE", "FREE_KICK", "PENALTY", "CORNER", "THROW_IN", "GOAL_KICK", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
 
 function shirt(id) {
   if (!id || !String(id).includes("_")) return "";
@@ -409,6 +409,9 @@ function describeMatchEvent(event) {
   if (event.type === "OFFSIDE") return { title: "OFFSIDE", detail: player ? `${player} caught offside` : "Flag up", kind: "offside" };
   if (event.type === "FOUL") return { title: "FOUL", detail: player ? `Committed by ${player}` : event.team_id, kind: "foul" };
   if (event.type === "FREE_KICK") return { title: "FREE KICK", detail: `${event.team_id} restart`, kind: "free-kick" };
+  if (event.type === "CORNER") return { title: "CORNER", detail: `${event.team_id} corner kick`, kind: "corner" };
+  if (event.type === "THROW_IN") return { title: "THROW-IN", detail: `${event.team_id} restart`, kind: "throw-in" };
+  if (event.type === "GOAL_KICK") return { title: "GOAL KICK", detail: `${event.team_id} restart`, kind: "goal-kick" };
   if (event.type === "SUBSTITUTION") return { title: "SUBSTITUTION", detail: player ? `${player} comes on` : event.team_id, kind: "substitution" };
   return null;
 }
