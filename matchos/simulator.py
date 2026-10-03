@@ -1006,7 +1006,7 @@ class MatchSimulator:
                 events.extend(scripted)
                 if any(event.type == "SHOT" and event.outcome == "GOAL" for event in scripted):
                     self.done_scripts.add("goal82")
-            if "goal88" not in self.done_scripts and minute_ms >= 88 * 60_000:
+            if "goal82" in self.done_scripts and "goal88" not in self.done_scripts and minute_ms >= 88 * 60_000:
                 scripted = self._script_goal("red_7", "goal88")
                 events.extend(scripted)
                 if any(event.type == "SHOT" and event.outcome == "GOAL" for event in scripted):
