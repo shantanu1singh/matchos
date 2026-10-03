@@ -460,6 +460,85 @@ def test_forward_pass_can_generate_offside_and_free_kick_events() -> None:
     assert any(event.type == "FREE_KICK" and event.qualifiers.get("reason") == "OFFSIDE" for event in events)
 
 
+def test_pass_out_creates_throw_in_and_restarts_with_opponent() -> None:
+    sim = MatchSimulator(seed=6, scenario_id="press_collapse")
+    carrier = sim.players["red_8"]
+    target = sim.players["red_7"]
+    carrier.x, carrier.y = 42.0, 34.0
+    target.x, target.y = 55.0, 10.0
+    sim.ball = Point(x=42.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim._select_target = lambda _carrier, _long_ball: target  # type: ignore[method-assign]
+    sim._pass_success = lambda *_args, **_kwargs: 0.0  # type: ignore[method-assign]
+    rolls = iter([0.9, 0.0])
+    sim.rng.random = lambda: next(rolls)  # type: ignore[method-assign]
+
+    events = sim._pass(carrier, long_ball=False)
+    throw_in = next(event for event in events if event.type == "THROW_IN")
+    assert throw_in.team_id == "BLUE"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "THROW_IN"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "BLUE"
+    assert sim.carrier_id is not None
+    assert sim.ball.y in {0.4, 67.6}
+
+
+def test_saved_wide_shot_can_create_corner_restart() -> None:
+    sim = MatchSimulator(seed=8, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 92.0, 34.0
+    sim.ball = Point(x=92.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.uniform = lambda _a, _b: 3.5  # type: ignore[method-assign]
+    sim.rng.random = lambda: 0.2  # type: ignore[method-assign]
+
+    events = sim._shot(carrier)
+    corner = next(event for event in events if event.type == "CORNER")
+    assert corner.team_id == "RED"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "CORNER"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "RED"
+    assert sim.ball.x > 104.0
+    assert sim.ball.y in {0.4, 67.6}
+
+
+def test_off_target_shot_creates_goal_kick_restart() -> None:
+    sim = MatchSimulator(seed=9, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 82.0, 34.0
+    sim.ball = Point(x=82.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.uniform = lambda _a, _b: 0.0  # type: ignore[method-assign]
+    sim.rng.random = lambda: 0.99  # type: ignore[method-assign]
+
+    events = sim._shot(carrier)
+    goal_kick = next(event for event in events if event.type == "GOAL_KICK")
+    assert goal_kick.team_id == "BLUE"
+    assert sim.pending_restart is not None
+    assert sim.pending_restart[0] == "GOAL_KICK"
+
+    while sim.flight is not None:
+        sim._advance(50)
+
+    assert sim.possession == "BLUE"
+    assert abs(sim.ball.x - 99.5) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
+
+
 def test_movement_does_not_teleport() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     prev_ball = (sim.ball.x, sim.ball.y)
