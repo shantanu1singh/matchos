@@ -28,6 +28,9 @@ EventType = Literal[
     "OFFSIDE",
     "FREE_KICK",
     "PENALTY",
+    "CORNER",
+    "THROW_IN",
+    "GOAL_KICK",
     "SUBSTITUTION",
     "FORMATION_CHANGE",
 ]
