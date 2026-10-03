@@ -138,6 +138,39 @@ button { cursor: pointer; }
   opacity: 0; pointer-events: none;
 }
 .goal-flash.show { animation: flash 1.6s ease; }
+
+.incident-flash {
+  position: absolute;
+  left: 50%;
+  top: 82px;
+  transform: translate(-50%, -8px);
+  z-index: 3;
+  min-width: 190px;
+  max-width: calc(100% - 48px);
+  padding: 10px 18px;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 999px;
+  background: rgba(6, 16, 12, 0.9);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+  text-align: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0;
+  pointer-events: none;
+}
+.incident-flash.show { animation: incident 2.1s ease; }
+.incident-flash[data-tone="warning"] { color: #ffe26f; border-color: rgba(255,226,111,0.55); }
+.incident-flash[data-tone="danger"] { color: #ff827a; border-color: rgba(255,93,82,0.55); }
+.incident-flash[data-tone="major"] { color: var(--gold); border-color: rgba(230,195,106,0.55); }
+@keyframes incident {
+  0% { opacity: 0; transform: translate(-50%, -12px); }
+  12% { opacity: 1; transform: translate(-50%, 0); }
+  78% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 6px); }
+}
 @keyframes flash {
   0% { opacity: 0; transform: scale(0.92); }
   18% { opacity: 1; transform: scale(1); }
@@ -195,6 +228,7 @@ select, input {
 }
 .transport { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
 .transport button, .lab-form button { padding: 10px 14px; background: var(--ink); color: #102019; border: 0; }
+.transport button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .speeds { display: flex; gap: 4px; }
 .speeds button { padding: 8px 10px; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; }
 .speeds button.on { color: var(--ink); border-color: var(--ink); }
