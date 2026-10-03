@@ -36,7 +36,10 @@
               <div class="side blue"><b id="score-blue">0</b><span>BLUE</span></div>
             </div>
             <canvas id="pitch"></canvas>
-            <div class="goal-flash" id="goal-flash">Goal</div>
+            <div class="event-flash" id="event-flash" aria-live="polite">
+              <strong id="event-flash-title"></strong>
+              <span id="event-flash-detail"></span>
+            </div>
           </div>
           <div class="raw-event" id="raw-event">
             <p class="kicker">Raw event</p>
@@ -81,8 +84,10 @@
             <label>Player
               <select id="player"></select>
             </label>
+            <p class="viewer-help" id="viewer-help"></p>
             <div class="transport">
               <button id="pause" type="button">Pause</button>
+              <button id="reset" type="button" class="secondary">Reset</button>
               <div class="speeds" id="speeds"></div>
             </div>
           </div>
