@@ -412,6 +412,7 @@ function describeMatchEvent(event) {
   if (event.type === "CORNER") return { title: "CORNER", detail: `${event.team_id} corner kick`, kind: "corner" };
   if (event.type === "THROW_IN") return { title: "THROW-IN", detail: `${event.team_id} restart`, kind: "throw-in" };
   if (event.type === "GOAL_KICK") return { title: "GOAL KICK", detail: `${event.team_id} restart`, kind: "goal-kick" };
+  if (event.type === "FORMATION_CHANGE") return { title: "FORMATION CHANGE", detail: event.outcome || event.qualifiers?.formation || event.team_id, kind: "formation" };
   if (event.type === "SUBSTITUTION") return { title: "SUBSTITUTION", detail: player ? `${player} comes on` : event.team_id, kind: "substitution" };
   return null;
 }
