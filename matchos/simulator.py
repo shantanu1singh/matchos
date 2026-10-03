@@ -1024,6 +1024,9 @@ class MatchSimulator:
         fouler_id = self._nearest_actual(defending, spot)
         if fouler_id is None:
             return self._carry(carrier)
+        fouler = self.players[fouler_id]
+        if math.hypot(fouler.x - carrier.x, fouler.y - carrier.y) > 4.5:
+            return self._carry(carrier)
 
         events = [
             self._emit(
