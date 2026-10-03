@@ -259,6 +259,22 @@ def test_pass_planner_uses_current_player_positions() -> None:
     receive = sim._receive_point(target, "RED")
     assert math.hypot(receive.x - red_9.x, receive.y - red_9.y) < 6.0
 
+    red_9.x, red_9.y = 94.0, 60.0
+    assert sim._select_target(red_8, long_ball=False) is None
+
+
+def test_players_hold_shape_inside_a_soft_tactical_zone() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    player = sim.players["red_6"]
+    anchor_x, anchor_y = sim._target(player)
+    player.x, player.y = anchor_x + 1.0, anchor_y
+    player.vx = player.vy = 0.0
+    before = (player.x, player.y)
+
+    sim._move_players(0.05)
+
+    assert math.hypot(player.x - before[0], player.y - before[1]) < 0.15
+
 
 def test_interceptor_must_be_near_the_actual_pass_lane() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
