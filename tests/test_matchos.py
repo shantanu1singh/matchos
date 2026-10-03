@@ -158,6 +158,47 @@ def test_scripted_stories_emit_real_events() -> None:
     assert saw_card and chaos.players["blue_8"].on_pitch is False
 
 
+def test_all_lab_scenarios_keep_tracking_coherent() -> None:
+    """Every Lab scenario should use the same physically coherent tracking model."""
+    for scenario_id, seed in [
+        ("balanced", 7),
+        ("press_collapse", 47129),
+        ("substitute_impact", 11),
+        ("late_comeback", 47129),
+        ("red_card", 5),
+        ("random", 19),
+    ]:
+        sim = MatchSimulator(seed=seed, scenario_id=scenario_id)
+        sim.collect_warmup()
+        previous = {
+            pid: (player.x, player.y)
+            for pid, player in sim.players.items()
+            if player.on_pitch
+        }
+
+        # Two simulated minutes is enough to cross the nearby scripted transition
+        # for each Lab while keeping the smoke test cheap.
+        for _ in range(120):
+            sim.step(1_000)
+            assert 0.0 <= sim.ball.x <= 105.0
+            assert 0.0 <= sim.ball.y <= 68.0
+
+            for pid, player in sim.players.items():
+                if not player.on_pitch:
+                    previous.pop(pid, None)
+                    continue
+
+                assert 1.0 <= player.x <= 104.0
+                assert 1.5 <= player.y <= 66.5
+                assert math.hypot(player.vx, player.vy) <= 9.0
+
+                # At one-second sampling a player should not appear to teleport.
+                if pid in previous:
+                    ox, oy = previous[pid]
+                    assert math.hypot(player.x - ox, player.y - oy) < 9.0
+                previous[pid] = (player.x, player.y)
+
+
 def test_trigger_requires_sample_size() -> None:
     engine = TriggerEngine()
     sim = MatchSimulator(seed=1, scenario_id="balanced")
@@ -234,35 +275,79 @@ def test_workflow_airs_press_breakdown() -> None:
     assert prose_is_faithful(enrichment.enrichment_text, moment)
 
 
-def test_animation_follows_the_named_pass() -> None:
-    """The event names who plays the ball and who it is for. The dots catch up."""
+def test_pass_planner_uses_current_player_positions() -> None:
+    """A pass target must be feasible in the visible world, not only in formation shape."""
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     sim.carrier_id = "red_8"
     sim.possession = "RED"
-    sim.ball = Point(x=42.0, y=30.0)
     red_8 = sim.players["red_8"]
     red_8.x, red_8.y = 42.0, 30.0
-    # Park the rest of the side away from their shape. That must not change who the pass is for.
+    sim.ball = Point(x=42.0, y=30.0)
+
+    # Make red 9 the only realistically reachable teammate. Other players keep
+    # their roles/formation slots but are physically far from the carrier.
     for player in sim.players.values():
         if player.team_id == "RED" and player.player_id != "red_8":
-            player.x, player.y = 8.0, 8.0
-    events = sim._pass(red_8, long_ball=False)
-    assert events[0].type == "PASS"
-    assert events[0].player_id == "red_8"
-    flight = sim.flight
-    assert flight is not None
-    assert abs(flight.start.x - 42.0) < 0.2
-    assert abs(flight.start.y - 30.0) < 0.2
-    assert flight.receiver_id
-    assert sim.focus[flight.receiver_id] == (flight.end.x, flight.end.y)
-    receiver = flight.receiver_id
-    for _ in range(90):
-        if sim.flight is None and sim.carrier_id == receiver:
-            break
-        sim._advance(50)
-    assert sim.carrier_id == receiver
-    owner = sim.players[receiver]
-    assert math.hypot(owner.x - sim.ball.x, owner.y - sim.ball.y) < 4.0
+            player.x, player.y = 94.0, 60.0
+            player.vx = player.vy = 0.0
+    red_9 = sim.players["red_9"]
+    red_9.x, red_9.y = 56.0, 30.0
+
+    target = sim._select_target(red_8, long_ball=False)
+    assert target is not None
+    assert target.player_id == "red_9"
+
+    receive = sim._receive_point(target, "RED")
+    assert math.hypot(receive.x - red_9.x, receive.y - red_9.y) < 6.0
+
+    red_9.x, red_9.y = 94.0, 60.0
+    assert sim._select_target(red_8, long_ball=False) is None
+
+
+def test_players_hold_shape_inside_a_soft_tactical_zone() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    player = sim.players["red_6"]
+    anchor_x, anchor_y = sim._target(player)
+    player.x, player.y = anchor_x + 1.0, anchor_y
+    player.vx = player.vy = 0.0
+    before = (player.x, player.y)
+
+    sim._move_players(0.05)
+
+    assert math.hypot(player.x - before[0], player.y - before[1]) < 0.15
+
+
+def test_interceptor_must_be_near_the_actual_pass_lane() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    start = Point(x=35.0, y=34.0)
+    end = Point(x=70.0, y=34.0)
+
+    # Put every blue outfield player far from the lane except blue 6.
+    for player in sim.players.values():
+        if player.team_id == "BLUE" and player.role != "GK":
+            player.x, player.y = 80.0, 60.0
+    blue_6 = sim.players["blue_6"]
+    blue_6.x, blue_6.y = 55.0, 35.0
+
+    challenge = sim._named_interceptor(start, end, "RED")
+    assert challenge is not None
+    point, player_id = challenge
+    assert player_id == "blue_6"
+    assert math.hypot(blue_6.x - point.x, blue_6.y - point.y) < 8.0
+
+
+def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    sim.possession = "BLUE"
+    sim.carrier_id = None
+    sim.ball = Point(x=105.0, y=34.0)
+
+    sim._kickoff()
+
+    assert sim.flight is None
+    assert sim.carrier_id is not None
+    assert abs(sim.ball.x - 52.5) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
 
 
 def test_movement_does_not_teleport() -> None:
