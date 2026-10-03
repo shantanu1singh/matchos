@@ -370,6 +370,8 @@ function incidentDescriptor(event) {
   if (event.type === "OFFSIDE") return { label: "Offside", tone: "warning", priority: 60 };
   if (event.type === "FOUL" && event.qualifiers?.restart === "FREE_KICK") return { label: "Free kick", tone: "major", priority: 50 };
   if (event.type === "FOUL") return { label: "Foul", tone: "warning", priority: 40 };
+  if (event.type === "SUBSTITUTION") return { label: "Substitution", tone: "major", priority: 30 };
+  if (event.type === "FORMATION_CHANGE") return { label: "Formation change", tone: "major", priority: 25 };
   return null;
 }
 
