@@ -951,8 +951,12 @@ class MatchSimulator:
         spot = Point(x=carrier.x, y=carrier.y)
         rival = self._nearest_actual(other(carrier.team_id), spot)
         start = Point(x=self.ball.x, y=self.ball.y)
-        if rival and self.rng.random() < 0.16:
-            return self._foul(carrier, rival)
+        if rival:
+            opponent = self.players[rival]
+            if math.hypot(opponent.x - carrier.x, opponent.y - carrier.y) > 4.5:
+                return self._carry(carrier)
+            if self.rng.random() < 0.16:
+                return self._foul(carrier, rival)
         won = self.rng.random() < 0.48 + carrier.dribbling * 0.2
         winner = carrier.player_id if won else rival
         loser = rival if won else carrier.player_id
