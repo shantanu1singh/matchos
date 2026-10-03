@@ -176,6 +176,14 @@ def event_label(event: MatchEvent) -> str:
         return f"{shirt(str(off)) if off else who} off, {who} on"
     if event.type == "CARD":
         return f"{who} {event.qualifiers.get('card', 'card')}"
+    if event.type == "OFFSIDE":
+        return f"{who} offside"
+    if event.type == "FREE_KICK":
+        return f"{event.team_id} free kick"
+    if event.type == "PENALTY":
+        return f"{event.team_id} penalty"
+    if event.type == "FOUL":
+        return f"{who} foul"
     if event.type == "SHOT":
         return f"{who} shot"
     return f"{who} {event.type.lower()}"
