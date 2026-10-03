@@ -686,6 +686,39 @@ class MatchSimulator:
         length = distance(start, end)
         pressure = self._pressure_modifier(carrier)
         qual = self._geometry(carrier.team_id)
+        pace = 12.0 if not long_ball else 14.0
+        if self._is_offside(carrier, target, qual):
+            defender = self._nearest_actual(other(carrier.team_id), end)
+            flight = self._realize(defender, start, end, "PASS", carrier.team_id, False, pace)
+            shown_end = flight.end
+            pass_event = self._emit(
+                "PASS",
+                carrier.team_id,
+                carrier.player_id,
+                target.player_id,
+                "OFFSIDE",
+                start,
+                shown_end,
+                {
+                    **qual,
+                    "length_m": round(length, 1),
+                    "long_ball": long_ball,
+                    "pressure": round(pressure, 2),
+                    "offside": True,
+                },
+            )
+            offside_event = self._emit(
+                "OFFSIDE",
+                carrier.team_id,
+                target.player_id,
+                None,
+                "OFFSIDE",
+                shown_end,
+                shown_end,
+                {"restart": "FREE_KICK", "related": pass_event.id},
+            )
+            return [pass_event, offside_event]
+
         success_p = self._pass_success(carrier, target, length, pressure, qual, long_ball, end)
         success = self.rng.random() < success_p
         outcome = "COMPLETE" if success else ("OUT" if self.rng.random() < 0.25 else "INCOMPLETE")
@@ -699,7 +732,6 @@ class MatchSimulator:
             # cleanly receiving it. Give the loose ball to the closest visible
             # opponent and let the motion planner choose a reachable meeting point.
             runner_id = self._nearest_actual(other(carrier.team_id), desired)
-        pace = 12.0 if not long_ball else 14.0
         if outcome == "OUT":
             desired = Point(x=clamp(end.x, 0.4, 104.6), y=0.4 if end.y < 34 else 67.6)
             runner_id = self._nearest_actual(other(carrier.team_id), desired)
@@ -741,6 +773,19 @@ class MatchSimulator:
                 )
             )
         return events
+
+    def _is_offside(self, carrier: SimPlayer, target: SimPlayer, qual: dict[str, object]) -> bool:
+        """Approximate an offside decision from the visible defensive line.
+
+        The simulator is not a laws engine; this is deliberately conservative
+        and only flags clearly advanced receivers on forward passes.
+        """
+        line = float(qual["defending_line_x"])
+        if carrier.team_id == "RED":
+            clearly_beyond = target.x > line + 1.8 and target.x > carrier.x + 2.0
+        else:
+            clearly_beyond = target.x < line - 1.8 and target.x < carrier.x - 2.0
+        return clearly_beyond and self.rng.random() < 0.14
 
     def _named_interceptor(self, start: Point, end: Point, attacking: TeamId) -> tuple[Point, str] | None:
         """The defender whose shape stands on this pass. None if the lane is clear."""
@@ -906,6 +951,8 @@ class MatchSimulator:
         spot = Point(x=carrier.x, y=carrier.y)
         rival = self._nearest_actual(other(carrier.team_id), spot)
         start = Point(x=self.ball.x, y=self.ball.y)
+        if rival and self.rng.random() < 0.16:
+            return self._foul(carrier, rival)
         won = self.rng.random() < 0.48 + carrier.dribbling * 0.2
         winner = carrier.player_id if won else rival
         loser = rival if won else carrier.player_id
@@ -924,6 +971,52 @@ class MatchSimulator:
             self.carrier_id = rival
             self.focus[rival] = (start.x, start.y)
         return [event]
+
+    def _foul(self, carrier: SimPlayer, offender_id: str) -> list[MatchEvent]:
+        """Stop play for a foul and attach the restart in provider-style qualifiers."""
+        offender = self.players[offender_id]
+        spot = Point(x=carrier.x, y=carrier.y)
+        in_penalty_area = in_box(carrier.team_id, spot.x) and 13.84 <= spot.y <= 54.16
+        restart = "PENALTY" if in_penalty_area else "FREE_KICK"
+        events = [
+            self._emit(
+                "FOUL",
+                offender.team_id,
+                offender.player_id,
+                carrier.player_id,
+                "FOUL",
+                spot,
+                spot,
+                {"restart": restart},
+            )
+        ]
+        if self.rng.random() < 0.34:
+            events.append(
+                self._emit(
+                    "CARD",
+                    offender.team_id,
+                    offender.player_id,
+                    None,
+                    "YELLOW",
+                    spot,
+                    spot,
+                    {"card": "yellow", "related_foul": events[0].id},
+                )
+            )
+
+        # Dead-ball state: attacking side retains possession at the foul spot.
+        self.flight = None
+        self.carry_target = None
+        self.carry_until_ms = 0
+        self.possession = carrier.team_id
+        self.carrier_id = carrier.player_id
+        self.ball = spot
+        self.ball_vx = 0.0
+        self.ball_vy = 0.0
+        self.ball_z = 0.0
+        self.focus[carrier.player_id] = (spot.x, spot.y)
+        self.next_action_ms = self.clock_ms + 1_000
+        return events
 
     def _shot(self, carrier: SimPlayer) -> list[MatchEvent]:
         goal_x = 105.0 if carrier.team_id == "RED" else 0.0
