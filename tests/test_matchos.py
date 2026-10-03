@@ -350,6 +350,48 @@ def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
     assert abs(sim.ball.y - 34.0) < 0.01
 
 
+def test_foul_qualifies_free_kick_yellow_card_and_penalty() -> None:
+    class FixedRandom:
+        def random(self) -> float:
+            return 0.1
+
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    sim.rng = FixedRandom()  # type: ignore[assignment]
+    carrier = sim.players["red_9"]
+    offender = sim.players["blue_4"]
+
+    carrier.x, carrier.y = 60.0, 34.0
+    offender.x, offender.y = 60.5, 34.0
+    free_kick = sim._foul(carrier, offender.player_id)
+    foul = next(event for event in free_kick if event.type == "FOUL")
+    card = next(event for event in free_kick if event.type == "CARD")
+    assert foul.qualifiers["restart"] == "FREE_KICK"
+    assert card.qualifiers["card"] == "yellow"
+
+    carrier.x, carrier.y = 92.0, 34.0
+    offender.x, offender.y = 92.5, 34.0
+    penalty = sim._foul(carrier, offender.player_id)
+    foul = next(event for event in penalty if event.type == "FOUL")
+    assert foul.qualifiers["restart"] == "PENALTY"
+
+
+def test_offside_uses_live_defensive_line() -> None:
+    class FixedRandom:
+        def random(self) -> float:
+            return 0.01
+
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    sim.rng = FixedRandom()  # type: ignore[assignment]
+    carrier = sim.players["red_8"]
+    target = sim.players["red_9"]
+    carrier.x, carrier.y = 50.0, 34.0
+    target.x, target.y = 82.0, 34.0
+    assert sim._is_offside(carrier, target, {"defending_line_x": 75.0}) is True
+
+    target.x = 72.0
+    assert sim._is_offside(carrier, target, {"defending_line_x": 75.0}) is False
+
+
 def test_movement_does_not_teleport() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     prev_ball = (sim.ball.x, sim.ball.y)
