@@ -592,18 +592,24 @@ class MatchSimulator:
         self._turnover(flight.end, flight.team_id)
 
     def _kickoff(self) -> None:
-        """A goal leaves the ball in the net. A named player restarts from the centre."""
+        """Reset a dead ball at centre; never animate it flying out of the net."""
+        centre = Point(x=52.5, y=34.0)
+        self.flight = None
+        self.focus.clear()
+        self.carry_target = None
+        self.carry_until_ms = 0
+        self.ball = centre
         self.ball_vx = 0.0
         self.ball_vy = 0.0
         self.ball_z = 0.0
-        taker_id = f"{self.possession.lower()}_8"
-        if taker_id not in self.players or not self.players[taker_id].on_pitch:
-            taker_id = self._nearest_actual(self.possession, Point(x=52.5, y=34.0))
+        taker_id = self._nearest_actual(self.possession, centre)
         if taker_id is None:
             return
-        start = Point(x=self.ball.x, y=self.ball.y)
-        flight = self._realize(taker_id, start, Point(x=52.5, y=34.0), "RESTART", self.possession, True, 12.0, pull=False, max_s=4.5)
-        self.next_action_ms = self.clock_ms + flight.duration_ms + 500
+        self.carrier_id = taker_id
+        self.focus[taker_id] = (centre.x, centre.y)
+        # _arrival_done keeps open play paused until the taker has actually
+        # reached the stationary ball.
+        self.next_action_ms = self.clock_ms + 900
 
     def _turnover(self, spot: Point, previous: TeamId) -> None:
         self.possession = other(previous)
@@ -996,11 +1002,15 @@ class MatchSimulator:
             self.done_scripts.add("shape")
         if self.scenario_id == "late_comeback":
             if "goal82" not in self.done_scripts and minute_ms >= 82 * 60_000:
-                events.extend(self._script_goal("red_9"))
-                self.done_scripts.add("goal82")
+                scripted = self._script_goal("red_9", "goal82")
+                events.extend(scripted)
+                if any(event.type == "SHOT" and event.outcome == "GOAL" for event in scripted):
+                    self.done_scripts.add("goal82")
             if "goal88" not in self.done_scripts and minute_ms >= 88 * 60_000:
-                events.extend(self._script_goal("red_7"))
-                self.done_scripts.add("goal88")
+                scripted = self._script_goal("red_7", "goal88")
+                events.extend(scripted)
+                if any(event.type == "SHOT" and event.outcome == "GOAL" for event in scripted):
+                    self.done_scripts.add("goal88")
         return events
 
     def _substitute(self, off_id: str, on_id: str) -> list[MatchEvent]:
@@ -1044,13 +1054,71 @@ class MatchSimulator:
         card = self._emit("CARD", player.team_id, player_id, None, "RED", spot, spot, {"card": "red"})
         return [foul, card]
 
-    def _script_goal(self, scorer_id: str) -> list[MatchEvent]:
+    def _script_goal(self, scorer_id: str, script_key: str) -> list[MatchEvent]:
+        """Stage a deterministic comeback through visible football actions.
+
+        The old implementation could credit a player with a shot from wherever
+        the ball happened to be. Here the scenario first wins possession if
+        necessary, then plays a visible setup pass to the named scorer, and only
+        shoots once that scorer is actually on the ball.
+        """
+        if self.flight is not None:
+            return []
+
         scorer = self.players[scorer_id]
         scorer.on_pitch = True
+        events: list[MatchEvent] = []
+
+        if self.possession != scorer.team_id:
+            previous_carrier = self.carrier_id
+            spot = Point(x=self.ball.x, y=self.ball.y)
+            previous_team = self.possession
+            self._turnover(spot, previous_team)
+            winner = self.carrier_id
+            events.append(
+                self._emit(
+                    "INTERCEPTION",
+                    scorer.team_id,
+                    winner,
+                    previous_carrier,
+                    "WON",
+                    spot,
+                    spot,
+                    {"scripted": True, "setup_for": scorer_id},
+                )
+            )
+            self.next_action_ms = self.clock_ms + 900
+            return events
+
+        carrier = self.players.get(self.carrier_id) if self.carrier_id else None
+        if carrier is None or not carrier.on_pitch or not self._touching(carrier):
+            return []
+
+        if carrier.player_id != scorer_id:
+            setup_key = f"{script_key}_setup"
+            if setup_key in self.done_scripts:
+                return []
+            start = Point(x=self.ball.x, y=self.ball.y)
+            desired = self._receive_point(scorer, scorer.team_id)
+            flight = self._realize(scorer_id, start, desired, "PASS", scorer.team_id, True, 14.0, max_s=3.2)
+            self.done_scripts.add(setup_key)
+            self.next_action_ms = self.clock_ms + flight.duration_ms + 900
+            return [
+                self._emit(
+                    "PASS",
+                    scorer.team_id,
+                    carrier.player_id,
+                    scorer.player_id,
+                    "COMPLETE",
+                    start,
+                    flight.end,
+                    {"scripted": True, "setup_for": scorer_id},
+                )
+            ]
+
         start = Point(x=self.ball.x, y=self.ball.y)
         end = Point(x=105.0 if scorer.team_id == "RED" else 0.0, y=34.0)
-        self.possession = scorer.team_id
-        self.carrier_id = None
+        distance_m = math.hypot(end.x - start.x, end.y - start.y)
         event = self._emit(
             "SHOT",
             scorer.team_id,
@@ -1059,16 +1127,18 @@ class MatchSimulator:
             "GOAL",
             start,
             end,
-            {"distance_m": 13.0, "xg": 0.42, "scripted": True},
+            {"distance_m": round(distance_m, 1), "xg": 0.42, "scripted": True},
         )
-        self.flight = Flight(start, end, self.clock_ms, 500, "SHOT", scorer.team_id, None, False)
+        duration = int(max(420, min(1200, distance_m / 18.0 * 1000)))
+        self.flight = Flight(start, end, self.clock_ms, duration, "SHOT", scorer.team_id, None, False)
+        self.carrier_id = None
         if scorer.team_id == "RED":
             self.score_red += 1
         else:
             self.score_blue += 1
         self.possession = other(scorer.team_id)
         self.possession_id += 1
-        self.next_action_ms = self.clock_ms + 1200
+        self.next_action_ms = self.clock_ms + duration + 900
         return [event]
 
     def _shape_tracking(self) -> list[TrackingPlayer]:
