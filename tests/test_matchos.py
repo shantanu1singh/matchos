@@ -295,6 +295,20 @@ def test_interceptor_must_be_near_the_actual_pass_lane() -> None:
     assert math.hypot(blue_6.x - point.x, blue_6.y - point.y) < 8.0
 
 
+def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    sim.possession = "BLUE"
+    sim.carrier_id = None
+    sim.ball = Point(x=105.0, y=34.0)
+
+    sim._kickoff()
+
+    assert sim.flight is None
+    assert sim.carrier_id is not None
+    assert abs(sim.ball.x - 52.5) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
+
+
 def test_movement_does_not_teleport() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     prev_ball = (sim.ball.x, sim.ball.y)
