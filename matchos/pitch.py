@@ -182,6 +182,12 @@ def event_label(event: MatchEvent) -> str:
         return f"{event.team_id} free kick"
     if event.type == "PENALTY":
         return f"{event.team_id} penalty"
+    if event.type == "CORNER":
+        return f"{event.team_id} corner"
+    if event.type == "THROW_IN":
+        return f"{event.team_id} throw-in"
+    if event.type == "GOAL_KICK":
+        return f"{event.team_id} goal kick"
     if event.type == "FOUL":
         return f"{who} foul"
     if event.type == "SHOT":
