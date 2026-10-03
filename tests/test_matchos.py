@@ -350,6 +350,75 @@ def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
     assert abs(sim.ball.y - 34.0) < 0.01
 
 
+def test_foul_creates_a_free_kick_and_can_show_a_yellow_card() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 52.0, 34.0
+    sim.ball = Point(x=52.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    # Force the optional card branch.
+    sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
+    events = sim._foul(carrier)
+    types = [event.type for event in events]
+
+    assert "FOUL" in types
+    assert "FREE_KICK" in types
+    card = next(event for event in events if event.type == "CARD")
+    assert card.qualifiers.get("card") == "yellow"
+    assert sim.possession == "RED"
+
+
+def test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot() -> None:
+    sim = MatchSimulator(seed=4, scenario_id="balanced")
+    carrier = sim.players["red_9"]
+    carrier.x, carrier.y = 94.0, 34.0
+    carrier.vx = carrier.vy = 0.0
+    sim.ball = Point(x=94.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    sim.rng.random = lambda: 0.9  # type: ignore[method-assign]
+    events = sim._foul(carrier)
+    assert any(event.type == "PENALTY" for event in events)
+    assert sim.pending_penalty_taker == carrier.player_id
+    assert abs(sim.ball.x - 94.0) < 0.01
+    assert abs(sim.ball.y - 34.0) < 0.01
+
+    shot = sim._take_penalty()
+    assert len(shot) == 1
+    assert shot[0].type == "SHOT"
+    assert shot[0].qualifiers.get("penalty") is True
+
+
+def test_forward_pass_can_generate_offside_and_free_kick_events() -> None:
+    sim = MatchSimulator(seed=5, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 60.0, 34.0
+    carrier.vx = carrier.vy = 0.0
+    sim.ball = Point(x=60.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+
+    for player in sim.players.values():
+        if player.team_id == "RED" and player.player_id not in {"red_8", "red_9"}:
+            player.x, player.y = 15.0, 60.0
+            player.vx = player.vy = 0.0
+        elif player.team_id == "BLUE" and player.role != "GK":
+            player.x = 75.0
+            player.vx = player.vy = 0.0
+    target = sim.players["red_9"]
+    target.x, target.y = 90.0, 34.0
+    target.vx = target.vy = 0.0
+
+    sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
+    events = sim._pass(carrier, long_ball=False)
+
+    assert any(event.type == "OFFSIDE" for event in events)
+    assert any(event.type == "FREE_KICK" and event.qualifiers.get("reason") == "OFFSIDE" for event in events)
+
+
 def test_movement_does_not_teleport() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     prev_ball = (sim.ball.x, sim.ball.y)
