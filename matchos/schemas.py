@@ -27,6 +27,7 @@ EventType = Literal[
     "CARD",
     "SUBSTITUTION",
     "FORMATION_CHANGE",
+    "OFFSIDE",
 ]
 
 MomentFrame = Literal[
