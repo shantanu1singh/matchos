@@ -16,6 +16,7 @@ const state = {
   pulse: null,
   provider: "",
   raw: [],
+  playerRosterKey: "",
 };
 
 const pitch = document.getElementById("pitch");
@@ -59,7 +60,7 @@ function onMessage(message) {
     if (!state.prev || state.frame.timestamp_ms < state.prev.timestamp_ms || nextAction !== prevAction) state.trail = [];
     state.pulse = message.state;
     const arrivals = message.events || [];
-    if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
+    showImportantMatchEvent(arrivals);
     const shown = arrivals.filter((item) => RAW_TYPES.has(item.type));
     if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
     renderRaw();
@@ -105,7 +106,7 @@ function onMessage(message) {
   }
 }
 
-const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
+const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "OFFSIDE", "FREE_KICK", "PENALTY", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
 
 function shirt(id) {
   if (!id || !String(id).includes("_")) return "";
@@ -168,9 +169,37 @@ function renderRaw() {
   anim.textContent = `Animation  ${action.kind}  ${xy(action.start)} → ${xy(action.end)}${meets}${ball}`;
 }
 
-function startMatch() {
+function resetUiState() {
   state.raw = [];
+  state.frame = null;
+  state.prev = null;
+  state.frameAt = 0;
+  state.prevAt = 0;
+  state.trail = [];
+  state.moment = null;
+  state.overlay = null;
+  state.whyOpen = false;
+  state.candidates = [];
+  state.selected = 0;
+  state.pulse = null;
+  document.getElementById("latency").textContent = "—";
+  document.getElementById("score-red").textContent = "0";
+  document.getElementById("score-blue").textContent = "0";
+  document.getElementById("clock").textContent = "00:00";
+  document.getElementById("insight").className = "card empty";
+  document.getElementById("insight").innerHTML = `
+    <p class="kicker">Waiting for the match</p>
+    <h2>The feed is live. Insights appear only when they can be proved.</h2>
+    <p class="body">Same events drive the pitch and MatchOS.</p>`;
+  document.getElementById("why").classList.add("hidden");
+  document.getElementById("why").innerHTML = "";
+  document.getElementById("pulse").innerHTML = "";
+  renderCandidates();
   renderRaw();
+}
+
+function startMatch() {
+  resetUiState();
   send({
     type: "start",
     scenario: state.scenario,
@@ -317,15 +346,76 @@ function renderScenarios() {
 
 function fillPlayers() {
   const select = document.getElementById("player");
-  if (!state.frame || select.options.length) return;
+  if (!state.frame) return;
   const players = [...state.frame.players].sort((a, b) => a.team_id.localeCompare(b.team_id) || a.number - b.number);
-  select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number}</option>`).join("");
+  const rosterKey = players.map((player) => player.player_id).join("|");
+  if (rosterKey === state.playerRosterKey) return;
+  state.playerRosterKey = rosterKey;
+  const previous = state.viewer.player_id;
+  select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number} · ${player.role}</option>`).join("");
+  const available = players.some((player) => player.player_id === previous);
+  state.viewer.player_id = available ? previous : (players[0]?.player_id || previous);
   select.value = state.viewer.player_id;
+  updateViewerHelp();
 }
 
-function flashGoal() {
-  const node = document.getElementById("goal-flash");
-  node.classList.remove("show");
+function updateViewerHelp() {
+  const help = document.getElementById("viewer-help");
+  const select = document.getElementById("player");
+  const isPlayer = state.viewer.persona === "player";
+  select.disabled = !isPlayer;
+  if (isPlayer) {
+    help.textContent = `Following ${shirt(state.viewer.player_id)}. MatchOS prioritizes verified moments involving this player; major match moments can still break through.`;
+  } else if (state.viewer.persona === "fan") {
+    help.textContent = `Home fan view frames verified moments from ${state.viewer.team_id}'s perspective.`;
+  } else if (state.viewer.persona === "analyst") {
+    help.textContent = "Analyst view favors tactical changes, underlying metrics and denser explanations.";
+  } else if (state.viewer.persona === "broadcaster") {
+    help.textContent = "Broadcaster view returns short, graphic-ready verified copy and production metadata.";
+  } else {
+    help.textContent = "Casual view shows fewer moments and explains them with minimal football jargon.";
+  }
+}
+
+function matchEventDescriptor(events) {
+  const priority = (event) => {
+    if (event.type === "SHOT" && event.outcome === "GOAL") return 100;
+    if (event.type === "PENALTY") return 90;
+    if (event.type === "CARD" && String(event.qualifiers?.card || event.outcome).toLowerCase() === "red") return 85;
+    if (event.type === "CARD") return 80;
+    if (event.type === "OFFSIDE") return 70;
+    if (event.type === "FOUL") return 60;
+    if (event.type === "FREE_KICK") return 50;
+    if (event.type === "SUBSTITUTION") return 40;
+    return 0;
+  };
+  const event = [...events].sort((a, b) => priority(b) - priority(a))[0];
+  if (!event || priority(event) === 0) return null;
+  const player = shirt(event.player_id);
+  if (event.type === "SHOT" && event.outcome === "GOAL") {
+    return { title: "GOAL", detail: player ? `${player} scores` : `${event.team_id} score`, kind: "goal" };
+  }
+  if (event.type === "PENALTY") return { title: "PENALTY", detail: `${event.team_id} awarded a penalty`, kind: "penalty" };
+  if (event.type === "CARD") {
+    const card = String(event.qualifiers?.card || event.outcome || "").toLowerCase();
+    return { title: card === "red" ? "RED CARD" : "YELLOW CARD", detail: player || event.team_id, kind: card === "red" ? "red" : "yellow" };
+  }
+  if (event.type === "OFFSIDE") return { title: "OFFSIDE", detail: player ? `${player} caught offside` : "Flag up", kind: "offside" };
+  if (event.type === "FOUL") return { title: "FOUL", detail: player ? `Committed by ${player}` : event.team_id, kind: "foul" };
+  if (event.type === "FREE_KICK") return { title: "FREE KICK", detail: `${event.team_id} restart`, kind: "free-kick" };
+  if (event.type === "SUBSTITUTION") return { title: "SUBSTITUTION", detail: player ? `${player} comes on` : event.team_id, kind: "substitution" };
+  return null;
+}
+
+function showImportantMatchEvent(events) {
+  const descriptor = matchEventDescriptor(events);
+  if (!descriptor) return;
+  const node = document.getElementById("event-flash");
+  const title = document.getElementById("event-flash-title");
+  const detail = document.getElementById("event-flash-detail");
+  node.className = `event-flash ${descriptor.kind}`;
+  title.textContent = descriptor.title;
+  detail.textContent = descriptor.detail;
   void node.offsetWidth;
   node.classList.add("show");
 }
@@ -521,7 +611,18 @@ function drawPlayers(xOf, yOf, view) {
   view.players.forEach((player) => {
     const x = xOf(player.x);
     const y = yOf(player.y);
-    if (highlights.has(player.player_id)) {
+    const followed = state.viewer.persona === "player" && state.viewer.player_id === player.player_id;
+    if (followed) {
+      ctx.beginPath();
+      ctx.arc(x, y, 19, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.95)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "600 9px Outfit, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("FOLLOW", x, y - 23);
+    } else if (highlights.has(player.player_id)) {
       ctx.beginPath();
       ctx.arc(x, y, 16, 0, Math.PI * 2);
       ctx.strokeStyle = "rgba(230,195,106,0.9)";
@@ -575,7 +676,13 @@ document.querySelectorAll(".tab").forEach((tab) => {
     state.viewer[map[id]] = event.target.value;
     send({ type: "viewer", viewer: state.viewer });
     renderPulse();
+    updateViewerHelp();
   });
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  markSpeed(state.speed);
+  startMatch();
 });
 
 document.getElementById("pause").addEventListener("click", () => {
@@ -603,15 +710,12 @@ document.getElementById("lab-form").addEventListener("submit", (event) => {
   state.seed = document.getElementById("seed").value;
   state.speed = Number(document.getElementById("lab-speed").value);
   markSpeed(state.speed);
-  state.trail = [];
-  state.moment = null;
-  state.overlay = null;
-  state.candidates = [];
   document.querySelector(".tab[data-tab='watch']").click();
   startMatch();
 });
 
 window.addEventListener("resize", resize);
+updateViewerHelp();
 resize();
 requestAnimationFrame(draw);
 connect();
