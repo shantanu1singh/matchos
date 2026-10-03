@@ -411,6 +411,22 @@ def test_foul_creates_a_free_kick_and_can_show_a_yellow_card() -> None:
     assert sim.possession == "RED"
 
 
+def test_foul_requires_a_nearby_defender() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    carrier = sim.players["red_8"]
+    carrier.x, carrier.y = 52.0, 34.0
+    sim.ball = Point(x=52.0, y=34.0)
+    sim.carrier_id = carrier.player_id
+    sim.possession = "RED"
+    for player in sim.players.values():
+        if player.team_id == "BLUE":
+            player.x, player.y = 90.0, 60.0
+
+    events = sim._foul(carrier)
+
+    assert not any(event.type == "FOUL" for event in events)
+
+
 def test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot() -> None:
     sim = MatchSimulator(seed=4, scenario_id="balanced")
     carrier = sim.players["red_9"]
