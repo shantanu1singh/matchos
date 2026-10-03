@@ -622,7 +622,7 @@ class MatchSimulator:
         carrier = self.players[self.carrier_id]
         events: list[MatchEvent] = []
         if self._pressers(carrier) >= 2 and self.clock_ms - self.last_pressure_ms > 2500:
-            events.append(self._emit("PRESSURE", other(carrier.team_id), self._slot_nearest(other(carrier.team_id), self._slot(carrier)), None, "APPLIED"))
+            events.append(self._emit("PRESSURE", other(carrier.team_id), self._nearest_actual(other(carrier.team_id), Point(x=carrier.x, y=carrier.y)), None, "APPLIED"))
             self.last_pressure_ms = self.clock_ms
         kind = self._choose_action(carrier)
         if kind == "SHOT":
@@ -691,7 +691,7 @@ class MatchSimulator:
         pace = 12.0 if not long_ball else 14.0
         if outcome == "OUT":
             desired = Point(x=clamp(end.x, 0.4, 104.6), y=0.4 if end.y < 34 else 67.6)
-            runner_id = self._slot_nearest(other(carrier.team_id), desired)
+            runner_id = self._nearest_actual(other(carrier.team_id), desired)
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, False, pace, pull=False, max_s=3.2)
         else:
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, success, pace)
@@ -1081,7 +1081,8 @@ class MatchSimulator:
         return rows
 
     def _geometry(self, attacking: TeamId) -> dict[str, object]:
-        players = self._shape_tracking()
+        # Tactical metrics describe the world the viewer can actually see.
+        players = self._tracking()
         defending = other(attacking)
         return {
             "defending_team": defending,
