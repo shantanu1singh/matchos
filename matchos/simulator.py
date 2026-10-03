@@ -688,6 +688,11 @@ class MatchSimulator:
         challenge = self._named_interceptor(start, end, carrier.team_id) if outcome == "INCOMPLETE" else None
         if challenge is not None:
             desired, runner_id = challenge
+        elif outcome == "INCOMPLETE":
+            # A failed pass cannot still be animated as the intended teammate
+            # cleanly receiving it. Give the loose ball to the closest visible
+            # opponent and let the motion planner choose a reachable meeting point.
+            runner_id = self._nearest_actual(other(carrier.team_id), desired)
         pace = 12.0 if not long_ball else 14.0
         if outcome == "OUT":
             desired = Point(x=clamp(end.x, 0.4, 104.6), y=0.4 if end.y < 34 else 67.6)
@@ -786,7 +791,10 @@ class MatchSimulator:
                 score += 0.55
             scored.append((score, mate))
         if not scored:
-            return self.rng.choice(mates)
+            # No pass is physically plausible from the current world state.
+            # Let _pass fall back to a carry rather than dragging a remote
+            # teammate across the pitch to satisfy an invented event.
+            return None
         scored.sort(key=lambda item: item[0], reverse=True)
         top = scored[:3]
         weights = [max(0.05, item[0]) for item in top]
