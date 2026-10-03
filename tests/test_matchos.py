@@ -158,6 +158,47 @@ def test_scripted_stories_emit_real_events() -> None:
     assert saw_card and chaos.players["blue_8"].on_pitch is False
 
 
+def test_all_lab_scenarios_keep_tracking_coherent() -> None:
+    """Every Lab scenario should use the same physically coherent tracking model."""
+    for scenario_id, seed in [
+        ("balanced", 7),
+        ("press_collapse", 47129),
+        ("substitute_impact", 11),
+        ("late_comeback", 47129),
+        ("red_card", 5),
+        ("random", 19),
+    ]:
+        sim = MatchSimulator(seed=seed, scenario_id=scenario_id)
+        sim.collect_warmup()
+        previous = {
+            pid: (player.x, player.y)
+            for pid, player in sim.players.items()
+            if player.on_pitch
+        }
+
+        # Two simulated minutes is enough to cross the nearby scripted transition
+        # for each Lab while keeping the smoke test cheap.
+        for _ in range(120):
+            sim.step(1_000)
+            assert 0.0 <= sim.ball.x <= 105.0
+            assert 0.0 <= sim.ball.y <= 68.0
+
+            for pid, player in sim.players.items():
+                if not player.on_pitch:
+                    previous.pop(pid, None)
+                    continue
+
+                assert 1.0 <= player.x <= 104.0
+                assert 1.5 <= player.y <= 66.5
+                assert math.hypot(player.vx, player.vy) <= 9.0
+
+                # At one-second sampling a player should not appear to teleport.
+                if pid in previous:
+                    ox, oy = previous[pid]
+                    assert math.hypot(player.x - ox, player.y - oy) < 9.0
+                previous[pid] = (player.x, player.y)
+
+
 def test_trigger_requires_sample_size() -> None:
     engine = TriggerEngine()
     sim = MatchSimulator(seed=1, scenario_id="balanced")
