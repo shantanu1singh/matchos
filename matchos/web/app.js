@@ -182,6 +182,11 @@ function resetUiState() {
   state.candidates = [];
   state.selected = 0;
   state.pulse = null;
+  state.playerRosterKey = "";
+  const eventFlash = document.getElementById("event-flash");
+  eventFlash.className = "event-flash";
+  document.getElementById("event-flash-title").textContent = "";
+  document.getElementById("event-flash-detail").textContent = "";
   document.getElementById("latency").textContent = "—";
   document.getElementById("score-red").textContent = "0";
   document.getElementById("score-blue").textContent = "0";
@@ -194,6 +199,9 @@ function resetUiState() {
   document.getElementById("why").classList.add("hidden");
   document.getElementById("why").innerHTML = "";
   document.getElementById("pulse").innerHTML = "";
+  document.getElementById("candidate-detail").innerHTML = `
+    <p class="kicker">Current moment</p>
+    <h2>Nothing has cleared the producer yet.</h2>`;
   renderCandidates();
   renderRaw();
 }
