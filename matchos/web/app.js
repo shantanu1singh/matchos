@@ -5,7 +5,7 @@ const state = {
   seed: 47129,
   speed: 1,
   running: false,
-  viewer: { persona: "casual", team_id: "BLUE", language: "en", player_id: "red_7" },
+  viewer: { persona: "casual", team_id: "BLUE", language: "en", player_id: "blue_7" },
   frame: null,
   prev: null,
   moment: null,
@@ -60,6 +60,7 @@ function onMessage(message) {
     state.pulse = message.state;
     const arrivals = message.events || [];
     if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
+    flashIncident(arrivals);
     const shown = arrivals.filter((item) => RAW_TYPES.has(item.type));
     if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
     renderRaw();
@@ -105,7 +106,7 @@ function onMessage(message) {
   }
 }
 
-const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
+const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE", "OFFSIDE"]);
 
 function shirt(id) {
   if (!id || !String(id).includes("_")) return "";
@@ -128,10 +129,12 @@ function eventLine(event) {
   const who = shirt(event.player_id) || event.team_id || "";
   const target = event.target_player_id ? ` → ${shirt(event.target_player_id)}` : "";
   const outcome = event.outcome ? `  ${event.outcome}` : "";
+  const restart = event.qualifiers && event.qualifiers.restart ? ` · ${event.qualifiers.restart.replaceAll("_", " ")}` : "";
+  const card = event.type === "CARD" && event.qualifiers?.card ? ` · ${String(event.qualifiers.card).toUpperCase()}` : "";
   const from = xy(event.location);
   const to = xy(event.end_location);
   const path = from && to ? `<span class="path">${escapeHtml(`${from} → ${to}`)}</span>` : "";
-  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}`)}${path}`;
+  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}${restart}${card}`)}${path}`;
 }
 
 function playerPoint(id) {
@@ -168,9 +171,36 @@ function renderRaw() {
   anim.textContent = `Animation  ${action.kind}  ${xy(action.start)} → ${xy(action.end)}${meets}${ball}`;
 }
 
-function startMatch() {
+function clearMatchView() {
+  state.frame = null;
+  state.prev = null;
+  state.frameAt = 0;
+  state.prevAt = 0;
+  state.moment = null;
+  state.overlay = null;
+  state.whyOpen = false;
+  state.candidates = [];
+  state.selected = 0;
+  state.pulse = null;
   state.raw = [];
+  state.trail = [];
+
+  document.getElementById("score-red").textContent = "—";
+  document.getElementById("score-blue").textContent = "—";
+  document.getElementById("clock").textContent = "00:00";
+  document.getElementById("latency").textContent = "—";
+  document.getElementById("pulse").innerHTML = "";
+  document.getElementById("why").classList.add("hidden");
+  document.getElementById("candidates").innerHTML = "";
+  document.getElementById("candidate-detail").innerHTML = '<p class="kicker">Current moment</p><h2>Nothing has cleared the producer yet.</h2>';
+  document.getElementById("insight").className = "card empty";
+  document.getElementById("insight").innerHTML = '<p class="kicker">Waiting for the match</p><h2>The feed is live. Insights appear only when they can be proved.</h2><p class="body">Same events drive the pitch and MatchOS.</p>';
+  document.getElementById("incident-flash").classList.remove("show");
   renderRaw();
+}
+
+function startMatch() {
+  clearMatchView();
   send({
     type: "start",
     scenario: state.scenario,
@@ -317,10 +347,43 @@ function renderScenarios() {
 
 function fillPlayers() {
   const select = document.getElementById("player");
-  if (!state.frame || select.options.length) return;
+  if (!state.frame) return;
   const players = [...state.frame.players].sort((a, b) => a.team_id.localeCompare(b.team_id) || a.number - b.number);
-  select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number}</option>`).join("");
-  select.value = state.viewer.player_id;
+  const signature = players.map((player) => player.player_id).join("|");
+  if (select.dataset.signature !== signature) {
+    const wanted = state.viewer.player_id;
+    select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number}</option>`).join("");
+    select.dataset.signature = signature;
+    const available = players.some((player) => player.player_id === wanted);
+    if (!available && players.length) {
+      state.viewer.player_id = players[0].player_id;
+    }
+    select.value = state.viewer.player_id;
+  }
+}
+
+function incidentDescriptor(event) {
+  if (event.type === "FOUL" && event.qualifiers?.restart === "PENALTY") return { label: "Penalty", tone: "major", priority: 90 };
+  if (event.type === "CARD" && event.qualifiers?.card === "red") return { label: "Red card", tone: "danger", priority: 80 };
+  if (event.type === "CARD" && event.qualifiers?.card === "yellow") return { label: "Yellow card", tone: "warning", priority: 70 };
+  if (event.type === "OFFSIDE") return { label: "Offside", tone: "warning", priority: 60 };
+  if (event.type === "FOUL" && event.qualifiers?.restart === "FREE_KICK") return { label: "Free kick", tone: "major", priority: 50 };
+  if (event.type === "FOUL") return { label: "Foul", tone: "warning", priority: 40 };
+  return null;
+}
+
+function flashIncident(events) {
+  const incident = (events || [])
+    .map(incidentDescriptor)
+    .filter(Boolean)
+    .sort((a, b) => b.priority - a.priority)[0];
+  if (!incident) return;
+  const node = document.getElementById("incident-flash");
+  node.textContent = incident.label;
+  node.dataset.tone = incident.tone;
+  node.classList.remove("show");
+  void node.offsetWidth;
+  node.classList.add("show");
 }
 
 function flashGoal() {
@@ -518,9 +581,20 @@ function drawAction(x, y, view) {
 
 function drawPlayers(xOf, yOf, view) {
   const highlights = new Set(state.moment?.highlight_player_ids || []);
+  const focusPlayer = state.viewer.persona === "player" ? state.viewer.player_id : null;
   view.players.forEach((player) => {
     const x = xOf(player.x);
     const y = yOf(player.y);
+    if (player.player_id === focusPlayer) {
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(x, y, 18, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(230,195,106,0.95)";
+      ctx.lineWidth = 2.2;
+      ctx.stroke();
+      ctx.restore();
+    }
     if (highlights.has(player.player_id)) {
       ctx.beginPath();
       ctx.arc(x, y, 16, 0, Math.PI * 2);
@@ -582,6 +656,10 @@ document.getElementById("pause").addEventListener("click", () => {
   send({ type: "control", action: state.running ? "pause" : "resume" });
   state.running = !state.running;
   document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  startMatch();
 });
 
 function markSpeed(speed) {
