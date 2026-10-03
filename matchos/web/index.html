@@ -37,6 +37,7 @@
             </div>
             <canvas id="pitch"></canvas>
             <div class="goal-flash" id="goal-flash">Goal</div>
+            <div class="incident-flash" id="incident-flash" aria-live="polite"></div>
           </div>
           <div class="raw-event" id="raw-event">
             <p class="kicker">Raw event</p>
@@ -78,11 +79,12 @@
                 <option value="hi">Hindi</option>
               </select>
             </label>
-            <label>Player
+            <label>Focus player
               <select id="player"></select>
             </label>
             <div class="transport">
               <button id="pause" type="button">Pause</button>
+              <button id="reset" type="button" class="secondary">Reset</button>
               <div class="speeds" id="speeds"></div>
             </div>
           </div>
