@@ -1080,14 +1080,20 @@ class MatchSimulator:
         shot_end = end if goal or saved else Point(x=goal_x, y=clamp(aim_y + 6.0, 1.0, 67.0))
         self.flight = Flight(start, shot_end, self.clock_ms, 650, "SHOT", taker.team_id, None, False)
         self.focus.clear()
-        self.carrier_id = None
+        self.possession = other(taker.team_id)
+        self.possession_id += 1
         if goal:
+            self.carrier_id = None
             if taker.team_id == "RED":
                 self.score_red += 1
             else:
                 self.score_blue += 1
-        self.possession = other(taker.team_id)
-        self.possession_id += 1
+        else:
+            keeper = "blue_1" if taker.team_id == "RED" else "red_1"
+            self.carrier_id = keeper if keeper in self.players and self.players[keeper].on_pitch else self._nearest_actual(self.possession, shot_end)
+            if self.carrier_id:
+                keeper_x = 103.2 if taker.team_id == "RED" else 1.8
+                self.focus[self.carrier_id] = (keeper_x, clamp(shot_end.y, 27.5, 40.5))
         self.next_action_ms = self.clock_ms + 1500
         return [event]
 
