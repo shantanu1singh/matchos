@@ -389,6 +389,7 @@ function matchEventDescriptor(events) {
   const priority = (event) => {
     if (event.type === "SHOT" && event.outcome === "GOAL") return 100;
     if (event.type === "PENALTY") return 90;
+    if (event.type === "SHOT" && event.qualifiers?.penalty) return 88;
     if (event.type === "CARD" && String(event.qualifiers?.card || event.outcome).toLowerCase() === "red") return 85;
     if (event.type === "CARD") return 80;
     if (event.type === "OFFSIDE") return 70;
@@ -404,6 +405,10 @@ function matchEventDescriptor(events) {
     return { title: "GOAL", detail: player ? `${player} scores` : `${event.team_id} score`, kind: "goal" };
   }
   if (event.type === "PENALTY") return { title: "PENALTY", detail: `${event.team_id} awarded a penalty`, kind: "penalty" };
+  if (event.type === "SHOT" && event.qualifiers?.penalty) {
+    const title = event.outcome === "SAVED" ? "PENALTY SAVED" : "PENALTY MISSED";
+    return { title, detail: player || event.team_id, kind: "penalty" };
+  }
   if (event.type === "CARD") {
     const card = String(event.qualifiers?.card || event.outcome || "").toLowerCase();
     return { title: card === "red" ? "RED CARD" : "YELLOW CARD", detail: player || event.team_id, kind: card === "red" ? "red" : "yellow" };
