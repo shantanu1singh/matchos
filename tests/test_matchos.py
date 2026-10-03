@@ -7,7 +7,7 @@ import math
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
-from matchos.schemas import MatchEvent, MomentDecision, ViewerProfile
+from matchos.schemas import MatchEvent, MatchState, MomentDecision, PlayerRollup, ViewerProfile
 from matchos.simulator import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.trigger_engine import TriggerEngine
@@ -197,6 +197,47 @@ def test_all_lab_scenarios_keep_tracking_coherent() -> None:
                     ox, oy = previous[pid]
                     assert math.hypot(player.x - ox, player.y - oy) < 9.0
                 previous[pid] = (player.x, player.y)
+
+
+def test_player_decision_uses_the_selected_player() -> None:
+    from matchos.jev_client import LocalJevClient
+
+    state = MatchState(
+        match_id="m-player-focus",
+        timestamp_ms=30 * 60_000,
+        period=1,
+        minute=30,
+        second=0,
+        score_red=0,
+        score_blue=0,
+        possession_team="BLUE",
+        players={
+            "blue_9": PlayerRollup(
+                team_id="BLUE",
+                number=9,
+                between_lines_last8=5,
+                between_lines_prev30=2,
+            )
+        },
+    )
+
+    decision = asyncio.run(LocalJevClient().decide(state, ["player_involvement"], "blue_9"))
+    assert decision.primary_frame == "PLAYER_IMPACT"
+    assert decision.player_id == "blue_9"
+    assert decision.team_id == "BLUE"
+
+
+def test_selected_player_can_fire_the_player_trigger() -> None:
+    engine = TriggerEngine()
+    sim = MatchSimulator(seed=1, scenario_id="balanced")
+    tick = sim.step(100)
+    fired = engine.evaluate(
+        tick,
+        {"focus_player_involvement_delta": 1.0},
+        {"focus_between": 4},
+    )
+    assert fired.fired is True
+    assert "player_involvement" in fired.reasons
 
 
 def test_trigger_requires_sample_size() -> None:
