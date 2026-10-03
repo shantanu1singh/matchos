@@ -101,6 +101,7 @@ class MatchSimulator:
     carry_target: Point | None = None
     carry_until_ms: int = 0
     pending_penalty_taker: str | None = None
+    pending_restart: tuple[str, TeamId, Point, str | None] | None = None
     next_action_ms: int = 400
     focus: dict[str, tuple[float, float]] = field(default_factory=dict)
     sequence: int = 0
@@ -573,6 +574,9 @@ class MatchSimulator:
         self.ball_vx *= 0.2
         self.ball_vy *= 0.2
         self.ball_z = 0.0
+        if self.pending_restart is not None:
+            self._apply_restart()
+            return
         if flight.kind == "SHOT":
             if self.carrier_id is None:
                 self._kickoff()
@@ -603,6 +607,7 @@ class MatchSimulator:
         self.carry_target = None
         self.carry_until_ms = 0
         self.pending_penalty_taker = None
+        self.pending_restart = None
         self.ball = centre
         self.ball_vx = 0.0
         self.ball_vy = 0.0
@@ -615,6 +620,32 @@ class MatchSimulator:
         # _arrival_done keeps open play paused until the taker has actually
         # reached the stationary ball.
         self.next_action_ms = self.clock_ms + 900
+
+    def _schedule_restart(self, kind: str, team: TeamId, spot: Point, taker_id: str | None = None) -> str | None:
+        """Queue a dead-ball restart to be applied when the current ball flight ends."""
+        taker = taker_id or self._nearest_actual(team, spot)
+        self.pending_restart = (kind, team, spot, taker)
+        if taker:
+            self.focus[taker] = (spot.x, spot.y)
+        return taker
+
+    def _apply_restart(self) -> None:
+        pending = self.pending_restart
+        self.pending_restart = None
+        if pending is None:
+            return
+        _kind, team, spot, taker = pending
+        self.possession = team
+        self.possession_id += 1
+        self.ball = Point(x=spot.x, y=spot.y)
+        self.ball_vx = 0.0
+        self.ball_vy = 0.0
+        self.ball_z = 0.0
+        self.carrier_id = taker or self._nearest_actual(team, spot)
+        self.focus.clear()
+        if self.carrier_id:
+            self.focus[self.carrier_id] = (spot.x, spot.y)
+        self.next_action_ms = self.clock_ms + 800
 
     def _turnover(self, spot: Point, previous: TeamId) -> None:
         self.possession = other(previous)
@@ -768,10 +799,13 @@ class MatchSimulator:
             # opponent and let the motion planner choose a reachable meeting point.
             runner_id = self._nearest_actual(other(carrier.team_id), desired)
         pace = 12.0 if not long_ball else 14.0
+        restart_event: MatchEvent | None = None
         if outcome == "OUT":
             desired = Point(x=clamp(end.x, 0.4, 104.6), y=0.4 if end.y < 34 else 67.6)
-            runner_id = self._nearest_actual(other(carrier.team_id), desired)
+            restart_team = other(carrier.team_id)
+            runner_id = self._nearest_actual(restart_team, desired)
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, False, pace, pull=False, max_s=3.2)
+            self._schedule_restart("THROW_IN", restart_team, flight.end, runner_id)
         else:
             flight = self._realize(runner_id, start, desired, "PASS", carrier.team_id, success, pace)
         shown_end = flight.end
@@ -794,6 +828,18 @@ class MatchSimulator:
             },
         )
         events = [event]
+        if outcome == "OUT":
+            restart_event = self._emit(
+                "THROW_IN",
+                other(carrier.team_id),
+                runner_id,
+                carrier.player_id,
+                "AWARDED",
+                shown_end,
+                shown_end,
+                {"related": event.id},
+            )
+            events.append(restart_event)
         caught = outcome == "INCOMPLETE" and self.rng.random() < 0.7 and challenge is not None
         if caught:
             events.append(
@@ -1132,6 +1178,8 @@ class MatchSimulator:
         p_goal = p_on_target * (0.18 if distance_m < 14 else 0.06)
         is_goal = on_target and self.rng.random() < p_goal
         outcome = "GOAL" if is_goal else ("SAVED" if on_target else "OFF_TARGET")
+        duration = int(max(480, min(1600, distance_m / 16 * 1000)))
+        shot_end = end if on_target else Point(x=goal_x, y=clamp(aim_y + 8, 1, 67))
         event = self._emit(
             "SHOT",
             carrier.team_id,
@@ -1139,22 +1187,58 @@ class MatchSimulator:
             None,
             outcome,
             start,
-            end,
+            shot_end,
             {"distance_m": round(distance_m, 1), "xg": round(p_goal, 2)},
         )
         events = [event]
-        duration = int(max(480, min(1600, distance_m / 16 * 1000)))
-        shot_end = end if on_target else Point(x=goal_x, y=clamp(aim_y + 8, 1, 67))
         self.flight = Flight(start, shot_end, self.clock_ms, duration, "SHOT", carrier.team_id, None, False)
         self.carrier_id = None
-        if not is_goal:
-            keeper = "blue_1" if carrier.team_id == "RED" else "red_1"
+
+        restart_events = self.scenario_id in {"balanced", "random"}
+        corner = restart_events and outcome == "SAVED" and abs(aim_y - 34.0) >= 2.4
+        goal_kick = restart_events and outcome == "OFF_TARGET"
+        keeper = "blue_1" if carrier.team_id == "RED" else "red_1"
+
+        if corner:
+            corner_y = 67.6 if aim_y >= 34.0 else 0.4
+            corner_spot = Point(x=104.6 if carrier.team_id == "RED" else 0.4, y=corner_y)
+            taker = self._nearest_actual(carrier.team_id, corner_spot)
+            self._schedule_restart("CORNER", carrier.team_id, corner_spot, taker)
+            events.append(
+                self._emit(
+                    "CORNER",
+                    carrier.team_id,
+                    taker,
+                    keeper,
+                    "AWARDED",
+                    corner_spot,
+                    corner_spot,
+                    {"reason": "DEFLECTION", "related": event.id},
+                )
+            )
+        elif goal_kick:
+            defending = other(carrier.team_id)
+            goal_kick_spot = Point(x=99.5 if carrier.team_id == "RED" else 5.5, y=34.0)
+            taker = keeper if keeper in self.players and self.players[keeper].on_pitch else self._nearest_actual(defending, goal_kick_spot)
+            self._schedule_restart("GOAL_KICK", defending, goal_kick_spot, taker)
+            events.append(
+                self._emit(
+                    "GOAL_KICK",
+                    defending,
+                    taker,
+                    carrier.player_id,
+                    "AWARDED",
+                    goal_kick_spot,
+                    goal_kick_spot,
+                    {"related": event.id},
+                )
+            )
+        elif not is_goal:
             if keeper in self.players and self.players[keeper].on_pitch:
-                # The keeper attacks an intercept point in front of the goal;
-                # the shot itself can still travel to/through the goal line.
                 keeper_x = 103.2 if carrier.team_id == "RED" else 1.8
                 keeper_y = clamp(shot_end.y, 27.5, 40.5)
                 self.focus[keeper] = (keeper_x, keeper_y)
+
         if is_goal:
             if carrier.team_id == "RED":
                 self.score_red += 1
@@ -1164,12 +1248,13 @@ class MatchSimulator:
             self.possession = other(carrier.team_id)
             self.possession_id += 1
             self.next_action_ms = self.clock_ms + duration + 700
-        else:
-            keeper = "blue_1" if carrier.team_id == "RED" else "red_1"
+        elif not (corner or goal_kick):
             self.possession = other(carrier.team_id)
             self.possession_id += 1
             self.carrier_id = keeper if keeper in self.players and self.players[keeper].on_pitch else self._nearest_actual(self.possession, end)
             self.next_action_ms = self.clock_ms + duration + 400
+        else:
+            self.next_action_ms = self.clock_ms + duration + 800
         return events
 
     def _scripts(self) -> list[MatchEvent]:
