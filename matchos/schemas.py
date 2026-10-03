@@ -80,6 +80,8 @@ class TrackingPlayer(BaseModel):
     x: float
     y: float
     speed_mps: float = 0.0
+    vx: float = 0.0
+    vy: float = 0.0
     on_pitch: bool = True
 
 
@@ -92,6 +94,7 @@ class BallAction(BaseModel):
     end: Point
     started_ms: int
     duration_ms: int
+    receiver_id: str | None = None
 
 
 class TrackingFrame(BaseModel):
@@ -100,6 +103,8 @@ class TrackingFrame(BaseModel):
     period: Literal[1, 2]
     ball: Point
     ball_z: float = 0.0
+    ball_vx: float = 0.0
+    ball_vy: float = 0.0
     players: list[TrackingPlayer]
     possession_team: TeamId
     score_red: int

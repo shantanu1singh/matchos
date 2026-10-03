@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
@@ -127,9 +128,18 @@ def test_workflow_stays_quiet_without_a_trigger() -> None:
 def test_scripted_stories_emit_real_events() -> None:
     comeback = MatchSimulator(seed=47129, scenario_id="late_comeback")
     comeback.collect_warmup()
+    scripted: list[str] = []
     while comeback.clock_ms < 89 * 60_000:
-        comeback.step(5_000)
-    assert (comeback.score_red, comeback.score_blue) == (2, 2)
+        tick = comeback.step(5_000)
+        scripted.extend(
+            event.player_id or ""
+            for event in tick.events
+            if event.type == "SHOT" and event.outcome == "GOAL" and event.qualifiers.get("scripted")
+        )
+    # Both scripted chances land. Open play can add a goal for either side.
+    assert scripted == ["red_9", "red_7"]
+    assert comeback.score_red >= 2
+    assert comeback.score_blue >= 2
 
     impact = MatchSimulator(seed=11, scenario_id="substitute_impact")
     impact.collect_warmup()
@@ -222,6 +232,58 @@ def test_workflow_airs_press_breakdown() -> None:
     assert enrichment is not None
     assert enrichment.overlay.source == "agent"
     assert prose_is_faithful(enrichment.enrichment_text, moment)
+
+
+def test_animation_follows_the_named_pass() -> None:
+    """The event names who plays the ball and who it is for. The dots catch up."""
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    sim.carrier_id = "red_8"
+    sim.possession = "RED"
+    sim.ball = Point(x=42.0, y=30.0)
+    red_8 = sim.players["red_8"]
+    red_8.x, red_8.y = 42.0, 30.0
+    # Park the rest of the side away from their shape. That must not change who the pass is for.
+    for player in sim.players.values():
+        if player.team_id == "RED" and player.player_id != "red_8":
+            player.x, player.y = 8.0, 8.0
+    events = sim._pass(red_8, long_ball=False)
+    assert events[0].type == "PASS"
+    assert events[0].player_id == "red_8"
+    flight = sim.flight
+    assert flight is not None
+    assert abs(flight.start.x - 42.0) < 0.2
+    assert abs(flight.start.y - 30.0) < 0.2
+    assert flight.receiver_id
+    assert sim.focus[flight.receiver_id] == (flight.end.x, flight.end.y)
+    receiver = flight.receiver_id
+    for _ in range(90):
+        if sim.flight is None and sim.carrier_id == receiver:
+            break
+        sim._advance(50)
+    assert sim.carrier_id == receiver
+    owner = sim.players[receiver]
+    assert math.hypot(owner.x - sim.ball.x, owner.y - sim.ball.y) < 4.0
+
+
+def test_movement_does_not_teleport() -> None:
+    sim = MatchSimulator(seed=3, scenario_id="balanced")
+    prev_ball = (sim.ball.x, sim.ball.y)
+    prev_players = {pid: (player.x, player.y) for pid, player in sim.players.items() if player.on_pitch}
+    worst_ball = 0.0
+    worst_player = 0.0
+    for _ in range(100):
+        sim._advance(50)
+        worst_ball = max(worst_ball, math.hypot(sim.ball.x - prev_ball[0], sim.ball.y - prev_ball[1]))
+        prev_ball = (sim.ball.x, sim.ball.y)
+        for pid, player in sim.players.items():
+            if not player.on_pitch or pid not in prev_players:
+                prev_players[pid] = (player.x, player.y)
+                continue
+            ox, oy = prev_players[pid]
+            worst_player = max(worst_player, math.hypot(player.x - ox, player.y - oy))
+            prev_players[pid] = (player.x, player.y)
+    assert worst_player < 0.9, worst_player
+    assert worst_ball < 1.5, worst_ball
 
 
 def _debug_state(engine: StateEngine) -> str:

@@ -15,6 +15,7 @@ const state = {
   selected: 0,
   pulse: null,
   provider: "",
+  raw: [],
 };
 
 const pitch = document.getElementById("pitch");
@@ -59,6 +60,9 @@ function onMessage(message) {
     state.pulse = message.state;
     const arrivals = message.events || [];
     if (arrivals.some((item) => item.type === "SHOT" && item.outcome === "GOAL")) flashGoal();
+    const shown = arrivals.filter((item) => RAW_TYPES.has(item.type));
+    if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
+    renderRaw();
     renderPulse();
     updateScore();
     fillPlayers();
@@ -101,7 +105,72 @@ function onMessage(message) {
   }
 }
 
+const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
+
+function shirt(id) {
+  if (!id || !String(id).includes("_")) return "";
+  const [team, number] = String(id).split("_");
+  return `${team.toUpperCase()} ${number}`;
+}
+
+function xy(point) {
+  if (!point || point.x == null || point.y == null) return "";
+  return `${Number(point.x).toFixed(1)},${Number(point.y).toFixed(1)}`;
+}
+
+function clockOf(ms) {
+  const minute = String(Math.floor(ms / 60000)).padStart(2, "0");
+  const second = String(Math.floor((ms / 1000) % 60)).padStart(2, "0");
+  return `${minute}:${second}`;
+}
+
+function eventLine(event) {
+  const who = shirt(event.player_id) || event.team_id || "";
+  const target = event.target_player_id ? ` → ${shirt(event.target_player_id)}` : "";
+  const outcome = event.outcome ? `  ${event.outcome}` : "";
+  const from = xy(event.location);
+  const to = xy(event.end_location);
+  const path = from && to ? `<span class="path">${escapeHtml(`${from} → ${to}`)}</span>` : "";
+  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}`)}${path}`;
+}
+
+function playerPoint(id) {
+  const players = state.frame && state.frame.players;
+  if (!players || !id) return null;
+  const player = players.find((item) => item.player_id === id);
+  return player ? { x: player.x, y: player.y } : null;
+}
+
+function metres(a, b) {
+  if (!a || !b || a.x == null || b.x == null) return null;
+  return Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
+}
+
+function renderRaw() {
+  const log = document.getElementById("raw-log");
+  const anim = document.getElementById("raw-anim");
+  if (!log || !anim) return;
+  const rows = state.raw.slice(-5).reverse();
+  log.innerHTML = rows.length
+    ? rows.map((event, index) => `<li class="${index === 0 ? "now" : ""}">${eventLine(event)}</li>`).join("")
+    : "<li>Waiting for the first event</li>";
+  const action = state.frame && state.frame.action;
+  if (!action) {
+    anim.textContent = "Animation  no ball flight";
+    return;
+  }
+  const runner = playerPoint(action.receiver_id);
+  const gap = metres(runner, action.end);
+  const meets = action.receiver_id
+    ? ` · meets ${shirt(action.receiver_id)}${runner ? ` now ${xy(runner)}` : ""}${gap == null ? "" : ` · ${gap.toFixed(1)}m from end`}`
+    : "";
+  const ball = state.frame.ball ? ` · ball now ${xy(state.frame.ball)}` : "";
+  anim.textContent = `Animation  ${action.kind}  ${xy(action.start)} → ${xy(action.end)}${meets}${ball}`;
+}
+
 function startMatch() {
+  state.raw = [];
+  renderRaw();
   send({
     type: "start",
     scenario: state.scenario,
@@ -288,27 +357,83 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function viewModel() {
+function hermite(p0, p1, v0, v1, t, dt) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (2 * t3 - 3 * t2 + 1) * p0 + (t3 - 2 * t2 + t) * v0 * dt + (-2 * t3 + 3 * t2) * p1 + (t3 - t2) * v1 * dt;
+}
+
+function sampleFrame() {
   const curr = state.frame;
   if (!curr) return null;
   const prev = state.prev;
   if (!prev || !state.frameAt || curr.timestamp_ms < prev.timestamp_ms) {
-    return { ball: curr.ball, ballZ: curr.ball_z || 0, players: curr.players, action: curr.action };
+    return { ball: curr.ball, ballZ: curr.ball_z || 0, players: curr.players, action: curr.action, step: 0 };
   }
-  const gap = Math.min(400, Math.max(80, state.frameAt - (state.prevAt || state.frameAt)));
+  const step = curr.timestamp_ms - prev.timestamp_ms;
+  const gap = Math.min(240, Math.max(60, state.frameAt - (state.prevAt || state.frameAt)));
   const t = Math.max(0, Math.min(1, (performance.now() - state.frameAt) / gap));
+  const simDt = step / 1000;
+  const curve = simDt > 0.04 && simDt < 0.28;
   const earlier = new Map(prev.players.map((player) => [player.player_id, player]));
   const players = curr.players.map((player) => {
     const from = earlier.get(player.player_id);
     if (!from) return player;
-    return { ...player, x: lerp(from.x, player.x, t), y: lerp(from.y, player.y, t) };
+    if (!curve) return { ...player, x: lerp(from.x, player.x, t), y: lerp(from.y, player.y, t) };
+    return {
+      ...player,
+      x: hermite(from.x, player.x, from.vx || 0, player.vx || 0, t, simDt),
+      y: hermite(from.y, player.y, from.vy || 0, player.vy || 0, t, simDt),
+    };
   });
   const sameFlight = curr.action && prev.action && curr.action.started_ms === prev.action.started_ms;
-  const ball = curr.action && !sameFlight
-    ? curr.ball
-    : { x: lerp(prev.ball.x, curr.ball.x, t), y: lerp(prev.ball.y, curr.ball.y, t) };
-  const ballZ = curr.action && !sameFlight ? (curr.ball_z || 0) : lerp(prev.ball_z || 0, curr.ball_z || 0, t);
-  return { ball, ballZ, players, action: curr.action || null };
+  const ball = sameFlight || !curve
+    ? { x: lerp(prev.ball.x, curr.ball.x, t), y: lerp(prev.ball.y, curr.ball.y, t) }
+    : {
+        x: hermite(prev.ball.x, curr.ball.x, prev.ball_vx || 0, curr.ball_vx || 0, t, simDt),
+        y: hermite(prev.ball.y, curr.ball.y, prev.ball_vy || 0, curr.ball_vy || 0, t, simDt),
+      };
+  const ballZ = lerp(prev.ball_z || 0, curr.ball_z || 0, t);
+  return { ball, ballZ, players, action: curr.action || null, step };
+}
+
+function glideView(sample) {
+  if (!sample) return null;
+  const now = performance.now();
+  const dt = Math.min(0.05, Math.max(0.001, (now - (state.paintAt || now)) / 1000));
+  state.paintAt = now;
+  const restart = sample.step < 0 || (state.smooth && state.frame && state.smoothClock > state.frame.timestamp_ms);
+  if (!state.smooth || restart || sample.step > 250) {
+    state.smooth = {
+      ball: { ...sample.ball },
+      ballZ: sample.ballZ,
+      players: new Map(sample.players.map((player) => [player.player_id, { x: player.x, y: player.y }])),
+    };
+    state.smoothClock = state.frame ? state.frame.timestamp_ms : 0;
+    return sample;
+  }
+  const gain = 1 - Math.exp(-14 * dt);
+  const ball = state.smooth.ball;
+  ball.x += (sample.ball.x - ball.x) * gain;
+  ball.y += (sample.ball.y - ball.y) * gain;
+  state.smooth.ballZ += (sample.ballZ - state.smooth.ballZ) * gain;
+  const players = sample.players.map((player) => {
+    let followed = state.smooth.players.get(player.player_id);
+    if (!followed) {
+      followed = { x: player.x, y: player.y };
+      state.smooth.players.set(player.player_id, followed);
+      return player;
+    }
+    followed.x += (player.x - followed.x) * gain;
+    followed.y += (player.y - followed.y) * gain;
+    return { ...player, x: followed.x, y: followed.y };
+  });
+  state.smoothClock = state.frame.timestamp_ms;
+  return { ball: { x: ball.x, y: ball.y }, ballZ: state.smooth.ballZ, players, action: sample.action };
+}
+
+function viewModel() {
+  return glideView(sampleFrame());
 }
 
 function draw() {
@@ -321,6 +446,7 @@ function draw() {
 
 function paint() {
   if (!watchVisible()) return;
+  resize();
   const rect = pitch.parentElement.getBoundingClientRect();
   const width = rect.width;
   const height = rect.height;

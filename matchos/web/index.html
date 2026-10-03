@@ -28,14 +28,21 @@
       </header>
 
       <section class="panel" id="panel-watch">
-        <div class="stage">
-          <div class="scorebug">
-            <div class="side red"><span>RED</span><b id="score-red">0</b></div>
-            <div class="clock" id="clock">00:00</div>
-            <div class="side blue"><b id="score-blue">0</b><span>BLUE</span></div>
+        <div class="pitch-col">
+          <div class="stage">
+            <div class="scorebug">
+              <div class="side red"><span>RED</span><b id="score-red">0</b></div>
+              <div class="clock" id="clock">00:00</div>
+              <div class="side blue"><b id="score-blue">0</b><span>BLUE</span></div>
+            </div>
+            <canvas id="pitch"></canvas>
+            <div class="goal-flash" id="goal-flash">Goal</div>
           </div>
-          <canvas id="pitch"></canvas>
-          <div class="goal-flash" id="goal-flash">Goal</div>
+          <div class="raw-event" id="raw-event">
+            <p class="kicker">Raw event</p>
+            <ol id="raw-log"></ol>
+            <p id="raw-anim"></p>
+          </div>
         </div>
         <aside class="rail">
           <div class="rail-head">
