@@ -43,6 +43,30 @@ def render_overlay(moment: VerifiedMoment, viewer: ViewerProfile, *, rich: bool,
     language = viewer.language
     persona = viewer.persona
     kicker, headline, body = _copy(moment, viewer, rich)
+    # Immediate comparison copy should reflect the persona even before the LLM replies.
+    if rich and persona in {"fan", "analyst"}:
+        if moment.frame in {"GOAL", "COMEBACK"}:
+            team = _side(facts["scoringTeam"], language)
+            if persona == "fan":
+                headline = f"{team} का गोल" if language == "hi" else f"A goal for {team}"
+            else:
+                headline = "स्कोर अपडेट" if language == "hi" else "Score update"
+                body += f" मिनट: {facts['minute']}'।" if language == "hi" else f" Minute: {facts['minute']}'."
+        elif moment.frame == "RED_CARD":
+            team = _side(facts["cardTeam"], language)
+            if persona == "fan":
+                headline = f"{team} अब दस से" if language == "hi" else f"{team} down to ten"
+                if language == "en":
+                    player = shirt(str(facts.get("player") or "")) or team
+                    body = f"{team} lose {player} to a red card and must finish with ten."
+            else:
+                headline = f"लाल कार्ड: {team}" if language == "hi" else f"Dismissal: {team}"
+        elif moment.frame == "SHOT_CHANCE":
+            team = _side(facts["team"], language)
+            if persona == "fan":
+                headline = f"{team} का मौका" if language == "hi" else f"Chance for {team}"
+            else:
+                headline = "शॉट का नतीजा" if language == "hi" else "Shot outcome"
     stats = _stats(moment, language)
     graphic = None
     if persona == "broadcaster":

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from matchos.copy import render_overlay
+from matchos.language_agent import personalize
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import ViewerProfile
 from matchos.session import MatchSession
@@ -41,7 +44,7 @@ async def index() -> FileResponse:
     return FileResponse(WEB / "index.html")
 
 
-async def _run(websocket: WebSocket, session: MatchSession, send) -> None:
+async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) -> None:
     await send(
         {
             "type": "status",
@@ -61,16 +64,20 @@ async def _run(websocket: WebSocket, session: MatchSession, send) -> None:
                 "type": "frame",
                 "frame": frame.model_dump(),
                 "events": [event.model_dump() for event in events],
-                "state": session.services.state_engine.state.model_dump(),
+                "state": session.live_state_engine.state.model_dump(),
             }
         )
         for result in outputs:
             if result.kind == "moment":
                 if session.take_air(result):
                     await send({"type": "moment", "result": result.model_dump()})
+                    if compare is not None:
+                        await compare(session)
                 else:
                     await send({"type": "trace", "result": result.model_dump()})
             elif result.kind == "enrichment" and session.active and session.active.moment and result.moment_id == session.active.moment.id:
+                session.active.overlay = result.overlay
+                session.active.enrichment_text = result.enrichment_text
                 await send({"type": "enrichment", "result": result.model_dump()})
             elif result.kind == "trace":
                 await send({"type": "trace", "result": result.model_dump()})
@@ -84,6 +91,9 @@ async def match_socket(websocket: WebSocket) -> None:
     await websocket.send_json({"type": "hello", "scenarios": _scenario_payload()})
     session: MatchSession | None = None
     task: asyncio.Task | None = None
+    reframe_task: asyncio.Task | None = None
+    comparison_task: asyncio.Task | None = None
+    comparison_viewers: list[ViewerProfile] = []
     lock = asyncio.Lock()
 
     async def send(payload: dict) -> None:
@@ -91,7 +101,7 @@ async def match_socket(websocket: WebSocket) -> None:
             await websocket.send_json(payload)
 
     async def stop() -> None:
-        nonlocal task
+        nonlocal task, reframe_task, comparison_task
         if session is not None:
             session.running = False
         if task is not None:
@@ -101,6 +111,71 @@ async def match_socket(websocket: WebSocket) -> None:
             except asyncio.CancelledError:
                 pass
             task = None
+        if reframe_task is not None:
+            reframe_task.cancel()
+            try:
+                await reframe_task
+            except asyncio.CancelledError:
+                pass
+            reframe_task = None
+        if comparison_task is not None:
+            comparison_task.cancel()
+            try:
+                await comparison_task
+            except asyncio.CancelledError:
+                pass
+            comparison_task = None
+        if session is not None:
+            await session.close()
+
+    async def enrich_viewer(current: MatchSession) -> None:
+        overlay = await current.reframe()
+        if overlay is not None and current.active is not None:
+            await send({"type": "reframe", "overlay": overlay.model_dump(),
+                        "moment": current.active.moment.model_dump() if current.active.moment else None})
+
+    async def compare(current: MatchSession) -> None:
+        nonlocal comparison_task
+        if comparison_task is not None:
+            comparison_task.cancel()
+            try:
+                await comparison_task
+            except asyncio.CancelledError:
+                pass
+            comparison_task = None
+        if not comparison_viewers or current.active is None or current.active.moment is None:
+            return
+        moment = current.active.moment
+        viewers = [viewer.model_copy(deep=True) for viewer in comparison_viewers]
+        overlays = [render_overlay(moment, viewer, rich=True, provider="template") for viewer in viewers]
+        for overlay in overlays:
+            overlay.source = "template"
+        await send({"type": "comparison", "moment": moment.model_dump(),
+                    "overlays": [overlay.model_dump() for overlay in overlays]})
+
+        async def enrich(index: int, viewer: ViewerProfile) -> None:
+            if current.services.agent is None:
+                return
+            try:
+                text = await personalize(current.services.agent, moment, viewer)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Persona enrichment failed (%s); retaining template", type(exc).__name__)
+                return
+            if current is not session or current.active is None or current.active.moment is not moment:
+                return
+            overlay = render_overlay(moment, viewer, rich=True, provider=current.services.language_provider)
+            overlay.body = text
+            if viewer.persona == "broadcaster":
+                overlay.headline = text
+            await send({"type": "comparison_enrichment", "momentId": moment.id,
+                        "index": index, "overlay": overlay.model_dump()})
+
+        async def enrich_all() -> None:
+            await asyncio.gather(*(enrich(index, viewer) for index, viewer in enumerate(viewers)))
+
+        comparison_task = asyncio.create_task(enrich_all())
 
     try:
         while True:
@@ -115,12 +190,36 @@ async def match_socket(websocket: WebSocket) -> None:
                     speed=int(message.get("speed") or 1),
                     viewer=viewer,
                 )
+                comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
                 await session.warmup()
                 session.running = True
-                task = asyncio.create_task(_run(websocket, session, send))
+                task = asyncio.create_task(_run(websocket, session, send, compare))
+            elif kind == "seek" and session is not None:
+                previous = session
+                was_running = previous.running
+                await stop()
+                await send({"type": "seeking"})
+                session = MatchSession(scenario_id=previous.scenario_id, seed=previous.seed,
+                                       speed=previous.speed, viewer=previous.viewer)
+                session.running = was_running
+                frame = await session.seek_to(int(message.get("timestamp_ms", 0)))
+                await send({"type": "seeked", "frame": frame.model_dump(),
+                            "state": session.live_state_engine.state.model_dump(),
+                            "running": was_running})
+                if was_running:
+                    task = asyncio.create_task(_run(websocket, session, send, compare))
+            elif kind == "views" and session is not None:
+                comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
+                await compare(session)
             elif kind == "viewer" and session is not None:
+                if reframe_task is not None:
+                    reframe_task.cancel()
+                    try:
+                        await reframe_task
+                    except asyncio.CancelledError:
+                        pass
                 session.viewer = ViewerProfile.model_validate(message.get("viewer") or {})
-                overlay = await session.reframe()
+                overlay = session.reframe_template()
                 if overlay is not None and session.active is not None:
                     await send(
                         {
@@ -129,11 +228,11 @@ async def match_socket(websocket: WebSocket) -> None:
                             "moment": session.active.moment.model_dump() if session.active.moment else None,
                         }
                     )
+                reframe_task = asyncio.create_task(enrich_viewer(session))
             elif kind == "control" and session is not None:
                 action = message.get("action")
                 if action == "pause":
-                    # Finish the tick already in flight. Cancelling it leaves the
-                    # workflow mid-run, and the next resume cannot start.
+                    # Finish the short feed tick; model work runs independently.
                     session.running = False
                     if task is not None:
                         try:
@@ -152,10 +251,12 @@ async def match_socket(websocket: WebSocket) -> None:
                     )
                 elif action == "resume" and task is None:
                     session.running = True
-                    task = asyncio.create_task(_run(websocket, session, send))
+                    task = asyncio.create_task(_run(websocket, session, send, compare))
             elif kind == "speed" and session is not None:
                 session.speed = int(message.get("speed") or session.speed)
     except WebSocketDisconnect:
+        pass
+    finally:
         await stop()
 
 

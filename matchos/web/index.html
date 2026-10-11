@@ -41,6 +41,18 @@
               <span id="event-flash-detail"></span>
             </div>
           </div>
+          <div class="timeline">
+            <label for="timeline">Match timeline <output id="timeline-time">50:00</output></label>
+            <input id="timeline" type="range" min="3000000" max="5700000" step="1000" value="3000000" aria-label="Seek match time" />
+            <div class="timeline-labels"><span id="timeline-start">50:00</span><span id="seek-status" role="status">Drag to rewind or jump ahead</span><span>95:00</span></div>
+          </div>
+          <section class="comparison">
+            <div class="comparison-head"><label><input id="compare-enabled" type="checkbox" checked /> Compare personas</label><span>Same moment · different perspectives</span></div>
+            <div class="comparison-grid" id="comparison-grid">
+              <div><label for="compare-a">View A</label><select id="compare-a" aria-label="View A persona"></select><article class="card empty" id="compare-card-a" aria-live="polite"></article></div>
+              <div><label for="compare-b">View B</label><select id="compare-b" aria-label="View B persona"></select><article class="card empty" id="compare-card-b" aria-live="polite"></article></div>
+            </div>
+          </section>
           <div class="raw-event" id="raw-event">
             <p class="kicker">Raw event</p>
             <ol id="raw-log"></ol>

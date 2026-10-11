@@ -1,14 +1,17 @@
 """Language agent: a renderer, not a source of football truth.
 
-Microsoft Agent Framework wraps either a Foundry GPT deployment or a local
+Microsoft Agent Framework wraps either a LiteLLM provider or a local
 fact-locked client in the same Agent. The enrichment executor discards any
 reply that introduces a number the verified moment does not contain.
 """
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 import json
-import os
+import logging
+import sys
 from collections.abc import AsyncIterable, Awaitable, Mapping, Sequence
 
 from agent_framework import (
@@ -18,11 +21,13 @@ from agent_framework import (
     ChatResponse,
     ChatResponseUpdate,
     Content,
+    FunctionInvocationLayer,
     Message,
     ResponseStream,
 )
 
 from matchos.copy import prose_is_faithful, render_overlay
+from matchos.llm_config import LLMConfig
 from matchos.schemas import VerifiedMoment, ViewerProfile
 
 INSTRUCTIONS = """You are the MatchOS language renderer.
@@ -39,8 +44,8 @@ Return only the sentence or headline, with no JSON and no preamble.
 """
 
 
-class LocalFactsChatClient(BaseChatClient):
-    """Offline renderer used when no Foundry project is configured."""
+class LocalFactsChatClient(FunctionInvocationLayer, BaseChatClient):
+    """Offline renderer used when no reasoning provider is configured."""
 
     def _inner_get_response(
         self,
@@ -62,10 +67,82 @@ class LocalFactsChatClient(BaseChatClient):
                     finish_reason="stop",
                 )
 
-            return ResponseStream(chunks())
+            return ResponseStream(chunks(), finalizer=ChatResponse.from_updates)
 
         async def once() -> ChatResponse:
             return ChatResponse(messages=[Message("assistant", [text])], model="matchos-fact-renderer")
+
+        return once()
+
+
+class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
+    """Adapt provider-neutral async completions to the existing AgentExecutor."""
+
+    def __init__(self, config: LLMConfig) -> None:
+        super().__init__()
+        self.config = config
+
+    def _inner_get_response(
+        self,
+        *,
+        messages: Sequence[Message],
+        stream: bool,
+        options: Mapping[str, object],
+        **kwargs: object,
+    ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
+        async def generate() -> str:
+            try:
+                litellm = await asyncio.to_thread(importlib.import_module, "litellm")
+
+                request_messages = []
+                instructions = options.get("instructions")
+                if instructions:
+                    request_messages.append({"role": "system", "content": str(instructions)})
+                request_messages.extend(
+                    {"role": str(message.role), "content": message.text or ""} for message in messages
+                )
+                response = await asyncio.wait_for(
+                    litellm.acompletion(
+                        messages=request_messages,
+                        **self.config.completion_options(),
+                    ),
+                    timeout=self.config.reasoning_timeout_s,
+                )
+                text = response.choices[0].message.content
+                if not isinstance(text, str) or not text.strip():
+                    raise ValueError("Empty reasoning response")
+                return text
+            except ModuleNotFoundError as exc:
+                logging.getLogger(__name__).warning(
+                    "Reasoning dependency %s is missing from %s; install the project requirements. "
+                    "Using the fact renderer",
+                    exc.name, sys.executable,
+                )
+                return render_from_messages(messages)
+            except Exception:
+                # Provider errors must not remove an already verified overlay.
+                # Do not log exception text: SDK errors may include credentials.
+                logging.getLogger(__name__).warning(
+                    "Reasoning model %s failed; using the fact renderer", self.config.reasoning_model
+                )
+                return render_from_messages(messages)
+
+        if stream:
+
+            async def chunks() -> AsyncIterable[ChatResponseUpdate]:
+                yield ChatResponseUpdate(
+                    contents=[Content.from_text(await generate())],
+                    role="assistant",
+                    author_name="matchos-language",
+                    finish_reason="stop",
+                )
+
+            return ResponseStream(chunks(), finalizer=ChatResponse.from_updates)
+
+        async def once() -> ChatResponse:
+            return ChatResponse(
+                messages=[Message("assistant", [await generate()])], model=self.config.reasoning_model
+            )
 
         return once()
 
@@ -112,20 +189,12 @@ def faithful_text(text: str, moment: VerifiedMoment, viewer: ViewerProfile) -> s
     return render_overlay(moment, viewer, rich=True, provider="template").body
 
 
-def build_language_executor() -> tuple[AgentExecutor, Agent, str]:
-    endpoint = os.getenv("FOUNDRY_PROJECT_ENDPOINT", "").strip()
-    model = os.getenv("FOUNDRY_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
+def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecutor, Agent, str]:
+    config = config or LLMConfig.from_env()
     provider = "local-renderer"
-    if endpoint:
-        from azure.identity import DefaultAzureCredential
-        from agent_framework.foundry import FoundryChatClient
-
-        client = FoundryChatClient(
-            project_endpoint=endpoint,
-            model=model,
-            credential=DefaultAzureCredential(),
-        )
-        provider = f"foundry:{model}"
+    if config.reasoning_enabled:
+        client = LiteLLMChatClient(config)
+        provider = f"litellm:{config.reasoning_model}"
     else:
         client = LocalFactsChatClient()
     agent = Agent(

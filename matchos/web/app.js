@@ -1,5 +1,10 @@
 const state = {
   ws: null,
+  revision: 0,
+  seeking: false,
+  scrubbing: false,
+  comparisonMoment: null,
+  comparisonOverlays: [],
   scenarios: [],
   scenario: "press_collapse",
   seed: 47129,
@@ -38,6 +43,32 @@ function send(payload) {
 }
 
 function onMessage(message) {
+  if (message.type === "seeking") { setLive("Seeking…"); return; }
+  if (message.type === "seeked") {
+    resetUiState();
+    state.seeking = false;
+    state.running = message.running;
+    document.getElementById("timeline").disabled = false;
+    document.getElementById("pause").disabled = false;
+    document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
+    document.getElementById("seek-status").textContent = "Drag to rewind or jump ahead";
+    setLive(state.running ? `Live · ${state.speed}×` : "Paused");
+    onMessage({ type: "frame", frame: message.frame, state: message.state, events: [] });
+    return;
+  }
+  if (state.seeking && ["frame", "moment", "enrichment", "reframe", "comparison", "comparison_enrichment", "trace"].includes(message.type)) return;
+  if (message.type === "comparison") {
+    state.comparisonMoment = message.moment;
+    state.comparisonOverlays = message.overlays;
+    renderComparison();
+    return;
+  }
+  if (message.type === "comparison_enrichment") {
+    if (state.comparisonMoment?.id !== message.momentId) return;
+    state.comparisonOverlays[message.index] = message.overlay;
+    renderComparison();
+    return;
+  }
   if (message.type === "hello") {
     state.scenarios = message.scenarios;
     renderScenarios();
@@ -69,6 +100,10 @@ function onMessage(message) {
     renderRaw();
     renderPulse();
     updateScore();
+    if (!state.scrubbing) {
+      document.getElementById("timeline").value = state.frame.timestamp_ms;
+      document.getElementById("timeline-time").textContent = clockOf(state.frame.timestamp_ms);
+    }
     fillPlayers();
     return;
   }
@@ -90,8 +125,9 @@ function onMessage(message) {
     const overlay = message.result.overlay;
     const moment = message.result.moment;
     const momentId = moment && moment.id;
+    const revision = state.revision;
     window.setTimeout(() => {
-      if (!state.moment || state.moment.id !== momentId) return;
+      if (state.revision !== revision || !state.moment || state.moment.id !== momentId) return;
       state.overlay = overlay;
       renderInsight(false);
     }, 700);
@@ -173,6 +209,10 @@ function renderRaw() {
 }
 
 function resetUiState() {
+  state.revision += 1;
+  state.comparisonMoment = null;
+  state.comparisonOverlays = [];
+  renderComparison();
   state.raw = [];
   state.frame = null;
   state.prev = null;
@@ -215,12 +255,22 @@ function resetUiState() {
 
 function startMatch() {
   resetUiState();
+  state.seeking = false;
+  state.scrubbing = false;
+  const start = (state.scenarios.find(item => item.id === state.scenario)?.startMinute || 0) * 60000;
+  document.getElementById("timeline").min = start;
+  document.getElementById("timeline").value = start;
+  document.getElementById("timeline").disabled = false;
+  document.getElementById("pause").disabled = false;
+  document.getElementById("timeline-start").textContent = clockOf(start);
+  document.getElementById("timeline-time").textContent = clockOf(start);
   send({
     type: "start",
     scenario: state.scenario,
     seed: Number(state.seed),
     speed: Number(state.speed),
     viewer: state.viewer,
+    views: comparisonViews(),
   });
 }
 
@@ -378,7 +428,7 @@ function updateViewerHelp() {
   const help = document.getElementById("viewer-help");
   const select = document.getElementById("player");
   const isPlayer = state.viewer.persona === "player";
-  select.disabled = !isPlayer;
+  select.disabled = !isPlayer && !comparisonViews().some(viewer => viewer.persona === "player");
   if (isPlayer) {
     help.textContent = `Following ${shirt(state.viewer.player_id)}. MatchOS prioritizes verified moments involving this player; major match moments can still break through.`;
   } else if (state.viewer.persona === "fan") {
@@ -700,8 +750,10 @@ document.querySelectorAll(".tab").forEach((tab) => {
 ["persona", "team", "language", "player"].forEach((id) => {
   document.getElementById(id).addEventListener("change", (event) => {
     const map = { persona: "persona", team: "team_id", language: "language", player: "player_id" };
+    state.revision += 1;
     state.viewer[map[id]] = event.target.value;
     send({ type: "viewer", viewer: state.viewer });
+    send({ type: "views", views: comparisonViews() });
     renderPulse();
     updateViewerHelp();
   });
@@ -740,6 +792,54 @@ document.getElementById("lab-form").addEventListener("submit", (event) => {
   document.querySelector(".tab[data-tab='watch']").click();
   startMatch();
 });
+
+function comparisonViews() {
+  if (!document.getElementById("compare-enabled").checked) return [];
+  return ["a", "b"].map(key => ({ ...state.viewer, persona: document.getElementById(`compare-${key}`).value }));
+}
+
+function renderComparison() {
+  ["a", "b"].forEach((key, index) => {
+    const card = document.getElementById(`compare-card-${key}`);
+    const overlay = state.comparisonOverlays[index];
+    card.classList.toggle("empty", !overlay);
+    card.innerHTML = overlay
+      ? `<p class="kicker">${escapeHtml(overlay.kicker)} · ${escapeHtml(overlay.source)}</p><h2>${escapeHtml(overlay.headline)}</h2><p class="body">${escapeHtml(overlay.body)}</p>`
+      : '<p class="kicker">Same verified facts</p><h2>Waiting for a moment</h2><p class="body">Both perspectives update together as the match unfolds.</p>';
+  });
+}
+
+["a", "b"].forEach((key, index) => {
+  const select = document.getElementById(`compare-${key}`);
+  select.innerHTML = document.getElementById("persona").innerHTML;
+  select.value = index === 0 ? "fan" : "analyst";
+});
+["compare-enabled", "compare-a", "compare-b"].forEach(id => {
+  document.getElementById(id).addEventListener("change", () => {
+    state.comparisonMoment = null;
+    state.comparisonOverlays = [];
+    renderComparison();
+    document.getElementById("comparison-grid").classList.toggle("hidden", !document.getElementById("compare-enabled").checked);
+    send({ type: "views", views: comparisonViews() });
+    updateViewerHelp();
+    requestAnimationFrame(resize);
+  });
+});
+const timeline = document.getElementById("timeline");
+timeline.addEventListener("input", () => {
+  state.scrubbing = true;
+  document.getElementById("timeline-time").textContent = clockOf(Number(timeline.value));
+});
+timeline.addEventListener("change", () => {
+  state.scrubbing = false;
+  state.seeking = true;
+  timeline.disabled = true;
+  document.getElementById("pause").disabled = true;
+  document.getElementById("seek-status").textContent = "Rebuilding match and statistics…";
+  setLive("Seeking…");
+  send({ type: "seek", timestamp_ms: Number(timeline.value) });
+});
+renderComparison();
 
 window.addEventListener("resize", resize);
 updateViewerHelp();

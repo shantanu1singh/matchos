@@ -272,3 +272,24 @@ select, input {
   .top { flex-wrap: wrap; }
   .app { height: auto; }
 }
+
+.timeline { padding: 10px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-2); }
+.timeline label { display: flex; justify-content: space-between; font-size: 13px; }
+.timeline output, .timeline-labels { font: 11px "IBM Plex Mono", monospace; color: var(--muted); }
+.timeline input { width: 100%; padding: 0; margin: 12px 0; accent-color: var(--gold); cursor: ew-resize; }
+.timeline-labels { display: flex; justify-content: space-between; gap: 8px; }
+.comparison { padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg-2); }
+.comparison-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.comparison-head span { color: var(--muted); font-size: 12px; }
+.comparison-head input { accent-color: var(--gold); }
+.comparison-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.comparison-grid.hidden { display: none; }
+.comparison-grid label { color: var(--muted); font-size: 12px; margin-right: 8px; }
+.comparison-grid select { padding: 5px 8px; margin-bottom: 8px; }
+.comparison-grid .card { min-height: 140px; padding: 12px; }
+.comparison-grid h2 { font-size: 20px; }
+.comparison-grid .body { font-size: 14px; }
+.stage { min-height: 300px; }
+.rail { overflow-y: auto; }
+.app { min-height: 850px; }
+@media (max-width: 600px) { .comparison-head { flex-wrap: wrap; } .comparison-grid { gap: 8px; } .comparison-grid h2 { font-size: 17px; } }

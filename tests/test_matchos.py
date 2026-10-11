@@ -200,7 +200,7 @@ def test_all_lab_scenarios_keep_tracking_coherent() -> None:
 
 
 def test_player_decision_uses_the_selected_player() -> None:
-    from matchos.jev_client import LocalJevClient
+    from matchos.decision_client import LocalDecisionClient
 
     state = MatchState(
         match_id="m-player-focus",
@@ -221,7 +221,7 @@ def test_player_decision_uses_the_selected_player() -> None:
         },
     )
 
-    decision = asyncio.run(LocalJevClient().decide(state, ["player_involvement"], "blue_9"))
+    decision = asyncio.run(LocalDecisionClient().decide(state, ["player_involvement"], "blue_9"))
     assert decision.primary_frame == "PLAYER_IMPACT"
     assert decision.player_id == "blue_9"
     assert decision.team_id == "BLUE"

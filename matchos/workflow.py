@@ -26,7 +26,7 @@ from agent_framework import (
 )
 
 from matchos.copy import render_overlay
-from matchos.jev_client import DecisionClient
+from matchos.decision_client import DecisionClient
 from matchos.language_agent import Agent, build_language_executor, faithful_text, prompt_payload
 from matchos.producer import Producer
 from matchos.schemas import (
@@ -145,9 +145,9 @@ class QuietExecutor(Executor):
         return None
 
 
-class JevDecisionExecutor(Executor):
+class DecisionExecutor(Executor):
     def __init__(self, services: MatchServices) -> None:
-        super().__init__(id="jev_decision")
+        super().__init__(id="decision")
         self.services = services
 
     @handler
@@ -296,7 +296,7 @@ def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, Mat
     state = StateUpdateExecutor(services)
     trigger = TriggerExecutor(services)
     quiet = QuietExecutor()
-    jev = JevDecisionExecutor(services)
+    decision = DecisionExecutor(services)
     verifier = VerificationExecutor(services)
     producer = ProducerExecutor(services)
     publish = PublishExecutor(services, language_executor)
@@ -306,8 +306,8 @@ def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, Mat
         WorkflowBuilder(start_executor=state)
         .add_edge(state, trigger)
         .add_edge(trigger, quiet, condition=_quiet)
-        .add_edge(trigger, jev, condition=_fired)
-        .add_edge(jev, verifier)
+        .add_edge(trigger, decision, condition=_fired)
+        .add_edge(decision, verifier)
         .add_edge(verifier, producer)
         .add_switch_case_edge_group(
             producer,
@@ -325,7 +325,7 @@ def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, Mat
 
 def new_services() -> MatchServices:
     state_engine = StateEngine()
-    from matchos.jev_client import build_decision_client
+    from matchos.decision_client import build_decision_client
 
     return MatchServices(
         state_engine=state_engine,
