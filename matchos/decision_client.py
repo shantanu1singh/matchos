@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -12,6 +13,7 @@ from urllib.parse import quote
 import httpx
 
 from matchos.llm_config import LLMConfig
+from matchos.model_logging import ModelCall
 from matchos.schemas import MatchState, MomentDecision, MomentFrame
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,8 @@ class GatewayDecisionClient:
     async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision:
         started = time.perf_counter()
         payload = self._payload(state, reasons, focus_player_id)
+        call = ModelCall("decision", self.provider, payload,
+                         secrets=(self.config.gateway_api_key, self.config.cloudflare_api_token))
         try:
             async with httpx.AsyncClient(timeout=self.config.decision_timeout_s) as client:
                 response = await client.post(
@@ -80,6 +84,7 @@ class GatewayDecisionClient:
                 )
                 response.raise_for_status()
                 body = response.json()
+            call.result(body)
             decision = self._parse_response(body, (time.perf_counter() - started) * 1000)
             if decision.primary_frame == "PLAYER_IMPACT":
                 decision.player_id = focus_player_id
@@ -90,7 +95,11 @@ class GatewayDecisionClient:
                 decision.player_id = "red_17"
                 decision.team_id = "RED"
             return decision
+        except asyncio.CancelledError:
+            call.result({"reason": "session or request cancelled"}, phase="CANCELLED")
+            raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            call.result({"error": _failure_detail(exc, self.config)}, phase="ERROR")
             logger.warning(
                 "Decision model %s failed (%s); using the local model",
                 self.model, _failure_detail(exc, self.config),
@@ -98,6 +107,7 @@ class GatewayDecisionClient:
             decision = await self._fallback.decide(state, reasons, focus_player_id)
             decision.provider = f"local-decision-fallback:{self.provider}"
             decision.latency_ms = round((time.perf_counter() - started) * 1000, 3)
+            call.result(decision.model_dump(mode="json"), phase="FALLBACK")
             return decision
 
 
@@ -274,6 +284,7 @@ class LocalDecisionClient:
 
     async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision:
         started = time.perf_counter()
+        call = ModelCall("decision", self.provider, _decision_state(state, reasons, focus_player_id))
         deltas = state.deltas
         scores = _frame_scores(state, reasons, focus_player_id)
         public = {key: value for key, value in scores.items() if not key.startswith("_")}
@@ -303,7 +314,7 @@ class LocalDecisionClient:
             team_id = "BLUE"
         latency = (time.perf_counter() - started) * 1000
         public_scores = {key: round(value, 3) for key, value in scores.items() if not key.startswith("_")}
-        return MomentDecision(
+        decision = MomentDecision(
             tactical_shift=round(tactical, 3),
             momentum_shift=round(momentum, 3),
             player_story=round(player, 3),
@@ -317,6 +328,8 @@ class LocalDecisionClient:
             provider=self.provider,
             latency_ms=round(latency, 3),
         )
+        call.result(decision.model_dump(mode="json"))
+        return decision
 
 
 def _frame_scores(state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> dict[str, float]:

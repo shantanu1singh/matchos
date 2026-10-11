@@ -118,10 +118,29 @@ seed's positions, score and rolling evidence, and clears insights from the old
 position. Long jumps briefly show a rebuilding state; historical model calls are
 skipped.
 
-Compare personas is enabled by default with Home fan and Analyst side by side.
-Choose either card's persona to compare other perspectives. Both cards use the
-same verified moment and the Team, Language and Focus player settings in the
-viewer controls. Templates appear immediately; each persona's language model
-response arrives independently in the background. Comparison adds one language
-request per selected view for each aired moment and does not duplicate decision
-model calls. Turn off Compare personas to disable those additional requests.
+Playback controls float over the pitch. While dragging the timeline, a preview
+above the thumb shows the time playback will resume from.
+
+The right sidebar starts with one viewer card. Use its ellipsis button to open
+Viewer, Team, Language and Focus player settings. Use the sidebar's plus button
+to add up to two comparison cards, each with independent settings in its own
+popover. Remove a comparison card from that popover. All cards use the same
+verified moment. Templates appear immediately; each persona's language model
+response arrives independently in the background. Each added card adds one
+language request per aired moment and does not duplicate decision model calls.
+
+Each viewer card shows live stat capsules for its persona and selected team or
+player. **Facts & evidence** opens the exact facts, source events and verification
+checks for its displayed moment; **Raw verified data** exposes the moment and
+rendered overlay as JSON. These facts stay tied to the update while live capsules
+continue tracking the match.
+
+Model diagnostics print to the terminal by default for both cloud and local
+providers. Correlated request IDs connect input payloads to responses, elapsed
+time, errors, cancellations and fallbacks. Credentials and authorization fields
+are redacted; logs include match facts and generated text.
+Diagnostics go to stdout and flush after each record. Startup prints `MODEL
+Logging enabled` with the active Python path; starting a match prints its decision
+and reasoning providers. If the startup banner is missing, stop the previous
+server and restart with `.venv/bin/python -u -m matchos`. Request logs appear
+when live match triggers fire; warmup and timeline replay skip historical calls.

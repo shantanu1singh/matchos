@@ -4,6 +4,7 @@ const state = {
   seeking: false,
   scrubbing: false,
   comparisonMoment: null,
+  comparisonViewers: [],
   comparisonOverlays: [],
   scenarios: [],
   scenario: "press_collapse",
@@ -16,6 +17,7 @@ const state = {
   moment: null,
   overlay: null,
   whyOpen: false,
+  expandedProof: new Set(),
   candidates: [],
   selected: 0,
   pulse: null,
@@ -105,6 +107,7 @@ function onMessage(message) {
       document.getElementById("timeline-time").textContent = clockOf(state.frame.timestamp_ms);
     }
     fillPlayers();
+    fillComparisonPlayers();
     return;
   }
   if (message.type === "moment") {
@@ -212,6 +215,9 @@ function resetUiState() {
   state.revision += 1;
   state.comparisonMoment = null;
   state.comparisonOverlays = [];
+  state.pulse = null;
+  state.expandedProof.clear();
+  document.getElementById("seek-preview").hidden = true;
   renderComparison();
   state.raw = [];
   state.frame = null;
@@ -241,8 +247,8 @@ function resetUiState() {
   document.getElementById("insight").className = "card empty";
   document.getElementById("insight").innerHTML = `
     <p class="kicker">Waiting for the match</p>
-    <h2>The feed is live. Insights appear only when they can be proved.</h2>
-    <p class="body">Same events drive the pitch and MatchOS.</p>`;
+    <h2>Waiting for an insight</h2>
+    <p class="body">Verified moments will appear as the match unfolds.</p>`;
   document.getElementById("why").classList.add("hidden");
   document.getElementById("why").innerHTML = "";
   document.getElementById("pulse").innerHTML = "";
@@ -312,35 +318,62 @@ function renderInsight(fresh) {
 }
 
 function renderWhy() {
-  const host = document.getElementById("why");
-  const moment = state.moment;
-  if (!moment) {
-    host.classList.add("hidden");
-    return;
-  }
-  host.classList.remove("hidden");
-  const stats = (state.overlay?.stats || []).map((stat) => `<div class="stat"><span>${escapeHtml(stat.label)}</span><span>${escapeHtml(stat.value)}</span></div>`).join("");
-  const evidence = state.whyOpen
-    ? `<ul class="evidence">${(moment.evidence_detail || []).map((item) => `<li>${String(item.minute).padStart(2, "0")}:${String(item.second).padStart(2, "0")} ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)}</li>`).join("")}</ul>`
-    : "";
-  host.innerHTML = `<button class="why-toggle" type="button">Why?</button>${state.whyOpen ? stats + evidence : ""}`;
-  host.querySelector("button").addEventListener("click", () => {
-    state.whyOpen = !state.whyOpen;
-    renderWhy();
-  });
+  renderProof(document.getElementById("why"), state.moment, state.overlay, "primary");
 }
 
-function renderPulse() {
-  const host = document.getElementById("pulse");
-  const pulse = state.pulse;
-  if (!pulse || state.viewer.persona === "casual") {
+function renderProof(host, moment, overlay, viewKey) {
+  if (!host) return;
+  if (!moment || !overlay || moment.id !== overlay.moment_id) {
+    host.classList.add("hidden");
     host.innerHTML = "";
     return;
   }
-  const blue = pulse.blue || {};
-  const bypass = blue.press_bypass_rate == null ? "—" : `${Math.round(blue.press_bypass_rate * 100)}%`;
-  const line = blue.defensive_line_m == null ? "—" : `${blue.defensive_line_m.toFixed(1)}m`;
-  host.innerHTML = `<span>Blue bypass ${bypass}</span><span>Blue line ${line}</span><span>Red possession ${Math.round((pulse.red.possession_last5 || 0) * 100)}%</span>`;
+  host.classList.remove("hidden");
+  const key = `${viewKey}:${moment.id}`;
+  const stats = (overlay.stats || []).map(stat => `<div class="stat"><span>${escapeHtml(stat.label)}</span><span>${escapeHtml(stat.value)}</span></div>`).join("");
+  const facts = Object.entries(moment.facts || {}).map(([name, value]) => `<div class="stat"><span>${escapeHtml(name)}</span><span>${escapeHtml(value)}</span></div>`).join("");
+  const evidence = (moment.evidence_detail || []).map(item => `<li><b>${clockOf(item.timestamp_ms)}</b> ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)}<small>${escapeHtml(item.id)}</small></li>`).join("");
+  const checks = (moment.checks || []).map(check => `<li><b>${check.passed ? "PASS" : "FAIL"}</b> ${escapeHtml(check.name)}: ${escapeHtml(check.detail)}</li>`).join("");
+  host.innerHTML = `<details class="proof" data-proof="${escapeHtml(key)}" ${state.expandedProof.has(key) ? "open" : ""}>
+    <summary>Facts &amp; evidence <span>${Math.round(moment.confidence * 100)}% confidence</span></summary>
+    <div class="proof-content"><p class="kicker">Verified at ${clockOf(moment.valid_from_ms)}</p>${stats}
+    <p class="proof-label">Facts behind this update</p>${facts || '<p class="evidence">No additional facts.</p>'}
+    <p class="proof-label">Source events</p><ul class="evidence">${evidence || '<li>No event details attached.</li>'}</ul>
+    ${checks ? `<p class="proof-label">Verification checks</p><ul class="evidence">${checks}</ul>` : ""}
+    <details class="raw-proof" data-proof="${escapeHtml(key + ":raw")}" ${state.expandedProof.has(key + ":raw") ? "open" : ""}><summary>Raw verified data</summary><pre>${escapeHtml(JSON.stringify({ moment, overlay }, null, 2))}</pre></details>
+    </div></details>`;
+  host.querySelectorAll("details").forEach(details => details.addEventListener("toggle", () => {
+    if (!details.isConnected) return;
+    if (details.open) state.expandedProof.add(details.dataset.proof);
+    else state.expandedProof.delete(details.dataset.proof);
+  }));
+}
+
+function statCapsules(viewer) {
+  const pulse = state.pulse;
+  if (!pulse) return [];
+  const teamName = viewer.team_id === "BLUE" ? "Blue" : "Red";
+  const team = pulse[viewer.team_id.toLowerCase()] || {};
+  const share = `${Math.round((team.possession_last5 ?? 0) * 100)}%`;
+  if (viewer.persona === "casual") return [`Score ${pulse.score_red}–${pulse.score_blue}`, `${pulse.possession_team === "BLUE" ? "Blue" : "Red"} on the ball`];
+  if (viewer.persona === "fan") return [`${teamName} possession ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`, `Shots (5′) ${team.shots_last5 ?? 0}`];
+  if (viewer.persona === "player") {
+    const player = pulse.players?.[viewer.player_id];
+    if (!player) return [`${shirt(viewer.player_id)} · no tracking data`];
+    return [`${shirt(viewer.player_id)} between lines (8′) ${player.between_lines_last8}`, `Progressive ${player.progressive_actions}`, `Box entries ${player.box_entries}`];
+  }
+  if (viewer.persona === "broadcaster") return [`Score ${pulse.score_red}–${pulse.score_blue}`, `${teamName} possession ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`];
+  const bypass = team.press_bypass_rate == null ? "—" : `${Math.round(team.press_bypass_rate * 100)}%`;
+  const line = team.defensive_line_m == null ? "—" : `${team.defensive_line_m.toFixed(1)}m`;
+  return [`${teamName} bypass ${bypass}`, `${teamName} line ${line}`, `Possession (5′) ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`];
+}
+
+function renderPulse() {
+  const render = (host, viewer) => {
+    if (host) host.innerHTML = statCapsules(viewer).map(text => `<span>${escapeHtml(text)}</span>`).join("");
+  };
+  render(document.getElementById("pulse"), state.viewer);
+  state.comparisonViewers.forEach((viewer, index) => render(document.getElementById(`view-pulse-${index}`), viewer));
 }
 
 function pushCandidate(result) {
@@ -428,7 +461,7 @@ function updateViewerHelp() {
   const help = document.getElementById("viewer-help");
   const select = document.getElementById("player");
   const isPlayer = state.viewer.persona === "player";
-  select.disabled = !isPlayer && !comparisonViews().some(viewer => viewer.persona === "player");
+  select.disabled = !isPlayer;
   if (isPlayer) {
     help.textContent = `Following ${shirt(state.viewer.player_id)}. MatchOS prioritizes verified moments involving this player; major match moments can still break through.`;
   } else if (state.viewer.persona === "fan") {
@@ -753,7 +786,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     state.revision += 1;
     state.viewer[map[id]] = event.target.value;
     send({ type: "viewer", viewer: state.viewer });
-    send({ type: "views", views: comparisonViews() });
+    updatePrimaryLabel();
     renderPulse();
     updateViewerHelp();
   });
@@ -793,45 +826,135 @@ document.getElementById("lab-form").addEventListener("submit", (event) => {
   startMatch();
 });
 
+const personaNames = { casual: "Casual", analyst: "Analyst", fan: "Home fan", player: "Player", broadcaster: "Broadcaster" };
+
 function comparisonViews() {
-  if (!document.getElementById("compare-enabled").checked) return [];
-  return ["a", "b"].map(key => ({ ...state.viewer, persona: document.getElementById(`compare-${key}`).value }));
+  return state.comparisonViewers.map(viewer => ({ ...viewer }));
+}
+
+function matchesView(overlay, viewer) {
+  return overlay && viewer && overlay.persona === viewer.persona && overlay.language === viewer.language && overlay.team_id === viewer.team_id && (viewer.persona !== "player" || overlay.player_id === viewer.player_id);
+}
+
+function updatePrimaryLabel() {
+  document.getElementById("primary-label").textContent = `${personaNames[state.viewer.persona]} · ${state.viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${state.viewer.language === "hi" ? "Hindi" : "English"}`;
 }
 
 function renderComparison() {
-  ["a", "b"].forEach((key, index) => {
-    const card = document.getElementById(`compare-card-${key}`);
+  state.comparisonViewers.forEach((viewer, index) => {
+    const card = document.getElementById(`compare-card-${index}`);
+    if (!card) return;
     const overlay = state.comparisonOverlays[index];
-    card.classList.toggle("empty", !overlay);
-    card.innerHTML = overlay
+    const valid = matchesView(overlay, viewer);
+    card.classList.toggle("empty", !valid);
+    card.innerHTML = valid
       ? `<p class="kicker">${escapeHtml(overlay.kicker)} · ${escapeHtml(overlay.source)}</p><h2>${escapeHtml(overlay.headline)}</h2><p class="body">${escapeHtml(overlay.body)}</p>`
-      : '<p class="kicker">Same verified facts</p><h2>Waiting for a moment</h2><p class="body">Both perspectives update together as the match unfolds.</p>';
+      : '<p class="kicker">Same verified facts</p><h2>Waiting for a moment</h2><p class="body">This perspective updates with the live insight.</p>';
+    renderProof(document.getElementById(`view-proof-${index}`), valid ? state.comparisonMoment : null, overlay, `view-${index}`);
+  });
+  renderPulse();
+}
+
+function positionPopover(popover) {
+  popover.addEventListener("beforetoggle", event => {
+    if (event.newState !== "open") return;
+    const button = document.querySelector(`[popovertarget="${popover.id}"][class*="settings-button"]`);
+    const rect = button.getBoundingClientRect();
+    const width = Math.min(336, window.innerWidth - 24);
+    popover.style.left = `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`;
+    popover.style.top = `${Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 390))}px`;
   });
 }
 
-["a", "b"].forEach((key, index) => {
-  const select = document.getElementById(`compare-${key}`);
-  select.innerHTML = document.getElementById("persona").innerHTML;
-  select.value = index === 0 ? "fan" : "analyst";
-});
-["compare-enabled", "compare-a", "compare-b"].forEach(id => {
-  document.getElementById(id).addEventListener("change", () => {
-    state.comparisonMoment = null;
-    state.comparisonOverlays = [];
-    renderComparison();
-    document.getElementById("comparison-grid").classList.toggle("hidden", !document.getElementById("compare-enabled").checked);
-    send({ type: "views", views: comparisonViews() });
-    updateViewerHelp();
-    requestAnimationFrame(resize);
+function playerOptions(viewer) {
+  const players = state.frame?.players || [];
+  if (!players.length) return `<option value="${escapeHtml(viewer.player_id)}">${escapeHtml(shirt(viewer.player_id))}</option>`;
+  return players.map(player => `<option value="${escapeHtml(player.player_id)}" ${player.player_id === viewer.player_id ? "selected" : ""}>${escapeHtml(`${player.team_id} ${player.number} · ${player.role}`)}</option>`).join("");
+}
+
+function fillComparisonPlayers() {
+  state.comparisonViewers.forEach((viewer, index) => {
+    const select = document.getElementById(`view-player-${index}`);
+    if (!select) return;
+    const key = state.frame?.players.map(player => player.player_id).join("|") || "";
+    if (select.dataset.roster === key) return;
+    select.dataset.roster = key;
+    if (state.frame && !state.frame.players.some(player => player.player_id === viewer.player_id)) {
+      viewer.player_id = state.frame.players[0]?.player_id || viewer.player_id;
+      send({ type: "views", views: comparisonViews() });
+    }
+    select.innerHTML = playerOptions(viewer);
   });
+}
+
+function buildComparisonCards() {
+  const host = document.getElementById("extra-views");
+  host.innerHTML = state.comparisonViewers.map((viewer, index) => `
+    <section class="persona-panel">
+      <div class="card-top"><span class="view-label" id="view-label-${index}">${escapeHtml(personaNames[viewer.persona])} · ${viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${viewer.language === "hi" ? "Hindi" : "English"}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
+      <article class="card empty" id="compare-card-${index}" aria-live="polite"></article>
+      <div class="why hidden" id="view-proof-${index}"></div>
+      <div class="pulse" id="view-pulse-${index}" aria-label="Live match statistics"></div>
+      <div id="view-settings-${index}" class="settings-popover" popover>
+        <div class="popover-head"><strong>View ${index + 2} settings</strong><button class="icon-button" type="button" popovertarget="view-settings-${index}" popovertargetaction="hide" aria-label="Close view ${index + 2} settings">×</button></div>
+        <div class="controls">
+          <label>Viewer<select data-field="persona" aria-label="View ${index + 2} persona">${Object.entries(personaNames).map(([value, label]) => `<option value="${value}" ${value === viewer.persona ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+          <label>Team<select data-field="team_id" aria-label="View ${index + 2} team"><option value="BLUE" ${viewer.team_id === "BLUE" ? "selected" : ""}>Blue</option><option value="RED" ${viewer.team_id === "RED" ? "selected" : ""}>Red</option></select></label>
+          <label>Language<select data-field="language" aria-label="View ${index + 2} language"><option value="en" ${viewer.language === "en" ? "selected" : ""}>English</option><option value="hi" ${viewer.language === "hi" ? "selected" : ""}>Hindi</option></select></label>
+          <label>Focus player<select id="view-player-${index}" data-field="player_id" aria-label="View ${index + 2} focus player" ${viewer.persona === "player" ? "" : "disabled"}>${playerOptions(viewer)}</select></label>
+          <p class="viewer-help">Same verified moment. Choose an independent persona, team and language.</p>
+          <button class="remove-view" type="button" data-remove="${index}">Remove this view</button>
+        </div>
+      </div>
+    </section>`).join("");
+  host.querySelectorAll(".settings-popover").forEach(positionPopover);
+  host.querySelectorAll("section").forEach((panel, index) => {
+    panel.querySelectorAll("select").forEach(select => select.addEventListener("change", () => {
+      const viewer = state.comparisonViewers[index];
+      viewer[select.dataset.field] = select.value;
+      panel.querySelector(".view-label").textContent = `${personaNames[viewer.persona]} · ${viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
+      panel.querySelector('[data-field="player_id"]').disabled = viewer.persona !== "player";
+      state.comparisonOverlays = [];
+      renderComparison();
+      send({ type: "views", views: comparisonViews() });
+    }));
+    panel.querySelector(".remove-view").addEventListener("click", () => {
+      state.comparisonViewers.splice(index, 1);
+      state.comparisonOverlays = [];
+      buildComparisonCards();
+      send({ type: "views", views: comparisonViews() });
+    });
+  });
+  const add = document.getElementById("add-view");
+  add.disabled = state.comparisonViewers.length >= 2;
+  add.title = add.disabled ? "Three views are open" : "Add persona view";
+  renderComparison();
+}
+
+document.getElementById("add-view").addEventListener("click", () => {
+  if (state.comparisonViewers.length >= 2) return;
+  state.comparisonViewers.push({ ...state.viewer, persona: state.comparisonViewers.length ? "fan" : "analyst" });
+  state.comparisonOverlays = [];
+  buildComparisonCards();
+  send({ type: "views", views: comparisonViews() });
 });
+positionPopover(document.getElementById("primary-settings"));
+updatePrimaryLabel();
+
 const timeline = document.getElementById("timeline");
 timeline.addEventListener("input", () => {
   state.scrubbing = true;
-  document.getElementById("timeline-time").textContent = clockOf(Number(timeline.value));
+  const time = clockOf(Number(timeline.value));
+  document.getElementById("timeline-time").textContent = time;
+  const preview = document.getElementById("seek-preview");
+  preview.hidden = false;
+  preview.textContent = `Seek to ${time}`;
+  const ratio = (Number(timeline.value) - Number(timeline.min)) / (Number(timeline.max) - Number(timeline.min));
+  preview.style.left = `clamp(64px, ${ratio * 100}%, calc(100% - 64px))`;
 });
 timeline.addEventListener("change", () => {
   state.scrubbing = false;
+  document.getElementById("seek-preview").hidden = true;
   state.seeking = true;
   timeline.disabled = true;
   document.getElementById("pause").disabled = true;

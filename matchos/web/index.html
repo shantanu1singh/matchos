@@ -36,6 +36,11 @@
               <div class="side blue"><b id="score-blue">0</b><span>BLUE</span></div>
             </div>
             <canvas id="pitch"></canvas>
+            <div class="transport pitch-transport" aria-label="Match playback">
+              <button id="pause" type="button">Pause</button>
+              <button id="reset" type="button" class="secondary">Reset</button>
+              <div class="speeds" id="speeds"></div>
+            </div>
             <div class="event-flash" id="event-flash" aria-live="polite">
               <strong id="event-flash-title"></strong>
               <span id="event-flash-detail"></span>
@@ -43,34 +48,30 @@
           </div>
           <div class="timeline">
             <label for="timeline">Match timeline <output id="timeline-time">50:00</output></label>
+            <div class="timeline-track"><output id="seek-preview" class="seek-preview" hidden></output>
             <input id="timeline" type="range" min="3000000" max="5700000" step="1000" value="3000000" aria-label="Seek match time" />
+            </div>
             <div class="timeline-labels"><span id="timeline-start">50:00</span><span id="seek-status" role="status">Drag to rewind or jump ahead</span><span>95:00</span></div>
           </div>
-          <section class="comparison">
-            <div class="comparison-head"><label><input id="compare-enabled" type="checkbox" checked /> Compare personas</label><span>Same moment · different perspectives</span></div>
-            <div class="comparison-grid" id="comparison-grid">
-              <div><label for="compare-a">View A</label><select id="compare-a" aria-label="View A persona"></select><article class="card empty" id="compare-card-a" aria-live="polite"></article></div>
-              <div><label for="compare-b">View B</label><select id="compare-b" aria-label="View B persona"></select><article class="card empty" id="compare-card-b" aria-live="polite"></article></div>
-            </div>
-          </section>
           <div class="raw-event" id="raw-event">
             <p class="kicker">Raw event</p>
             <ol id="raw-log"></ol>
             <p id="raw-anim"></p>
           </div>
         </div>
-        <aside class="rail">
-          <div class="rail-head">
-            <span>Live insight</span>
-            <b id="latency">—</b>
-          </div>
+        <aside class="rail" aria-label="Viewer perspectives">
+          <div class="rail-head"><span>Viewer perspectives</span><button id="add-view" class="icon-button" type="button" aria-label="Add persona view" title="Add persona view">+</button></div>
+          <section class="persona-panel" id="primary-panel">
+            <div class="card-top"><div><span class="view-label" id="primary-label">Casual · Blue</span><b id="latency">—</b></div><button class="icon-button settings-button" type="button" popovertarget="primary-settings" aria-label="Primary view settings" title="Viewer settings">⋯</button></div>
           <article class="card empty" id="insight">
             <p class="kicker">Waiting for the match</p>
-            <h2>The feed is live. Insights appear only when they can be proved.</h2>
-            <p class="body">Same events drive the pitch and MatchOS.</p>
+            <h2>Waiting for an insight</h2>
+            <p class="body">Verified moments will appear as the match unfolds.</p>
           </article>
           <div class="why hidden" id="why"></div>
           <div class="pulse" id="pulse"></div>
+          <div id="primary-settings" class="settings-popover" popover>
+            <div class="popover-head"><strong>Viewer settings</strong><button type="button" class="icon-button" popovertarget="primary-settings" popovertargetaction="hide" aria-label="Close primary settings">×</button></div>
           <div class="controls">
             <label>Viewer
               <select id="persona">
@@ -97,12 +98,12 @@
               <select id="player"></select>
             </label>
             <p class="viewer-help" id="viewer-help"></p>
-            <div class="transport">
-              <button id="pause" type="button">Pause</button>
-              <button id="reset" type="button" class="secondary">Reset</button>
-              <div class="speeds" id="speeds"></div>
-            </div>
+
           </div>
+          </div>
+          </section>
+          <div id="extra-views"></div>
+          <p class="comparison-note">Add a view to compare the same verified moment across personas.</p>
         </aside>
       </section>
 

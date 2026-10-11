@@ -3,22 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from matchos.copy import render_overlay
 from matchos.language_agent import personalize
+from matchos.model_logging import configure_model_logging, logger as model_logger
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import ViewerProfile
 from matchos.session import MatchSession
 
 WEB = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="MatchOS")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_model_logging()
+    model_logger.info("Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable)
+    yield
+
+
+app = FastAPI(title="MatchOS", lifespan=lifespan)
 
 
 def _scenario_payload() -> list[dict[str, object]]:
@@ -40,8 +51,14 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(WEB / "index.html")
+async def index() -> HTMLResponse:
+    # Keep markup and assets in sync across edits, including previously cached CSS.
+    html = (WEB / "index.html").read_text()
+    for filename in ("styles.css", "app.js"):
+        version = hashlib.sha256((WEB / filename).read_bytes()).hexdigest()[:12]
+        path = f"/assets/{filename}"
+        html = html.replace(path, f"{path}?v={version}")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) -> None:
@@ -190,6 +207,9 @@ async def match_socket(websocket: WebSocket) -> None:
                     speed=int(message.get("speed") or 1),
                     viewer=viewer,
                 )
+                configure_model_logging()
+                model_logger.info("SESSION scenario=%s decision=%s reasoning=%s; waiting for live match triggers (warmup and seeking skip historical calls)",
+                                  session.scenario_id, session.services.decisions.provider, session.services.language_provider)
                 comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
                 await session.warmup()
                 session.running = True

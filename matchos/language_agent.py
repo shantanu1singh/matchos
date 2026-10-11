@@ -28,6 +28,7 @@ from agent_framework import (
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.llm_config import LLMConfig
+from matchos.model_logging import ModelCall
 from matchos.schemas import VerifiedMoment, ViewerProfile
 
 INSTRUCTIONS = """You are the MatchOS language renderer.
@@ -55,7 +56,9 @@ class LocalFactsChatClient(FunctionInvocationLayer, BaseChatClient):
         options: Mapping[str, object],
         **kwargs: object,
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
+        call = ModelCall("reasoning", "local-renderer", [{"role": str(message.role), "content": message.text} for message in messages])
         text = render_from_messages(messages)
+        call.result({"text": text})
 
         if stream:
 
@@ -91,6 +94,10 @@ class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
         **kwargs: object,
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
         async def generate() -> str:
+            call = ModelCall("reasoning", self.config.reasoning_model,
+                             {"instructions": options.get("instructions"),
+                              "messages": [{"role": str(message.role), "content": message.text} for message in messages]},
+                             secrets=(self.config.reasoning_api_key, self.config.gateway_api_key, self.config.cloudflare_api_token))
             try:
                 litellm = await asyncio.to_thread(importlib.import_module, "litellm")
 
@@ -108,24 +115,32 @@ class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
                     ),
                     timeout=self.config.reasoning_timeout_s,
                 )
+                call.result(response.model_dump() if hasattr(response, "model_dump") else {"text": response.choices[0].message.content})
                 text = response.choices[0].message.content
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("Empty reasoning response")
                 return text
+            except asyncio.CancelledError:
+                call.result({"reason": "session or request cancelled"}, phase="CANCELLED")
+                raise
             except ModuleNotFoundError as exc:
                 logging.getLogger(__name__).warning(
                     "Reasoning dependency %s is missing from %s; install the project requirements. "
                     "Using the fact renderer",
                     exc.name, sys.executable,
                 )
-                return render_from_messages(messages)
-            except Exception:
+                text = render_from_messages(messages)
+                call.result({"error": "missing dependency", "dependency": exc.name, "text": text}, phase="FALLBACK")
+                return text
+            except Exception as exc:
                 # Provider errors must not remove an already verified overlay.
                 # Do not log exception text: SDK errors may include credentials.
                 logging.getLogger(__name__).warning(
                     "Reasoning model %s failed; using the fact renderer", self.config.reasoning_model
                 )
-                return render_from_messages(messages)
+                text = render_from_messages(messages)
+                call.result({"error": type(exc).__name__, "text": text}, phase="FALLBACK")
+                return text
 
         if stream:
 
@@ -210,4 +225,7 @@ def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecu
 async def personalize(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     response = await agent.run(prompt_payload(moment, viewer))
     text = response.text or ""
-    return faithful_text(text, moment, viewer)
+    checked = faithful_text(text, moment, viewer)
+    if checked != " ".join(text.strip().split()):
+        logging.getLogger("matchos.model_calls").info("Reasoning text rejected by fact check for moment %s persona=%s; template=%s", moment.id, viewer.persona, checked)
+    return checked
