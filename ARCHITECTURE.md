@@ -1,0 +1,201 @@
+# MatchOS architecture
+
+MatchOS turns a synthetic football feed into verified, personalized match updates. A Python backend simulates the match and computes evidence; Microsoft Agent Framework orchestrates the intelligence workflow. A browser renders the pitch, viewer perspectives, production history, and execution telemetry.
+
+This document describes the current implementation. Setup and environment variables are documented in [README.md](README.md).
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph Browser["Browser: HTML, CSS, JavaScript"]
+        UI["Watch, Producer, Lab, Telemetry"]
+        Pitch["Canvas pitch and playback controls"]
+        Views["Persona cards and facts / evidence"]
+        UI --- Pitch
+        UI --- Views
+    end
+
+    subgraph Backend["Python backend: FastAPI / Uvicorn"]
+        Server["HTTP assets and WebSocket /ws"]
+        Session["MatchSession: playback and background tasks"]
+        Simulator["Seeded match simulator"]
+        LiveState["Live rolling state"]
+        Workflow["Agent Framework workflow"]
+        Traces["Session telemetry and model logs"]
+        Server --> Session
+        Simulator -->|"Events and tracking ticks"| Session
+        Session --> LiveState
+        Session --> Workflow
+        Workflow --> Traces
+    end
+
+    subgraph Providers["Configured model providers"]
+        Decision["Cloudflare Clef Flash or Vercel Laya"]
+        Language["LiteLLM: Vertex Gemini or another provider"]
+    end
+
+    UI <-->|"Commands, frames, updates, traces"| Server
+    LiveState -->|"Live statistics"| Server
+    Workflow -->|"Verified templates and enrichment"| Server
+    Workflow <-->|"Typed decision"| Decision
+    Workflow <-->|"Persona prose"| Language
+```
+
+The backend is one process. Each WebSocket connection owns an independent match session, simulator, state, workflow, and trace history. There is no database or shared session store; disconnecting closes the session and cancels its tasks.
+
+## Components
+
+| Component | Responsibility | Source |
+|---|---|---|
+| Browser UI | Draws the pitch, controls playback, compares personas, and exposes facts and telemetry. | [`matchos/web/`](matchos/web/) |
+| FastAPI server | Serves versioned assets and handles WebSocket commands and update delivery. | [`server.py`](matchos/server.py) |
+| Match session | Owns playback, warmup, replay, pending evidence, background model work, and result delivery. | [`session.py`](matchos/session.py) |
+| Simulator | Generates repeatable player movement, ball movement, events, and tracking from a scenario and seed. | [`simulator.py`](matchos/simulator.py), [`scenarios.py`](matchos/scenarios.py) |
+| State engine | Computes rolling possession, press bypass, defensive lines, entries, player involvement, and changes over time. | [`state_engine.py`](matchos/state_engine.py), [`pitch.py`](matchos/pitch.py) |
+| Trigger engine | Uses deterministic changes, sample thresholds, major events, and cooldowns to decide when model evaluation is worthwhile. | [`trigger_engine.py`](matchos/trigger_engine.py) |
+| Decision client | Produces a validated frame selection and probability contract through Cloudflare, Vercel, or local logic. | [`decision_client.py`](matchos/decision_client.py) |
+| Verifier | Tests proposed claims against deterministic state and events; constructs facts, checks, and evidence references. | [`verifier.py`](matchos/verifier.py) |
+| Producer | Applies importance, novelty, persona relevance, and cadence rules to air, suppress, or reject a moment. | [`producer.py`](matchos/producer.py) |
+| Copy renderer | Builds immediate, fact-based overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
+| Language agent | Uses an Agent Framework agent with a LiteLLM chat client to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
+| Workflow | Connects code executors, decision calls, publishing, and language enrichment into a conditional graph. | [`workflow.py`](matchos/workflow.py) |
+| Configuration | Selects providers, models, credentials, and timeouts; loads `.env` and `.env.local`. | [`llm_config.py`](matchos/llm_config.py) |
+| Observability | Captures session traces and correlated, redacted terminal model logs; optionally exports OpenTelemetry. | [`telemetry.py`](matchos/telemetry.py), [`model_logging.py`](matchos/model_logging.py) |
+
+## Intelligence workflow
+
+```mermaid
+flowchart TD
+    Tick["Pending feed batch: latest frame + accumulated evidence"]
+    State["state_update: deterministic rolling state"]
+    Trigger{"trigger: meaningful change?"}
+    Quiet["quiet: stop without a model call"]
+    Decision["decision: typed frame probabilities"]
+    Verify["verifier: evidence checks and VerifiedMoment"]
+    Produce{"producer: AIR, SUPPRESS, or REJECT"}
+    Trace["trace: retain candidate and rejection / suppression reason"]
+    Publish["publish: immediate template overlay"]
+    Agent["language_agent: persona-specific prose"]
+    Guard["enrichment: numeric and fraction guard"]
+    Enriched["Yield enriched overlay or verified fallback copy"]
+
+    Tick --> State --> Trigger
+    Trigger -->|"No"| Quiet
+    Trigger -->|"Yes"| Decision --> Verify --> Produce
+    Produce -->|"SUPPRESS / REJECT"| Trace
+    Produce -->|"AIR"| Publish --> Agent --> Guard --> Enriched
+```
+
+The workflow mixes deterministic code executors with two model roles:
+
+- **Decision:** chooses a candidate story using aggregate state and trigger reasons. Remote output must satisfy the typed contract; invalid output, timeouts, or missing credentials fall back to local decisions.
+- **Language:** renders an already verified moment for the requested persona and language. It does not compute the canonical match metrics. Provider failures use local copy; unsupported numbers or fractional possession/bypass values cause the enrichment guard to use a verified template.
+
+The producer runs after verification. A separate session gate also prevents an ordinary update from replacing a graphic already on air too soon; major moments can interrupt. A workflow `AIR` result therefore does not guarantee final display.
+
+### Data and units
+
+[`schemas.py`](matchos/schemas.py) defines the contracts connecting the layers:
+
+| Contract | Meaning |
+|---|---|
+| `Tick` | A current `TrackingFrame`, discrete `MatchEvent` records, and tracking samples. |
+| `MatchState` | Deterministic team/player aggregates, score, time, and metric deltas. |
+| `MomentDecision` | Candidate frame, probability scores, selected team/player, provider, and latency. |
+| `VerifiedMoment` | Canonical facts, evidence IDs/details, verification checks, confidence, and validity interval. |
+| `ProducerDecision` | Air/suppress/reject action, reason, priority, and eligible personas. |
+| `Overlay` / `PipelineResult` | Presentation content and workflow outputs delivered to the UI. |
+
+Tracking coordinates and distances use metres on a 105 × 68 metre pitch. Canonical possession and bypass rates remain fractions for arithmetic and verification. The **language prompt** converts those facts to percentage strings, such as `0.639` → `64%`; counts remain counts and distances remain metres. The decision adapter continues to receive its numeric state contract. Facts & evidence exposes the original verified data, while live stat capsules follow current state.
+
+## Async execution and persona comparisons
+
+```mermaid
+sequenceDiagram
+    participant UI as Browser
+    participant Feed as Live feed task
+    participant Session as MatchSession
+    participant Worker as Workflow worker
+    participant Model as Model provider
+
+    UI->>Feed: Start or resume
+    par Live playback
+        loop Approximately every 100 ms while playing
+            Feed->>Session: Advance simulator and update live state
+            Session->>Session: Merge evidence into one pending batch
+            Session-->>Feed: Frame, events, available workflow outputs
+            Feed-->>UI: Frame, statistics, eligible overlays / enrichment
+        end
+    and Background intelligence
+        Session->>Worker: Start worker if idle
+        Worker->>Worker: Update workflow state and evaluate trigger
+        opt Trigger fires
+            Worker->>Model: Typed decision request
+            Note over Feed,Model: Frames continue while the model is awaited
+            Model-->>Worker: Decision or local fallback
+            Worker->>Worker: Verify, produce, render template
+            Worker-->>Session: Queue fast overlay for feed delivery
+            Worker->>Model: Render verified facts for primary persona
+            Model-->>Worker: Prose or fallback
+            Worker-->>Session: Queue guarded enrichment for feed delivery
+        end
+    end
+```
+
+The live feed and workflow use **separate state engines**. The live engine advances with every feed tick; the workflow engine advances only inside its serial worker. This keeps UI statistics current while a decision call is in progress.
+
+There is one pending batch, rather than one queued model job per frame. It accumulates events and samples while retaining the newest frame, with evidence bounded to the rolling history window. A bounded output queue hands workflow results back to the feed. Expired moments and outputs for an old primary viewer profile are discarded.
+
+The sidebar supports one primary card and up to two comparison cards. Comparisons reuse the **same aired verified moment** and do not repeat decision or verification calls. Each comparison gets an immediate template and an independent background language request. Changing the primary viewer similarly reframes the current moment. Session, moment, and profile checks prevent outdated comparison responses from replacing newer content.
+
+### Pause, reset, and timeline seeking
+
+Pause stops the feed task without waiting for outstanding model calls. Resume restarts delivery. Reset creates a new session. Seeking cancels the old session's work and reconstructs a new simulator with the same scenario and seed, replaying physics and evidence to the target time in a background thread. It rebuilds both state engines, clears old insights and telemetry, and preserves speed and pause state. Warmup and replay make no historical model calls.
+
+## Model providers and configuration
+
+**Microsoft Agent Framework** owns workflow orchestration and the language agent. **LiteLLM** supplies interchangeable reasoning completions. Decision providers use native asynchronous HTTP adapters because their typed decision endpoints have provider-specific schemas.
+
+| Role | Configured default | Alternatives / fallback |
+|---|---|---|
+| Decision | Cloudflare Workers AI `@cf/cloudflare/clef-flash` | Vercel AI Gateway `convaiinnovations/laya-free` / `convaiinnovations/laya`; local typed decision logic. |
+| Language rendering | LiteLLM `vertex_ai/gemini-3.8-flash` | Another configured LiteLLM provider/model; local fact renderer. |
+
+These are repository configuration defaults, rather than a guarantee of provider model availability. Provider configuration changes require a restart. Environment precedence is shell environment → `.env.local` → `.env` → defaults. Vertex uses Google credentials such as Application Default Credentials; decision adapters use the selected provider's credentials.
+
+## Telemetry and diagnostics
+
+```mermaid
+flowchart LR
+    Runs["Workflow, viewer reframe, and comparison runs"]
+    Stages["Deterministic stage inputs / outputs"]
+    Calls["ModelCall: request, response, error, fallback"]
+    Context["ContextVar correlation and credential redaction"]
+    Store["Session memory: bounded trace history"]
+    Terminal["Immediate stdout model logs"]
+    Inspector["Telemetry tab: timing waterfall and JSON"]
+    Download["Export captured JSON"]
+    OTel["Optional Agent Framework OpenTelemetry"]
+    Collector["Configured OTLP collector"]
+
+    Runs --> Context
+    Stages --> Context
+    Calls --> Context
+    Calls --> Terminal
+    Context --> Store
+    Store -->|"WebSocket polling while visible"| Inspector --> Download
+    Runs --> OTel
+    Stages -->|"Stage events and timings"| OTel
+    OTel --> Collector
+```
+
+Local traces retain the last **40 meaningful completed runs**, active meaningful runs, and the latest quiet evaluation. Requests and responses share a call ID and appear together, including intermediate error/fallback events. State-stage input includes the current frame, events, sample count, and latest 30 samples; its output contains the aggregated deterministic state. Trace capture does not await network export. The inspector requests incremental snapshots once per second while visible.
+
+Terminal logs include model inputs, outputs, elapsed time, cancellation, and fallback outcomes, with credentials redacted. The local inspector uses the same sanitizer. Trace history is session-local and in memory; JSON export preserves the captured history before a reset or disconnect.
+
+Optional external collection uses Agent Framework's native OpenTelemetry instrumentation, MatchOS parent spans, and stage events. Enable it with the `telemetry` dependency extra and `MATCHOS_OTEL_ENABLED=1`, then configure an OTLP endpoint. External sensitive prompt/response capture is disabled; full sanitized payloads are available in the local inspector. See [execution telemetry setup](README.md#execution-telemetry).
+
+## Current boundaries
+
+The simulator is the implemented feed source. A future real-match adapter should produce the same event/tracking contracts and consistent units. The current app has no persistent match storage, distributed job queue, authentication layer, or cross-process session recovery. Numeric faithfulness checks constrain generated copy but do not prove every qualitative claim; deterministic verification establishes the canonical facts.

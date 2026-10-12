@@ -60,9 +60,14 @@ class ModelCall:
         self.started = time.perf_counter()
         self.secrets = secrets
         self.model = model
+        from matchos.telemetry import record
+        record(f"{kind}: {model}", payload, None, status="request", call_id=self.id, secrets=secrets)
         logger.info("[%s] %s REQUEST %s %s", self.id, kind, model, _safe_json(payload, secrets))
 
     def result(self, payload: object, *, phase: str = "RESPONSE") -> None:
         configure_model_logging()
+        from matchos.telemetry import record
+        record(self.model, None, payload, (time.perf_counter() - self.started) * 1000,
+               status=phase.lower(), call_id=self.id, secrets=self.secrets)
         logger.info("[%s] %s %s %.0fms %s", self.id, phase, self.model,
                     (time.perf_counter() - self.started) * 1000, _safe_json(payload, self.secrets))

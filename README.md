@@ -4,6 +4,8 @@ Real-time personalized match intelligence on a synthetic football match.
 
 Twenty-two players and a ball move on a 2D tactical board. The same feed — provider-neutral events plus 105×68m tracking — is what MatchOS reads. When the match changes in a way that can be proved, a verified moment is overlaid and then rephrased for whoever is watching.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the system design, Mermaid diagrams, and component responsibilities.
+
 ## Critical path
 
 Microsoft Agent Framework runs one workflow per live tick:
@@ -107,6 +109,7 @@ Events follow a Kloppy-style ontology in StatsBomb-like JSON. Tracking is contin
 
 ```bash
 .venv/bin/python -m pytest
+node --test tests/telemetry-ui.test.cjs
 ```
 
 ### Playback and persona comparisons
@@ -144,3 +147,27 @@ Logging enabled` with the active Python path; starting a match prints its decisi
 and reasoning providers. If the startup banner is missing, stop the previous
 server and restart with `.venv/bin/python -u -m matchos`. Request logs appear
 when live match triggers fire; warmup and timeline replay skip historical calls.
+
+### Execution telemetry
+
+Open **Telemetry** in the app to inspect live workflow runs, deterministic state and triggers, decision calls, verifier checks, producer decisions, and language calls. Expand a stage for input/output JSON; provider requests and responses share a call ID. Selected runs stay pinned while the match advances, and open panels retain their scroll positions through live updates. Fallbacks, rejected language, cancellation, and timing appear in the same run. Comparison personas and viewer changes have separate runs. **Export JSON** downloads the captured session history.
+
+Capture stays in memory for each WebSocket session: the last 40 meaningful runs and the latest quiet trigger evaluation. Resetting or seeking starts a fresh trace session. The inspector polls once per second only while visible; capturing does not wait for model or telemetry network calls. State inputs include the frame, events, total sample count, and latest 30 tracking samples; the full aggregated deterministic state is the output. Credentials are redacted using the same sanitizer as terminal model logs.
+
+Possession and press bypass facts sent to the language model use percentages (`64%`), while canonical evidence retains fractions (`0.639`). Distances keep metres and counts stay integers. A fractional possession/bypass response is rejected in favor of verified template copy.
+
+For persistent external telemetry, install the optional OpenTelemetry dependencies:
+
+```sh
+.venv/bin/python -m pip install -e '.[telemetry]'
+```
+
+Then configure your collector in `.env.local` and restart:
+
+```dotenv
+MATCHOS_OTEL_ENABLED=1
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+```
+
+This uses Microsoft Agent Framework's native OpenTelemetry instrumentation with MatchOS parent spans and stage events. Sensitive prompt/response capture is disabled for external export; full sanitized inputs/outputs remain in the local inspector. External collection is optional; the built-in view needs no account or extra package.

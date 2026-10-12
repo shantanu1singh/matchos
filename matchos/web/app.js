@@ -45,6 +45,7 @@ function send(payload) {
 }
 
 function onMessage(message) {
+  if (message.type === "telemetry") { receiveTelemetry(message); return; }
   if (message.type === "seeking") { setLive("Seeking…"); return; }
   if (message.type === "seeked") {
     resetUiState();
@@ -777,6 +778,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.querySelectorAll(".panel").forEach((panel) => panel.classList.add("hidden"));
     document.getElementById(`panel-${tab.dataset.tab}`).classList.remove("hidden");
     if (tab.dataset.tab === "watch") requestAnimationFrame(resize);
+    if (tab.dataset.tab === "telemetry") pollTelemetry();
   });
 });
 
@@ -969,3 +971,126 @@ updateViewerHelp();
 resize();
 requestAnimationFrame(draw);
 connect();
+
+
+const telemetryState = { session: null, revision: 0, runs: [], selected: null, pinnedRun: null };
+function pollTelemetry() {
+  if (!document.getElementById("panel-telemetry").classList.contains("hidden")) {
+    send({ type: "telemetry", session: telemetryState.session, since: telemetryState.revision });
+  }
+}
+setInterval(pollTelemetry, 1000);
+function receiveTelemetry(message) {
+  if (message.session !== telemetryState.session) {
+    telemetryState.runs = []; telemetryState.selected = null; telemetryState.pinnedRun = null;
+  }
+  if (message.retainedIds) telemetryState.runs = telemetryState.runs.filter(run => message.retainedIds.includes(run.id));
+  telemetryState.session = message.session;
+  telemetryState.revision = message.revision;
+  for (const run of message.runs) {
+    const index = telemetryState.runs.findIndex(item => item.id === run.id);
+    if (index >= 0) telemetryState.runs[index] = run;
+    else telemetryState.runs.push(run);
+    if (telemetryState.pinnedRun?.id === run.id) telemetryState.pinnedRun = run;
+  }
+  const quietRuns = telemetryState.runs.filter(run => run.quiet).sort((a,b) => b.revision-a.revision);
+  telemetryState.runs = telemetryState.runs.filter(run => !run.quiet).slice(-40).concat(quietRuns.slice(0,1));
+  const runs = [...telemetryState.runs];
+  // Retain one explicitly selected snapshot even after server history rotates.
+  if (telemetryState.pinnedRun && !runs.some(run => run.id === telemetryState.pinnedRun.id)) runs.push(telemetryState.pinnedRun);
+  runs.sort((a,b) => b.revision-a.revision);
+  if (!telemetryState.selected || !runs.some(run => run.id === telemetryState.selected)) telemetryState.selected = runs.find(run => !run.quiet)?.id || runs[0]?.id;
+  const list = document.getElementById("telemetry-runs");
+  const scrollTop = list.scrollTop;
+  const existing = new Map([...list.children].map(button => [button.dataset.run, button]));
+  runs.forEach((run, index) => {
+    let button = existing.get(run.id);
+    if (!button) {
+      button = document.createElement("button"); button.dataset.run = run.id;
+      button.append(document.createElement("strong"), document.createElement("span"));
+      button.addEventListener("click", () => {
+        telemetryState.selected = run.id;
+        telemetryState.pinnedRun = telemetryState.runs.find(item => item.id === run.id) || telemetryState.pinnedRun;
+        receiveTelemetry({ session: telemetryState.session, revision: telemetryState.revision, runs: [] });
+      });
+    }
+    button.className = `trace-run ${run.id === telemetryState.selected ? "selected" : ""}`;
+    button.setAttribute("aria-pressed", String(run.id === telemetryState.selected));
+    const label = `${clockOf(run.metadata.timestamp_ms || 0)} · ${run.quiet ? "Quiet tick" : run.label}`;
+    const detail = `${run.metadata.viewer?.persona || ""} · ${run.status} · ${run.duration_ms ?? "…"} ms`;
+    if (button.children[0].textContent !== label) button.children[0].textContent = label;
+    if (button.children[1].textContent !== detail) button.children[1].textContent = detail;
+    if (list.children[index] !== button) list.insertBefore(button, list.children[index] || null);
+    existing.delete(run.id);
+  });
+  for (const button of existing.values()) button.remove();
+  list.scrollTop = scrollTop;
+  renderTelemetryRun(runs.find(run => run.id === telemetryState.selected));
+  document.getElementById("export-trace").disabled = !runs.length;
+}
+function readableTrace(value) {
+  if (Array.isArray(value)) return value.map(readableTrace);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key,item]) => {
+    if (key === "content" && typeof item === "string" && /^[{[]/.test(item)) {
+      try { return [key, readableTrace(JSON.parse(item))]; } catch (_) { /* Keep non-JSON text. */ }
+    }
+    return [key, readableTrace(item)];
+  }));
+  return value;
+}
+function renderTelemetryRun(run) {
+  const host = document.getElementById("telemetry-detail");
+  if (!run) {
+    if (host.dataset.run) host.replaceChildren();
+    host.dataset.run = ""; host.dataset.revision = "";
+    host.textContent = "Waiting for execution traces…"; return;
+  }
+  const sameRun = host.dataset.run === run.id;
+  if (sameRun && host.dataset.revision === String(run.revision)) return;
+  if (!sameRun) {
+    host.replaceChildren(document.createElement("h2"), document.createElement("p"));
+    host.children[1].className = "note";
+  }
+  host.dataset.run = run.id; host.dataset.revision = String(run.revision);
+  host.children[0].textContent = run.label;
+  host.children[1].textContent = `${run.id} · ${run.status}${run.error ? " · " + run.error : ""}${run.quiet ? " · Trigger did not fire; no model call" : ""}`;
+  const max = Math.max(run.duration_ms || 0, ...run.steps.map(step => step.offset_ms + step.duration_ms), 1);
+  const existing = new Map([...host.querySelectorAll("details")].map(item => [item.dataset.step, item]));
+  run.steps.forEach((step, index) => {
+    const key = `${run.id}:${step.call_id || index}`;
+    let details = existing.get(key);
+    if (!details) {
+      details = document.createElement("details"); details.className = "trace-step"; details.dataset.step = key;
+      const summary = document.createElement("summary");
+      const track = document.createElement("div"); track.className = "trace-track"; track.append(document.createElement("span"));
+      const content = document.createElement("div"); content.className = "trace-payload";
+      for (const label of ["Input", "Output"]) {
+        const section = document.createElement("div"), title = document.createElement("p"), pre = document.createElement("pre");
+        title.textContent = label; pre.tabIndex = 0; pre.setAttribute("aria-label", `${step.name} ${label.toLowerCase()}`);
+        section.append(title, pre); content.append(section);
+      }
+      details.append(summary, track, content); host.append(details);
+    }
+    details.querySelector("summary").textContent = `${step.name} · ${step.status} · ${step.duration_ms} ms${step.call_id ? " · call " + step.call_id : ""}`;
+    const bar = details.querySelector(".trace-track span");
+    bar.style.marginLeft = `${Math.max(0,step.offset_ms)/max*100}%`; bar.style.width = `${Math.max(0.6,step.duration_ms/max*100)}%`;
+    const payloads = [step.input, step.responses?.length > 1 ? step.responses : step.output];
+    details.querySelectorAll("pre").forEach((pre, column) => {
+      const value = payloads[column];
+      const text = value === null ? "—" : JSON.stringify(readableTrace(value),null,2);
+      if (pre.textContent !== text) {
+        const top = pre.scrollTop, left = pre.scrollLeft;
+        pre.textContent = text;
+        pre.scrollTop = top; pre.scrollLeft = left;
+      }
+    });
+    existing.delete(key);
+  });
+  for (const details of existing.values()) details.remove();
+}
+
+document.getElementById("export-trace").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(telemetryState, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob), link = document.createElement("a");
+  link.href = url; link.download = "matchos-traces.json"; link.click(); URL.revokeObjectURL(url);
+});

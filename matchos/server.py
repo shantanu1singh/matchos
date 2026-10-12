@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from matchos.copy import render_overlay
 from matchos.language_agent import personalize
+from matchos.llm_config import load_env_files
 from matchos.model_logging import configure_model_logging, logger as model_logger
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import ViewerProfile
@@ -24,6 +26,10 @@ WEB = Path(__file__).resolve().parent / "web"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    load_env_files()
+    if os.getenv("MATCHOS_OTEL_ENABLED", "").lower() in {"1", "true"}:
+        from agent_framework.observability import configure_otel_providers
+        configure_otel_providers(service_name="matchos", enable_sensitive_data=False)
     configure_model_logging()
     model_logger.info("Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable)
     yield
@@ -174,7 +180,8 @@ async def match_socket(websocket: WebSocket) -> None:
             if current.services.agent is None:
                 return
             try:
-                text = await personalize(current.services.agent, moment, viewer)
+                with current.telemetry.capture("Persona comparison", {"moment": moment.id, "timestamp_ms": moment.valid_from_ms, "viewer": viewer.model_dump()}):
+                    text = await personalize(current.services.agent, moment, viewer)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -214,6 +221,9 @@ async def match_socket(websocket: WebSocket) -> None:
                 await session.warmup()
                 session.running = True
                 task = asyncio.create_task(_run(websocket, session, send, compare))
+            elif kind == "telemetry" and session is not None:
+                since = int(message.get("since", 0)) if message.get("session") == session.telemetry.id else 0
+                await send({"type": "telemetry", **session.telemetry.snapshot(since)})
             elif kind == "seek" and session is not None:
                 previous = session
                 was_running = previous.running

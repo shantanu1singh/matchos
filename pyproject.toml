@@ -15,5 +15,8 @@ dependencies = [
   "pydantic>=2",
 ]
 
+[project.optional-dependencies]
+telemetry = ["opentelemetry-sdk>=1.39,<2", "opentelemetry-exporter-otlp-proto-http>=1.39,<2"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

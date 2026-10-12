@@ -25,6 +25,7 @@ from agent_framework import (
     handler,
 )
 
+from matchos.telemetry import record, quiet
 from matchos.copy import render_overlay
 from matchos.decision_client import DecisionClient
 from matchos.language_agent import Agent, build_language_executor, faithful_text, prompt_payload
@@ -102,6 +103,7 @@ class StateUpdateExecutor(Executor):
         state = self.services.state_engine.ingest(incoming.tick)
         packet = PipelinePacket(tick=incoming.tick, viewer=incoming.viewer, state=state)
         packet.timings_ms["state"] = (time.perf_counter() - started) * 1000
+        record("state", {"frame": incoming.tick.frame.model_dump(), "events": [e.model_dump() for e in incoming.tick.events], "sampleCount": len(incoming.tick.samples), "latestSamples": [sample.model_dump() for sample in incoming.tick.samples[-30:]]}, state, packet.timings_ms["state"])
         await ctx.send_message(packet)
 
 
@@ -133,6 +135,7 @@ class TriggerExecutor(Executor):
         }
         packet.trigger = self.services.trigger_engine.evaluate(packet.tick, state.deltas, samples)
         packet.timings_ms["trigger"] = (time.perf_counter() - started) * 1000
+        record("trigger", {"deltas": state.deltas, "samples": samples}, packet.trigger, packet.timings_ms["trigger"])
         await ctx.send_message(packet)
 
 
@@ -142,6 +145,7 @@ class QuietExecutor(Executor):
 
     @handler
     async def stop(self, packet: PipelinePacket, ctx: WorkflowContext[Never, PipelineResult]) -> None:
+        quiet()
         return None
 
 
@@ -156,6 +160,7 @@ class DecisionExecutor(Executor):
         reasons = packet.trigger.reasons if packet.trigger else []
         packet.decision = await self.services.decisions.decide(state, reasons, packet.viewer.player_id)
         packet.timings_ms["decision"] = packet.decision.latency_ms
+        record("decision contract", {"reasons": reasons, "player": packet.viewer.player_id}, packet.decision, packet.decision.latency_ms)
         await ctx.send_message(packet)
 
 
@@ -174,6 +179,7 @@ class VerificationExecutor(Executor):
             packet.verification.moment.checks = list(packet.verification.checks)
             packet.moment = packet.verification.moment
         packet.timings_ms["verifier"] = (time.perf_counter() - started) * 1000
+        record("verifier", packet.decision, packet.verification, packet.timings_ms["verifier"])
         await ctx.send_message(packet)
 
 
@@ -195,6 +201,7 @@ class ProducerExecutor(Executor):
             verification.reason if verification else None,
         )
         packet.timings_ms["producer"] = (time.perf_counter() - started) * 1000
+        record("producer", packet.verification, packet.producer, packet.timings_ms["producer"])
         await ctx.send_message(packet)
 
 
@@ -211,6 +218,7 @@ class PublishExecutor(Executor):
         overlay = render_overlay(packet.moment, packet.viewer, rich=False, provider="template")
         packet.overlay = overlay
         packet.timings_ms["template"] = (time.perf_counter() - started) * 1000
+        record("template", packet.moment, overlay, packet.timings_ms["template"])
         self.services.pending_moment = packet.moment
         self.services.pending_viewer = packet.viewer
         await ctx.yield_output(self._result(packet, "moment"))

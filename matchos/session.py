@@ -7,6 +7,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+from matchos.telemetry import Telemetry
 from matchos.language_agent import personalize
 from matchos.schemas import MatchEvent, Overlay, PipelineResult, Tick, TrackingFrame, ViewerProfile
 from matchos.simulator import MatchSimulator
@@ -29,6 +30,7 @@ class MatchSession:
     simulator: MatchSimulator = field(init=False)
     workflow: Workflow = field(init=False)
     services: MatchServices = field(init=False)
+    telemetry: Telemetry = field(default_factory=Telemetry)
     running: bool = True
     candidates: list[Candidate] = field(default_factory=list)
     active: PipelineResult | None = None
@@ -112,12 +114,13 @@ class MatchSession:
                 tick, started = self._pending_tick, self._pending_started
                 self._pending_tick = None
                 viewer = self.viewer.model_copy(deep=True)
-                async for event in self.workflow.run(LiveTick(tick=tick, viewer=viewer), stream=True):
-                    data = event.data
-                    if isinstance(data, PipelineResult):
-                        if data.kind == "moment":
-                            data.timings_ms["fast"] = (time.perf_counter() - started) * 1000
-                        await self._outputs.put((data, viewer))
+                with self.telemetry.capture("Match workflow", {"timestamp_ms": tick.frame.timestamp_ms, "viewer": viewer.model_dump()}):
+                    async for event in self.workflow.run(LiveTick(tick=tick, viewer=viewer), stream=True):
+                        data = event.data
+                        if isinstance(data, PipelineResult):
+                            if data.kind == "moment":
+                                data.timings_ms["fast"] = (time.perf_counter() - started) * 1000
+                            await self._outputs.put((data, viewer))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -171,7 +174,8 @@ class MatchSession:
 
         active, viewer = self.active, self.viewer.model_copy(deep=True)
         self.reframe_template()
-        text = await personalize(self.services.agent, active.moment, viewer)
+        with self.telemetry.capture("Viewer reframe", {"moment": active.moment.id, "timestamp_ms": active.moment.valid_from_ms, "viewer": viewer.model_dump()}):
+            text = await personalize(self.services.agent, active.moment, viewer)
         if self.active is not active or self.viewer != viewer:
             return None
         rich = render_overlay(active.moment, viewer, rich=True, provider=self.services.language_provider)

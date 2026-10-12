@@ -11,6 +11,7 @@ import asyncio
 import importlib
 import json
 import logging
+import re
 import sys
 from collections.abc import AsyncIterable, Awaitable, Mapping, Sequence
 
@@ -35,6 +36,7 @@ INSTRUCTIONS = """You are the MatchOS language renderer.
 You receive one verified football moment as JSON plus a viewer profile.
 Write at most two short sentences in the requested language and persona.
 Use only numbers that already appear in the facts. Do not invent metrics, events, or causes.
+Possession and press bypass facts are percentages with a % unit. Always retain the % unit; never write a fractional ratio such as 0.639 possession. Distances are metres and counts are integers.
 Casual: plain speech, almost no numbers.
 Analyst: the exact before-and-after metrics.
 Fan: same facts, framed for the viewer's team, never abusive or invented.
@@ -166,24 +168,29 @@ def render_from_messages(messages: Sequence[Message]) -> str:
     payload = _latest_payload(messages)
     if payload is None:
         return ""
+    if "fallbackText" in payload:
+        return payload["fallbackText"]
     moment = VerifiedMoment.model_validate(payload["moment"])
     viewer = ViewerProfile.model_validate(payload["viewer"])
     overlay = render_overlay(moment, viewer, rich=True, provider="local-renderer")
     return overlay.body
 
 
+PERCENT_FACTS = {"possessionLast5", "pressBypassBefore", "pressBypassNow"}
+
+
 def prompt_payload(moment: VerifiedMoment, viewer: ViewerProfile) -> str:
-    return json.dumps(
-        {
-            "persona": viewer.persona,
-            "language": viewer.language,
-            "team": viewer.team_id,
-            "playerId": viewer.player_id,
-            "viewer": viewer.model_dump(),
-            "moment": moment.model_dump(),
-        },
-        default=str,
-    )
+    # Keep canonical facts untouched for arithmetic and evidence inspection.
+    facts = {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
+             for key, value in moment.facts.items()}
+    return json.dumps({
+        "viewer": viewer.model_dump(),
+        "moment": {"id": moment.id, "type": moment.type, "frame": moment.frame,
+                   "team_id": moment.team_id, "player_id": moment.player_id, "facts": facts},
+        "units": {"possessionLast5": "percent", "pressBypassBefore": "percent",
+                  "pressBypassNow": "percent", "distances": "metres"},
+        "fallbackText": render_overlay(moment, viewer, rich=True, provider="template").body,
+    }, default=str)
 
 
 def _latest_payload(messages: Sequence[Message]) -> dict | None:
@@ -199,9 +206,16 @@ def _latest_payload(messages: Sequence[Message]) -> dict | None:
 
 def faithful_text(text: str, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     cleaned = " ".join(text.strip().split())
-    if cleaned and prose_is_faithful(cleaned, moment):
-        return cleaned
-    return render_overlay(moment, viewer, rich=True, provider="template").body
+    ratios = {ratio for key, value in moment.facts.items() if key in PERCENT_FACTS
+              for ratio in (float(value), round(float(value), 2))}
+    fractional = any(float(number) in ratios and 0 < float(number) < 1
+                     for number in re.findall(r"(?<![\d.])\d+\.\d+(?![\d.])", cleaned))
+    accepted = bool(cleaned and not fractional and prose_is_faithful(cleaned, moment))
+    result = cleaned if accepted else render_overlay(moment, viewer, rich=True, provider="template").body
+    from matchos.telemetry import record
+    record("language fact guard", {"text": cleaned, "canonicalFacts": moment.facts},
+           {"accepted": accepted, "text": result}, status="complete" if accepted else "fallback")
+    return result
 
 
 def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecutor, Agent, str]:
