@@ -23,6 +23,10 @@ class Producer:
         self.last_air: dict[Persona, float] = {}
         self.last_frame: dict[str, float] = {}
         self.last_goal_at = -1_000.0
+        self.aired_major_events: set[str] = set()
+
+    def has_aired(self, moment: VerifiedMoment) -> bool:
+        return moment.frame in {"GOAL", "COMEBACK", "RED_CARD"} and bool(self.aired_major_events.intersection(moment.evidence))
 
     def decide(
         self,
@@ -34,6 +38,8 @@ class Producer:
     ) -> ProducerDecision:
         if not verified or moment is None:
             return ProducerDecision(action="REJECT", reason=reason or "Verifier rejected the claim.")
+        if self.has_aired(moment):
+            return ProducerDecision(action="SUPPRESS", reason="This goal or dismissal has already aired for this viewer.")
         if should_surface < 0.5 and moment.frame not in {"GOAL", "RED_CARD", "COMEBACK"}:
             return ProducerDecision(action="SUPPRESS", reason="Decision call kept this below the surface line.")
         now = self.clock()
@@ -55,6 +61,8 @@ class Producer:
                 air_for=air_for,
             )
         self.last_frame[moment.frame] = now
+        if moment.frame in {"GOAL", "COMEBACK", "RED_CARD"}:
+            self.aired_major_events.update(moment.evidence)
         for persona in air_for:
             self.last_air[persona] = now
         return ProducerDecision(

@@ -39,7 +39,7 @@ flowchart LR
 
     UI <-->|"Commands, frames, updates, traces"| Server
     LiveState -->|"Live statistics"| Server
-    Viewers -->|"Viewer templates, explanations and enrichment"| Server
+    Viewers -->|"Finished viewer cards and explanations"| Server
     Viewers <-->|"Typed editorial decision per viewer"| Decision
     Viewers <-->|"Persona prose"| Language
 ```
@@ -79,10 +79,10 @@ flowchart TD
     Verify["verifier: evidence checks and candidate set"]
     Produce{"producer: AIR, SUPPRESS, or REJECT"}
     Trace["trace: retain candidate and rejection / suppression reason"]
-    Publish["publish: immediate template overlay"]
+    Publish["publish: one finished card"]
     Agent["language_agent: persona-specific prose"]
-    Guard["enrichment: numeric and fraction guard"]
-    Enriched["Yield enriched overlay or verified fallback copy"]
+    Guard["language: numeric and fraction guard"]
+    Current{"Still current and eligible?"}
 
     Tick --> State --> Trigger
     Trigger -->|"No"| Quiet
@@ -91,13 +91,15 @@ flowchart TD
     Pool -->|"For each viewer independently"| Decision --> Produce
     Pool -->|"No candidates: skip models"| Produce
     Produce -->|"SUPPRESS / REJECT"| Trace
-    Produce -->|"AIR"| Publish --> Agent --> Guard --> Enriched
+    Produce -->|"Eligible"| Agent --> Guard --> Current
+    Current -->|"Yes"| Publish
+    Current -->|"Expired or suppressed"| Trace
 ```
 
 The workflow mixes deterministic code executors with two model roles:
 
-- **Decision:** chooses which verified candidate is worth showing to the viewer now, or `NONE`. It receives candidate facts/checks, persona preferences, match time/score, and recent aired updates. It scores editorial importance and interruption probability. Unknown candidate IDs or invalid responses use the existing local fallback, restricted to verified candidates; the model cannot invent a new candidate.
-- **Language:** renders an already verified moment for the requested persona and language. It does not compute the canonical match metrics. Provider failures use local copy; unsupported numbers or fractional possession/bypass values cause the enrichment guard to use a verified template.
+- **Decision:** chooses which verified candidate is worth showing to the viewer now, or `NONE`. It receives candidate facts/checks, persona preferences, match time/score, and recent aired updates. Analyst and Broadcaster cover the whole match without a team allegiance; model profiles omit inactive team/player preferences. Fan profiles carry their supported team and Player profiles carry their focused player. It scores editorial importance and interruption probability. Unknown candidate IDs or invalid responses use a persona-aware local fallback with recent-story suppression and a `NONE` option, restricted to verified candidates; the model cannot invent a new candidate.
+- **Language:** renders an already verified moment for the requested persona and language. It does not compute the canonical match metrics. Provider failures use local copy; unsupported numbers or fractional possession/bypass values cause the language guard to use a verified template.
 
 The producer runs after evidence verification and editorial selection. Choosing `NONE` suppresses the update without generating language copy; producer suppression does not rerank other candidates. A separate session gate also prevents an ordinary update from replacing a graphic already on air too soon; major moments can interrupt. A workflow `AIR` result therefore does not guarantee final display.
 
@@ -134,7 +136,7 @@ sequenceDiagram
             Feed->>Session: Advance simulator and update live state
             Session->>Session: Merge evidence into one pending batch
             Session-->>Feed: Frame, events, available workflow outputs
-            Feed-->>UI: Frame, statistics, eligible overlays / enrichment
+            Feed-->>UI: Frame and statistics
         end
     and Background intelligence
         Session->>Worker: Start worker if idle
@@ -150,10 +152,10 @@ sequenceDiagram
                     Model-->>Viewer: Editorial choice or local fallback
                     Viewer->>Viewer: Apply own producer and on-air rules
                     opt Candidate selected and AIR
-                        Viewer-->>UI: Template and decision explanation
                         Viewer->>Model: Render selected facts for this viewer
                         Model-->>Viewer: Prose or fallback
-                        Viewer-->>UI: Guarded enrichment
+                        Viewer->>Viewer: Recheck expiry and commit air time
+                        Viewer-->>UI: One finished card and explanation (if current)
                     end
                 end
             end
@@ -165,11 +167,11 @@ The live feed and workflow use **separate state engines**. The live engine advan
 
 There is one pending batch, rather than one queued model job per frame. It accumulates events and samples while retaining the newest frame, with evidence bounded to the rolling history window. A bounded output queue hands workflow results back to the feed. Expired moments and outputs for an old primary viewer profile are discarded.
 
-The sidebar defaults to three compact cards beside one shared pitch: analyst, supporter and casual. The shared Agent Framework workflow finishes after broadcasting a frozen `VerifiedCandidates` / state snapshot. Every viewer (including the primary viewer) then runs its own `Perspective` worker, typed editorial selection, producer policy, and language rendering. Selection histories and cadence are private to each viewer. A `NONE` result or slow model in one perspective does not delay the other perspectives or candidate generation. Player-focused candidates for configured viewers are included in the common pool.
+The sidebar defaults to three compact cards beside one shared pitch: neutral analyst, Liverpool supporter and neutral broadcaster. The shared Agent Framework workflow finishes after broadcasting a frozen `VerifiedCandidates` / state snapshot. Every viewer (including the primary viewer) then runs its own `Perspective` worker, typed editorial selection, producer policy, and language rendering. Selection histories and cadence are private to each viewer. A `NONE` result or slow model in one perspective does not delay the other perspectives or candidate generation. Player-focused candidates for configured viewers are included in the common pool.
 
-Each perspective processes one pool at a time, retaining only the latest pending pool. A template is emitted as soon as that viewer's selection clears its producer. Changes/removals close only affected workers; unchanged workers retain history. Settings changes use the latest pool and can refresh focused-player evidence. Snapshot timestamps and profile checks keep the UI tied to the correct viewer. Independent selections may agree; the system never fabricates distinct stories for a demo.
+Each perspective processes one pool at a time, retaining only the latest pending pool. The last aired card stays visible while language is prepared. One complete card is emitted after language validation (or persona fallback on error/deadline), a final expiry check, and production approval. Air-time and recent-update history begin at publication; there is no intermediate template or later enrichment replacement. Changes/removals close only affected workers; unchanged workers retain history. Settings changes use the latest pool and can refresh focused-player evidence. Snapshot timestamps and profile checks keep the UI tied to the correct viewer. Independent selections may agree; the system never fabricates distinct stories for a demo.
 
-The UI combines an active story with the most recent editorial outcome. A suppressed follow-up does not clear an unexpired active story. The decision disclosure identifies the original selection, supporting checks, and the latest held candidates. Explanations label model preferences, deterministic policy and fallback paths separately.
+The UI combines an active story with the most recent editorial outcome. A suppressed follow-up does not clear the last aired story, even after its live validity window. Historical cards are labelled Last aired, and later suppressions appear below the retained message with their own reason and match time. Expiry still prevents new publication of stale model results; seek, reset, removal or changed viewer clears the retained card. The decision disclosure identifies the original selection, supporting checks, and the latest held candidates. Explanations label model preferences, deterministic policy and fallback paths separately.
 
 ### Pause, reset, and timeline seeking
 
@@ -221,3 +223,10 @@ Optional external collection uses Agent Framework's native OpenTelemetry instrum
 ## Current boundaries
 
 The simulator is the implemented feed source. A future real-match adapter should produce the same event/tracking contracts and consistent units. The current app has no persistent match storage, distributed job queue, authentication layer, or cross-process session recovery. Numeric faithfulness checks constrain generated copy but do not prove every qualitative claim; deterministic verification establishes the canonical facts.
+
+
+### Default lab turning points and freshness
+
+The `press_collapse` feed stages an Isak goal from 65', then one City dismissal at 68' (Kovacic). These change the simulator's score, active roster and defensive shape. The state engine tracks active player counts from tracking and cumulative dismissals independently of rolling-stat expiry. Every verified moment includes the frozen score, players remaining and red-card counts, so decision and language inputs can explain the current match context without inventing consequences.
+
+Routine candidates expire after 40 match seconds. Goal/dismissal deadlines are 120 match seconds from the source event, not from each candidate refresh. Recent major evidence can be recovered for 60 match seconds after the event; each producer records aired source event IDs, and each viewer skips covered or already-expired candidates before calling a model. The final freshness check still rejects results that expire during decision/language waits. At accelerated playback, match-time windows elapse faster than model wall-clock latency. The retained card and held notice communicate that outcome separately from the new simulated event.

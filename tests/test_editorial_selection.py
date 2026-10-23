@@ -88,7 +88,8 @@ def test_native_editorial_request_and_restricted_output(monkeypatch, provider, s
         assert not decision.provider.startswith('local')
     else:
         assert decision.provider.startswith('local-decision-fallback:')
-        assert decision.selected_candidate_id in {candidate.id for candidate in candidates}
+        # The fallback respects the same recent-update cadence as this fan view.
+        assert decision.selected_candidate_id is None and decision.should_surface == 0
 
 
 @pytest.mark.parametrize('mode',['select','hold','empty'])
@@ -138,7 +139,9 @@ def test_workflow_verifies_before_selection_and_respects_exact_choice(monkeypatc
         assert initial.moment.facts['possessionLast5'] == .7
         assert initial.moment.importance == .8 and initial.moment.confidence == .85
         assert initial.producer.action == 'AIR'
-        assert any(output.kind == 'enrichment' for output in outputs)
+        assert initial.overlay.source == 'agent'
+        assert sum(output.kind == 'moment' for output in outputs) == 1
+        assert not any(output.kind == 'enrichment' for output in outputs)
         assert calls[0][2]['recentUpdates'][0]['frame'] == 'PLAYER_IMPACT'
     names = [step['name'] for step in store.snapshot()['runs'][0]['steps']]
     assert names.index('verified candidates') < names.index('editorial selection')

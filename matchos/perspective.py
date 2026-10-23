@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from copy import deepcopy
 
-from matchos.copy import render_overlay
 from matchos.editorial import explain
-from matchos.language_agent import personalize
+from matchos.language_agent import final_overlay
 from matchos.producer import Producer
 from matchos.schemas import PipelineResult, ProducerDecision, VerificationResult
 
@@ -69,10 +69,15 @@ class Perspective:
 
     async def process(self, batch):
         from matchos.telemetry import record
-        candidates = batch.candidates.candidates
+        candidates = [candidate for candidate in batch.candidates.candidates
+                      if candidate.expires_at_ms > self.session.live_state_engine.state.timestamp_ms
+                      and not self.producer.has_aired(candidate)]
         result = PipelineResult(kind="trace", candidates=batch.candidates, state=batch.state, trigger=batch.trigger)
         if not candidates:
-            result.producer = ProducerDecision(action="REJECT", reason="No story passed the evidence checks.")
+            if batch.candidates.candidates:
+                result.producer = ProducerDecision(action="SUPPRESS", reason="Available stories have already aired or their live window has passed.")
+            else:
+                result.producer = ProducerDecision(action="REJECT", reason="No story passed the evidence checks.")
             await self.emit(result)
             return
         now = time.monotonic()
@@ -86,32 +91,34 @@ class Perspective:
         if selected is None:
             result.producer = ProducerDecision(action="SUPPRESS", reason="Decision model chose no update.")
         elif selected.expires_at_ms <= self.session.live_state_engine.state.timestamp_ms:
-            result.producer = ProducerDecision(action="SUPPRESS", reason="This story expired before it could be shown.")
+            result.producer = ProducerDecision(action="SUPPRESS", reason="The match moved past this story's live window while waiting for the decision model.")
         else:
             result.moment = selected.model_copy(update={"importance": result.decision.importance / 5,
                                                        "confidence": result.decision.primary_frame_confidence})
             result.verification = VerificationResult(verified=True, moment=result.moment, checks=result.moment.checks)
-            result.producer = self.producer.decide(result.moment, True, result.decision.should_surface, self.viewer)
+            # Check eligibility without recording an air time before language is ready.
+            result.producer = deepcopy(self.producer).decide(result.moment, True, result.decision.should_surface, self.viewer)
             now = time.monotonic()
             if (result.producer.action == "AIR" and self.active and now - self.on_air_at < 40
                     and self.active.expires_at_ms > batch.state.timestamp_ms
                     and result.moment.frame not in {"GOAL", "COMEBACK", "RED_CARD"}):
                 result.producer = ProducerDecision(action="SUPPRESS", reason="A graphic is already on air for this viewer.")
             if result.producer.action == "AIR":
-                result.kind = "moment"
-                result.overlay = render_overlay(result.moment, self.viewer, rich=False, provider="template")
-                self.active, self.on_air_at = result.moment, now
-                self.recent = (self.recent + [{"aired_at": now, "frame": result.moment.frame,
-                                              "momentId": result.moment.id, "headline": result.overlay.headline}])[-10:]
+                overlay = await final_overlay(self.session.services.agent, result.moment, self.viewer,
+                                              self.session.services.language_provider,
+                                              getattr(self.session.services, "reasoning_timeout_s", 15))
+                if self.closed:
+                    return
+                if result.moment.expires_at_ms <= self.session.live_state_engine.state.timestamp_ms:
+                    result.producer = ProducerDecision(action="SUPPRESS", reason="The match moved past this story's live window while waiting for its final text.")
+                else:
+                    result.producer = self.producer.decide(result.moment, True, result.decision.should_surface, self.viewer)
+                    if result.producer.action == "AIR":
+                        result.kind, result.overlay = "moment", overlay
+                        now = time.monotonic()
+                        self.active, self.on_air_at = result.moment, now
+                        self.recent = (self.recent + [{"aired_at": now, "frame": result.moment.frame,
+                                                      "momentId": result.moment.id, "headline": overlay.headline}])[-10:]
         record("viewer production", {"viewer": self.viewer.model_dump(), "candidateIds": [candidate.id for candidate in candidates]},
                {"selection": result.decision.model_dump(), "producer": result.producer.model_dump(), "explanation": explain(result, self.viewer)})
         await self.emit(result)
-        if result.overlay and self.session.services.agent:
-            text = await personalize(self.session.services.agent, result.moment, self.viewer)
-            if self.closed or result.moment.expires_at_ms <= self.session.live_state_engine.state.timestamp_ms:
-                return
-            result.overlay = render_overlay(result.moment, self.viewer, rich=True, provider=self.session.services.language_provider)
-            result.overlay.body = text
-            if self.viewer.persona == "broadcaster":
-                result.overlay.headline = text
-            await self.emit(result, "enrichment")

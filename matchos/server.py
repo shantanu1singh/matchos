@@ -14,6 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from matchos.teams import identity_context
 from matchos.editorial import explain
 from matchos.perspective import Perspective
 from matchos.llm_config import load_env_files
@@ -115,7 +116,7 @@ async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) 
 @app.websocket("/ws")
 async def match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
-    await websocket.send_json({"type": "hello", "scenarios": _scenario_payload()})
+    await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context()})
     session: MatchSession | None = None
     task: asyncio.Task | None = None
     paused_task: asyncio.Task | None = None

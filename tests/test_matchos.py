@@ -309,11 +309,9 @@ def test_workflow_airs_press_breakdown() -> None:
     assert moment.facts["pressBypassNow"] - moment.facts["pressBypassBefore"] >= 0.25
     assert moment.facts["defensiveLineDeltaM"] <= -5
     assert len(moment.evidence) >= 2
-    assert moment_result.overlay.source == "template"
+    assert moment_result.overlay.source == "agent"
     assert prose_is_faithful(moment_result.overlay.body, moment)
-    assert enrichment is not None
-    assert enrichment.overlay.source == "agent"
-    assert prose_is_faithful(enrichment.enrichment_text, moment)
+    assert enrichment is None
 
 
 def test_pass_planner_uses_current_player_positions() -> None:

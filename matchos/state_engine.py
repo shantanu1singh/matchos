@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 
 from matchos.pitch import between_the_lines, entered_final_third, in_box, pass_against_press, pass_bypassed, shirt
+from matchos.teams import shirt_number
 from matchos.schemas import MatchEvent, MatchState, PlayerRollup, TeamId, TeamRollup, Tick
 
 FIVE = 5 * 60_000
@@ -41,6 +42,7 @@ def _mean(values: list[float]) -> float | None:
 class StateEngine:
     def __init__(self) -> None:
         self.events: deque[MatchEvent] = deque()
+        self.dismissed: dict[str, set[str]] = {"RED": set(), "BLUE": set()}
         self.samples: deque[tuple[int, float, float, float, str]] = deque()
         self.state = MatchState(
             match_id="",
@@ -60,10 +62,15 @@ class StateEngine:
             )
         for event in tick.events:
             self.events.append(event)
+            if event.type == "CARD" and event.qualifiers.get("card") == "red" and event.player_id:
+                self.dismissed[event.team_id].add(event.player_id)
         now = tick.frame.timestamp_ms
         self._trim(now)
         red = self._team("RED", now)
         blue = self._team("BLUE", now)
+        for team_id, roll in (("RED", red), ("BLUE", blue)):
+            roll.players_on_pitch = sum(player.team_id == team_id and player.on_pitch for player in tick.frame.players)
+            roll.red_cards = len(self.dismissed[team_id])
         players = self._players(now)
         deltas = self._deltas(red, blue, players)
         self.state = MatchState(
@@ -205,7 +212,7 @@ def _split(player_id: str) -> tuple[TeamId, str, int]:
         parsed = int(number)
     except ValueError:
         parsed = 0
-    return team_id, team, parsed
+    return team_id, team, shirt_number(player_id, parsed)
 
 
 def _receptions(events: list[MatchEvent], player_id: str, final_third: bool = False, between: bool = False) -> int:

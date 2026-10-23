@@ -22,7 +22,7 @@ def explain(result: PipelineResult, viewer: ViewerProfile) -> dict:
     # A model attribution must not imply unsupported player/team/recency evidence.
     valid_reason = reason_code in REASONS
     if reason_code == "TEAM_RELEVANCE":
-        valid_reason = bool(chosen and chosen.team_id == viewer.team_id)
+        valid_reason = bool(viewer.persona == "fan" and chosen and chosen.team_id == viewer.team_id)
     if reason_code == "PLAYER_RELEVANCE":
         valid_reason = bool(chosen and chosen.player_id == viewer.player_id)
     if reason_code == "TACTICAL_DETAIL":

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Iterable
 
+from matchos.teams import player_label, team_name
 from matchos.schemas import MatchEvent, Point, TeamId, TrackingPlayer
 
 PITCH_X = 105.0
@@ -161,14 +162,11 @@ def entered_final_third(event: MatchEvent) -> bool:
 
 
 def shirt(player_id: str | None) -> str:
-    if not player_id or "_" not in player_id:
-        return ""
-    team, number = player_id.split("_", 1)
-    return f"{team.upper()} {number}"
+    return player_label(player_id)
 
 
 def event_label(event: MatchEvent) -> str:
-    who = shirt(event.player_id) or event.team_id
+    who = shirt(event.player_id) or team_name(event.team_id)
     if event.type == "PASS" and event.target_player_id:
         return f"{who} → {shirt(event.target_player_id)}"
     if event.type == "SUBSTITUTION":
@@ -179,15 +177,15 @@ def event_label(event: MatchEvent) -> str:
     if event.type == "OFFSIDE":
         return f"{who} offside"
     if event.type == "FREE_KICK":
-        return f"{event.team_id} free kick"
+        return f"{team_name(event.team_id)} free kick"
     if event.type == "PENALTY":
-        return f"{event.team_id} penalty"
+        return f"{team_name(event.team_id)} penalty"
     if event.type == "CORNER":
-        return f"{event.team_id} corner"
+        return f"{team_name(event.team_id)} corner"
     if event.type == "THROW_IN":
-        return f"{event.team_id} throw-in"
+        return f"{team_name(event.team_id)} throw-in"
     if event.type == "GOAL_KICK":
-        return f"{event.team_id} goal kick"
+        return f"{team_name(event.team_id)} goal kick"
     if event.type == "FOUL":
         return f"{who} foul"
     if event.type == "SHOT":

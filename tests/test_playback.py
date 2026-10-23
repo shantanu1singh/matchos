@@ -52,13 +52,13 @@ def test_seek_clamps_to_scenario_start(monkeypatch):
     asyncio.run(run())
 
 
-def test_independent_viewer_choices_flow_while_other_model_waits(monkeypatch):
+def test_frames_pause_and_seek_continue_while_viewer_text_is_pending(monkeypatch):
     configure(monkeypatch)
     from test_editorial_selection import setup_candidates, answers
     from matchos.decision_client import _parse_selection
     from matchos.copy import render_overlay
     from matchos.schemas import VerifiedCandidates, ProducerDecision
-    import matchos.perspective as perspective_module
+    import matchos.language_agent as language_module
     engine, candidates = setup_candidates()
     batch = PipelineResult(kind="candidates", candidates=VerifiedCandidates(candidates=candidates), state=engine.state.model_copy(deep=True))
     analyst_story = next(candidate for candidate in candidates if candidate.frame == "MOMENTUM_SWING").model_copy(update={"importance": 1, "confidence": .9})
@@ -104,7 +104,7 @@ def test_independent_viewer_choices_flow_while_other_model_waits(monkeypatch):
             try: await asyncio.Event().wait()
             finally: cancelled.set()
         monkeypatch.setattr(server, "MatchSession", DemoSession)
-        monkeypatch.setattr(perspective_module, "personalize", personalize)
+        monkeypatch.setattr(language_module, "personalize", personalize)
         task = asyncio.create_task(server.match_socket(Socket()))
         await queue.put({"type": "start", "scenario": "balanced", "viewer": {"persona":"analyst"},
                          "views": [{"persona":"fan", "player_id":"blue_9"}, {"persona":"casual"}]})
@@ -122,8 +122,9 @@ def test_independent_viewer_choices_flow_while_other_model_waits(monkeypatch):
             assert model_waiting.is_set()
             await until(lambda item: item["type"] == "frame")
             release.set()
-            fan = await until(lambda item: item["type"] == "viewer_update" and item["index"] == 1)
-            assert fan["result"]["moment"]["frame"] == "PLAYER_IMPACT"
+            await asyncio.wait_for(language_waiting.wait(), 1)
+            await until(lambda item: item["type"] == "frame")
+            assert not any(item["type"] == "viewer_update" and item["index"] == 1 for item in messages)
             primary = next(item for item in messages if item["type"] == "viewer_update" and item["index"] == 0)
             assert primary["result"]["moment"]["frame"] == "MOMENTUM_SWING"
             assert all(ids == [candidate.id for candidate in candidates] for _, ids in selections)

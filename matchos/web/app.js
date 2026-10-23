@@ -4,17 +4,18 @@ const state = {
   seeking: false,
   scrubbing: false,
   comparisonMoment: null,
-  comparisonViewers: [{ persona: "fan", team_id: "BLUE", language: "en", player_id: "blue_9" }, { persona: "casual", team_id: "BLUE", language: "en", player_id: "blue_9" }],
+  comparisonViewers: [{ persona: "fan", team_id: "RED", language: "en", player_id: "red_9" }, { persona: "broadcaster", team_id: null, language: "en", player_id: "red_9" }],
   viewerDisplays: {},
   primaryEditorial: null,
   comparisonEditorial: [],
   comparisonOverlays: [],
   scenarios: [],
+  roster: { teams: {}, players: {} },
   scenario: "press_collapse",
   seed: 47129,
   speed: 1,
   running: false,
-  viewer: { persona: "analyst", team_id: "BLUE", language: "en", player_id: "red_7" },
+  viewer: { persona: "analyst", team_id: null, language: "en", player_id: "red_7" },
   frame: null,
   prev: null,
   moment: null,
@@ -102,6 +103,9 @@ function onMessage(message) {
     return;
   }
   if (message.type === "hello") {
+    state.roster = message.roster || state.roster;
+    updatePrimaryLabel();
+    buildComparisonCards();
     state.scenarios = message.scenarios;
     renderScenarios();
     startMatch();
@@ -132,8 +136,9 @@ function onMessage(message) {
     renderRaw();
     renderPulse();
     for (const [key, display] of Object.entries(state.viewerDisplays)) {
-      if (display.result.moment.expires_at_ms <= state.frame.timestamp_ms) {
-        delete state.viewerDisplays[key];
+      const cardId = key === "primary" ? "insight" : `compare-card-${Number(key.split("-")[1])}`;
+      const card = document.getElementById(cardId);
+      if (display.result.moment.expires_at_ms <= state.frame.timestamp_ms && card?.dataset.displayAge !== "historical") {
         if (key === "primary") renderInsight(false);
         else renderComparison(Number(key.split("-")[1]));
       }
@@ -166,10 +171,17 @@ function onMessage(message) {
 
 const RAW_TYPES = new Set(["PASS", "SHOT", "CARRY", "DUEL", "INTERCEPTION", "CARD", "OFFSIDE", "FREE_KICK", "PENALTY", "CORNER", "THROW_IN", "GOAL_KICK", "SUBSTITUTION", "FOUL", "FORMATION_CHANGE"]);
 
+function teamLabel(id, short = false) {
+  const team = state.roster.teams[String(id).toUpperCase()];
+  return team?.[short ? "short_name" : "name"] || id || "";
+}
+
 function shirt(id) {
+  const player = state.roster.players[id];
+  if (player) return `${player.name} #${player.number}`;
   if (!id || !String(id).includes("_")) return "";
   const [team, number] = String(id).split("_");
-  return `${team.toUpperCase()} ${number}`;
+  return `${teamLabel(team)} ${number}`;
 }
 
 function xy(point) {
@@ -184,7 +196,7 @@ function clockOf(ms) {
 }
 
 function eventLine(event) {
-  const who = shirt(event.player_id) || event.team_id || "";
+  const who = shirt(event.player_id) || teamLabel(event.team_id);
   const target = event.target_player_id ? ` → ${shirt(event.target_player_id)}` : "";
   const outcome = event.outcome ? `  ${event.outcome}` : "";
   const from = xy(event.location);
@@ -262,6 +274,10 @@ function resetUiState() {
   document.getElementById("latency").textContent = "—";
   document.getElementById("score-red").textContent = "0";
   document.getElementById("score-blue").textContent = "0";
+  for (const team of ["red", "blue"]) {
+    document.getElementById(`cards-${team}`).hidden = true;
+    document.getElementById(`cards-${team}`).textContent = "0";
+  }
   document.getElementById("clock").textContent = "00:00";
   document.getElementById("insight").className = "card empty";
   document.getElementById("insight").innerHTML = `
@@ -308,6 +324,14 @@ function updateScore() {
   if (!state.frame) return;
   document.getElementById("score-red").textContent = state.frame.score_red;
   document.getElementById("score-blue").textContent = state.frame.score_blue;
+  for (const team of ["red", "blue"]) {
+    const badge = document.getElementById(`cards-${team}`);
+    const count = state.pulse?.[team]?.red_cards || 0;
+    badge.hidden = count === 0;
+    badge.textContent = count;
+    badge.title = `${teamLabel(team)} red cards: ${count}`;
+    badge.setAttribute("aria-label", badge.title);
+  }
   const minute = String(Math.floor(state.frame.timestamp_ms / 60000)).padStart(2, "0");
   const second = String(Math.floor(state.frame.timestamp_ms / 1000) % 60).padStart(2, "0");
   document.getElementById("clock").textContent = `${minute}:${second}`;
@@ -324,8 +348,9 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
   const result = display?.result || update?.result;
   const explanation = display?.explanation || update?.explanation;
   const latest = update?.explanation;
-  const showing = Boolean(display?.result.overlay && display.result.moment?.expires_at_ms > now);
-  const heldNext = showing && update !== display;
+  const showing = Boolean(display?.result.overlay);
+  const historical = showing && display.result.moment.expires_at_ms <= now;
+  const heldNext = showing && latest?.status === "no_interruption";
   card.classList.toggle("empty", !showing);
   card.classList.toggle("quiet-card", !showing);
   const displayId = showing ? result.moment.id : "";
@@ -335,10 +360,12 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
     requestAnimationFrame(() => panel.classList.add("selection-flash"));
   }
   card.dataset.displayId = displayId;
+  card.dataset.displayAge = historical ? "historical" : "current";
   const at = explanation?.timestamp_ms;
-  const header = `<div class="editorial-status"><span class="${showing ? "status-update" : "status-quiet"}">${showing ? (heldNext ? "On screen · next update held" : "Update") : update ? "No interruption" : "Watching"}</span>${at != null ? `<time>${clockOf(at)}</time>` : ""}</div>`;
-  const title = showing ? result.overlay.headline : update ? "Let the match breathe" : "Watching for your next story";
-  const body = showing ? result.overlay.body : (latest?.status === "update" ? "That story has finished. Watching for the next relevant update." : explanation?.reason || "The match keeps flowing. A story appears when it matters to this viewer.");
+  const header = `<div class="editorial-status"><span class="${showing && !historical ? "status-update" : "status-quiet"}">${showing ? (historical ? "Last aired" : "Update") : "Watching"}</span>${at != null ? `<time title="Match time of this story">${clockOf(at)}</time>` : ""}</div>`;
+  const title = showing ? result.overlay.headline : "Watching for your next story";
+  const body = showing ? result.overlay.body : explanation?.reason || "The match keeps flowing. A story appears when it matters to this viewer.";
+  const heldStatus = heldNext ? `<div class="held-update" title="${escapeHtml(latest.reason)}"><span>${latest.candidateCount ? "Stories held" : "No new story"}</span><p>${escapeHtml(latest.reason)}</p>${latest.timestamp_ms != null ? `<time>${clockOf(latest.timestamp_ms)}</time>` : ""}</div>` : "";
   const disclosureKey = `${key}:explanation`;
   const previous = card.querySelector(".editorial-explanation");
   if (previous) {
@@ -347,8 +374,8 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
   }
   const evidence = explanation?.evidence?.map(text => `<li>${escapeHtml(text)}</li>`).join("") || "<li>No selected story needs to be put on screen.</li>";
   const held = latest?.held?.map(item => `<li><b>${escapeHtml(storyName(item.frame))}${item.player ? " · " + escapeHtml(shirt(item.player)) : ""}</b> · ${escapeHtml(item.reason)}</li>`).join("") || "<li>No other verified candidates in this update.</li>";
-  const why = explanation ? `<details class="editorial-explanation" ${state.expandedProof.has(disclosureKey) ? "open" : ""}><summary>Why this decision? <span>${explanation.candidateCount} stories</span></summary><div class="editorial-details"><p><b>${showing ? "Chosen" : "Held"}:</b> ${escapeHtml(storyName(explanation.chosen))}</p><p>${escapeHtml(explanation.reason)}</p>${showing ? `<p class="proof-label">Full update</p><p>${escapeHtml(result.overlay.body)}</p>` : ""}${heldNext ? `<p class="proof-label">Latest decision: no interruption</p><p>${escapeHtml(latest.reason)}</p>` : ""}<p class="proof-label">Evidence</p><ul>${evidence}</ul><p class="proof-label">Held back</p><ul>${held}</ul><p class="note">${explanation.sourceEventCount} source events · explanation from ${escapeHtml(explanation.reasonSource)}</p></div></details>` : "";
-  card.innerHTML = `${header}<h2>${escapeHtml(title)}</h2><p class="body">${escapeHtml(body)}</p>${why}`;
+  const why = explanation ? `<details class="editorial-explanation" ${state.expandedProof.has(disclosureKey) ? "open" : ""}><summary>Why this decision? <span>${explanation.candidateCount} ${explanation.candidateCount === 1 ? "story" : "stories"}</span></summary><div class="editorial-details"><p><b>${showing ? "Chosen" : "Held"}:</b> ${escapeHtml(storyName(explanation.chosen))}</p><p>${escapeHtml(explanation.reason)}</p>${showing ? `<p class="proof-label">Full update</p><p>${escapeHtml(result.overlay.body)}</p>` : ""}${heldNext ? `<p class="proof-label">Latest decision: no interruption</p><p>${escapeHtml(latest.reason)}</p>` : ""}<p class="proof-label">Evidence</p><ul>${evidence}</ul><p class="proof-label">Held back</p><ul>${held}</ul><p class="note">${explanation.sourceEventCount} source events · explanation from ${escapeHtml(explanation.reasonSource)}</p></div></details>` : "";
+  card.innerHTML = `${header}<h2>${escapeHtml(title)}</h2><p class="body">${escapeHtml(body)}</p>${heldStatus}${why}`;
   renderProof(proof, showing ? result.moment : null, showing ? result.overlay : null, key);
 }
 function renderInsight(fresh) {
@@ -390,11 +417,18 @@ function renderProof(host, moment, overlay, viewKey) {
 function statCapsules(viewer) {
   const pulse = state.pulse;
   if (!pulse) return [];
-  const teamName = viewer.team_id === "BLUE" ? "Blue" : "Red";
+  const dismissals = (pulse.red.red_cards || 0) + (pulse.blue.red_cards || 0);
+  const manpower = `Players LIV ${pulse.red.players_on_pitch ?? 11} · MCI ${pulse.blue.players_on_pitch ?? 11}`;
+  if (isNeutralViewer(viewer)) {
+    if (viewer.persona === "broadcaster") return [`Score ${pulse.score_red}–${pulse.score_blue}`, dismissals ? manpower : `Possession LIV ${Math.round(pulse.red.possession_last5 * 100)}% · MCI ${Math.round(pulse.blue.possession_last5 * 100)}%`];
+    const bypass = team => team.press_bypass_rate == null ? "—" : `${Math.round(team.press_bypass_rate * 100)}%`;
+    return [dismissals ? manpower : `Press bypass LIV ${bypass(pulse.red)} · MCI ${bypass(pulse.blue)}`, `Entries (5′) LIV ${pulse.red.final_third_entries_last5} · MCI ${pulse.blue.final_third_entries_last5}`];
+  }
+  const teamName = teamLabel(viewer.team_id, true);
   const team = pulse[viewer.team_id.toLowerCase()] || {};
   const share = `${Math.round((team.possession_last5 ?? 0) * 100)}%`;
-  if (viewer.persona === "casual") return [`Score ${pulse.score_red}–${pulse.score_blue}`, `${pulse.possession_team === "BLUE" ? "Blue" : "Red"} on the ball`];
-  if (viewer.persona === "fan") return [`${teamName} possession ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`, `Shots (5′) ${team.shots_last5 ?? 0}`];
+  if (viewer.persona === "casual") return [`Score ${pulse.score_red}–${pulse.score_blue}`, `${teamLabel(pulse.possession_team, true)} on the ball`];
+  if (viewer.persona === "fan") return [`${teamName} possession ${share}`, dismissals ? manpower : `Entries (5′) ${team.final_third_entries_last5 ?? 0}`, `Shots (5′) ${team.shots_last5 ?? 0}`];
   if (viewer.persona === "player") {
     const player = pulse.players?.[viewer.player_id];
     if (!player) return [`${shirt(viewer.player_id)} · no tracking data`];
@@ -489,7 +523,7 @@ function fillPlayers() {
   if (rosterKey === state.playerRosterKey) return;
   state.playerRosterKey = rosterKey;
   const previous = state.viewer.player_id;
-  select.innerHTML = players.map((player) => `<option value="${player.player_id}">${player.team_id} ${player.number} · ${player.role}</option>`).join("");
+  select.innerHTML = players.map((player) => `<option value="${escapeHtml(player.player_id)}">${escapeHtml(shirt(player.player_id))} · ${escapeHtml(player.role)}</option>`).join("");
   const available = players.some((player) => player.player_id === previous);
   state.viewer.player_id = available ? previous : (players[0]?.player_id || previous);
   select.value = state.viewer.player_id;
@@ -501,14 +535,17 @@ function updateViewerHelp() {
   const select = document.getElementById("player");
   const isPlayer = state.viewer.persona === "player";
   select.disabled = !isPlayer;
+  document.getElementById("team").closest("label").hidden = isNeutralViewer(state.viewer);
+  document.getElementById("team").disabled = isNeutralViewer(state.viewer);
+  document.getElementById("team").value = state.viewer.team_id || "RED";
   if (isPlayer) {
     help.textContent = `Following ${shirt(state.viewer.player_id)}. MatchOS prioritizes verified moments involving this player; major match moments can still break through.`;
   } else if (state.viewer.persona === "fan") {
-    help.textContent = `Home fan view frames verified moments from ${state.viewer.team_id}'s perspective.`;
+    help.textContent = `Home fan view frames verified moments from ${teamLabel(state.viewer.team_id)}'s perspective.`;
   } else if (state.viewer.persona === "analyst") {
-    help.textContent = "Analyst view favors tactical changes, underlying metrics and denser explanations.";
+    help.textContent = "Neutral analysis of both teams: tactical changes, underlying metrics and denser explanations.";
   } else if (state.viewer.persona === "broadcaster") {
-    help.textContent = "Broadcaster view returns short, graphic-ready verified copy and production metadata.";
+    help.textContent = "Neutral coverage of the whole match: timely broadcast headlines and production metadata.";
   } else {
     help.textContent = "Casual view shows fewer moments and explains them with minimal football jargon.";
   }
@@ -517,25 +554,25 @@ function updateViewerHelp() {
 function describeMatchEvent(event) {
   const player = shirt(event.player_id);
   if (event.type === "SHOT" && event.outcome === "GOAL") {
-    return { title: "GOAL", detail: player ? `${player} scores` : `${event.team_id} score`, kind: "goal" };
+    return { title: "GOAL", detail: player ? `${player} scores` : `${teamLabel(event.team_id)} score`, kind: "goal" };
   }
-  if (event.type === "PENALTY") return { title: "PENALTY", detail: `${event.team_id} awarded a penalty`, kind: "penalty" };
+  if (event.type === "PENALTY") return { title: "PENALTY", detail: `${teamLabel(event.team_id)} awarded a penalty`, kind: "penalty" };
   if (event.type === "SHOT" && event.qualifiers?.penalty) {
     const title = event.outcome === "SAVED" ? "PENALTY SAVED" : "PENALTY MISSED";
-    return { title, detail: player || event.team_id, kind: "penalty" };
+    return { title, detail: player || teamLabel(event.team_id), kind: "penalty" };
   }
   if (event.type === "CARD") {
     const card = String(event.qualifiers?.card || event.outcome || "").toLowerCase();
-    return { title: card === "red" ? "RED CARD" : "YELLOW CARD", detail: player || event.team_id, kind: card === "red" ? "red" : "yellow" };
+    return { title: card === "red" ? "RED CARD" : "YELLOW CARD", detail: player || teamLabel(event.team_id), kind: card === "red" ? "red" : "yellow" };
   }
   if (event.type === "OFFSIDE") return { title: "OFFSIDE", detail: player ? `${player} caught offside` : "Flag up", kind: "offside" };
-  if (event.type === "FOUL") return { title: "FOUL", detail: player ? `Committed by ${player}` : event.team_id, kind: "foul" };
-  if (event.type === "FREE_KICK") return { title: "FREE KICK", detail: `${event.team_id} restart`, kind: "free-kick" };
-  if (event.type === "CORNER") return { title: "CORNER", detail: `${event.team_id} corner kick`, kind: "corner" };
-  if (event.type === "THROW_IN") return { title: "THROW-IN", detail: `${event.team_id} restart`, kind: "throw-in" };
-  if (event.type === "GOAL_KICK") return { title: "GOAL KICK", detail: `${event.team_id} restart`, kind: "goal-kick" };
-  if (event.type === "FORMATION_CHANGE") return { title: "FORMATION CHANGE", detail: event.outcome || event.qualifiers?.formation || event.team_id, kind: "formation" };
-  if (event.type === "SUBSTITUTION") return { title: "SUBSTITUTION", detail: player ? `${player} comes on` : event.team_id, kind: "substitution" };
+  if (event.type === "FOUL") return { title: "FOUL", detail: player ? `Committed by ${player}` : teamLabel(event.team_id), kind: "foul" };
+  if (event.type === "FREE_KICK") return { title: "FREE KICK", detail: `${teamLabel(event.team_id)} restart`, kind: "free-kick" };
+  if (event.type === "CORNER") return { title: "CORNER", detail: `${teamLabel(event.team_id)} corner kick`, kind: "corner" };
+  if (event.type === "THROW_IN") return { title: "THROW-IN", detail: `${teamLabel(event.team_id)} restart`, kind: "throw-in" };
+  if (event.type === "GOAL_KICK") return { title: "GOAL KICK", detail: `${teamLabel(event.team_id)} restart`, kind: "goal-kick" };
+  if (event.type === "FORMATION_CHANGE") return { title: "FORMATION CHANGE", detail: event.outcome || event.qualifiers?.formation || teamLabel(event.team_id), kind: "formation" };
+  if (event.type === "SUBSTITUTION") return { title: "SUBSTITUTION", detail: player ? `${player} comes on` : teamLabel(event.team_id), kind: "substitution" };
   return null;
 }
 
@@ -730,7 +767,7 @@ function drawAction(x, y, view) {
   const ey = y(action.end.y);
   const bx = x(action.start.x + dx * along);
   const by = y(action.start.y + dy * along);
-  const colour = action.team_id === "RED" ? "rgba(255,93,82," : "rgba(91,147,255,";
+  const colour = action.team_id === "RED" ? "rgba(233,76,85," : "rgba(140,200,235,";
   ctx.save();
   ctx.lineCap = "round";
   ctx.setLineDash([6, 7]);
@@ -780,7 +817,7 @@ function drawPlayers(xOf, yOf, view) {
     }
     ctx.beginPath();
     ctx.arc(x, y, 11, 0, Math.PI * 2);
-    ctx.fillStyle = player.team_id === "RED" ? "#ff5d52" : "#5b93ff";
+    ctx.fillStyle = state.roster.teams[player.team_id]?.color || "#f3f6f2";
     ctx.fill();
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = "rgba(0,0,0,0.35)";
@@ -790,6 +827,15 @@ function drawPlayers(xOf, yOf, view) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(player.number), x, y + 0.5);
+    const name = state.roster.players[player.player_id]?.short_name || player.name;
+    if (name) {
+      ctx.font = "500 10px Outfit, sans-serif";
+      const width = ctx.measureText(name).width + 10;
+      ctx.fillStyle = "rgba(5, 19, 14, 0.82)";
+      ctx.fillRect(x - width / 2, y + 14, width, 15);
+      ctx.fillStyle = "#f3f6f2";
+      ctx.fillText(name, x, y + 21.5);
+    }
   });
   const lift = Math.max(0, view.ballZ) * 7;
   const bx = xOf(view.ball.x);
@@ -825,6 +871,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     const map = { persona: "persona", team: "team_id", language: "language", player: "player_id" };
     state.revision += 1;
     state.viewer[map[id]] = event.target.value;
+    normalizeViewer(state.viewer);
     state.primaryEditorial = null; delete state.viewerDisplays.primary; state.moment = null; state.overlay = null;
     renderInsight(false);
     send({ type: "viewer", viewer: state.viewer });
@@ -878,8 +925,21 @@ function matchesView(overlay, viewer) {
   return overlay && viewer && overlay.persona === viewer.persona && overlay.language === viewer.language && overlay.team_id === viewer.team_id && (viewer.persona !== "player" || overlay.player_id === viewer.player_id);
 }
 
+function isNeutralViewer(viewer) {
+  return viewer.persona === "analyst" || viewer.persona === "broadcaster";
+}
+
+function normalizeViewer(viewer) {
+  viewer.team_id = isNeutralViewer(viewer) ? null : (viewer.team_id || "RED");
+  return viewer;
+}
+
+function viewerLabel(viewer) {
+  return `${personaNames[viewer.persona]} · ${isNeutralViewer(viewer) ? "Neutral" : teamLabel(viewer.team_id, true)} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
+}
+
 function updatePrimaryLabel() {
-  document.getElementById("primary-label").textContent = `${personaNames[state.viewer.persona]} · ${state.viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${state.viewer.language === "hi" ? "Hindi" : "English"}`;
+  document.getElementById("primary-label").textContent = viewerLabel(state.viewer);
 }
 
 function renderComparison(onlyIndex = null, fresh = false) {
@@ -904,7 +964,7 @@ function positionPopover(popover) {
 function playerOptions(viewer) {
   const players = state.frame?.players || [];
   if (!players.length) return `<option value="${escapeHtml(viewer.player_id)}">${escapeHtml(shirt(viewer.player_id))}</option>`;
-  return players.map(player => `<option value="${escapeHtml(player.player_id)}" ${player.player_id === viewer.player_id ? "selected" : ""}>${escapeHtml(`${player.team_id} ${player.number} · ${player.role}`)}</option>`).join("");
+  return players.map(player => `<option value="${escapeHtml(player.player_id)}" ${player.player_id === viewer.player_id ? "selected" : ""}>${escapeHtml(`${shirt(player.player_id)} · ${player.role}`)}</option>`).join("");
 }
 
 function fillComparisonPlayers() {
@@ -926,7 +986,7 @@ function buildComparisonCards() {
   const host = document.getElementById("extra-views");
   host.innerHTML = state.comparisonViewers.map((viewer, index) => `
     <section class="persona-panel">
-      <div class="card-top"><span class="view-label" id="view-label-${index}">${escapeHtml(personaNames[viewer.persona])} · ${viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${viewer.language === "hi" ? "Hindi" : "English"}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
+      <div class="card-top"><span class="view-label" id="view-label-${index}">${escapeHtml(viewerLabel(viewer))}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
       <article class="card empty" id="compare-card-${index}" aria-live="polite"></article>
       <div class="why hidden" id="view-proof-${index}"></div>
       <div class="pulse" id="view-pulse-${index}" aria-label="Live match statistics"></div>
@@ -934,10 +994,10 @@ function buildComparisonCards() {
         <div class="popover-head"><strong>View ${index + 2} settings</strong><button class="icon-button" type="button" popovertarget="view-settings-${index}" popovertargetaction="hide" aria-label="Close view ${index + 2} settings">×</button></div>
         <div class="controls">
           <label>Viewer<select data-field="persona" aria-label="View ${index + 2} persona">${Object.entries(personaNames).map(([value, label]) => `<option value="${value}" ${value === viewer.persona ? "selected" : ""}>${label}</option>`).join("")}</select></label>
-          <label>Team<select data-field="team_id" aria-label="View ${index + 2} team"><option value="BLUE" ${viewer.team_id === "BLUE" ? "selected" : ""}>Blue</option><option value="RED" ${viewer.team_id === "RED" ? "selected" : ""}>Red</option></select></label>
+          <label ${isNeutralViewer(viewer) ? "hidden" : ""}>Team<select ${isNeutralViewer(viewer) ? "disabled" : ""} data-field="team_id" aria-label="View ${index + 2} team"><option value="BLUE" ${viewer.team_id === "BLUE" ? "selected" : ""}>Manchester City</option><option value="RED" ${viewer.team_id === "RED" ? "selected" : ""}>Liverpool</option></select></label>
           <label>Language<select data-field="language" aria-label="View ${index + 2} language"><option value="en" ${viewer.language === "en" ? "selected" : ""}>English</option><option value="hi" ${viewer.language === "hi" ? "selected" : ""}>Hindi</option></select></label>
           <label>Focus player<select id="view-player-${index}" data-field="player_id" aria-label="View ${index + 2} focus player" ${viewer.persona === "player" ? "" : "disabled"}>${playerOptions(viewer)}</select></label>
-          <p class="viewer-help">Independent story selection. Choose a persona, team and language.</p>
+          <p class="viewer-help">Independent selection. Analyst and Broadcaster cover both teams neutrally.</p>
           <button class="remove-view" type="button" data-remove="${index}">Remove this view</button>
         </div>
       </div>
@@ -947,7 +1007,12 @@ function buildComparisonCards() {
     panel.querySelectorAll("select").forEach(select => select.addEventListener("change", () => {
       const viewer = state.comparisonViewers[index];
       viewer[select.dataset.field] = select.value;
-      panel.querySelector(".view-label").textContent = `${personaNames[viewer.persona]} · ${viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
+      normalizeViewer(viewer);
+      panel.querySelector(".view-label").textContent = viewerLabel(viewer);
+      const teamSelect = panel.querySelector('[data-field="team_id"]');
+      teamSelect.closest("label").hidden = isNeutralViewer(viewer);
+      teamSelect.disabled = isNeutralViewer(viewer);
+      teamSelect.value = viewer.team_id || "RED";
       panel.querySelector('[data-field="player_id"]').disabled = viewer.persona !== "player";
       state.comparisonEditorial[index] = null; delete state.viewerDisplays[`view-${index}`];
       state.comparisonOverlays = [];
@@ -972,7 +1037,7 @@ function buildComparisonCards() {
 document.getElementById("add-view").addEventListener("click", () => {
   if (state.comparisonViewers.length >= 2) return;
   state.comparisonEditorial = [];
-  state.comparisonViewers.push({ ...state.viewer, persona: state.comparisonViewers.length ? "fan" : "analyst" });
+  state.comparisonViewers.push(normalizeViewer({ ...state.viewer, persona: state.comparisonViewers.length ? "fan" : "analyst" }));
   state.comparisonOverlays = [];
   buildComparisonCards();
   send({ type: "views", views: comparisonViews() });
@@ -980,6 +1045,7 @@ document.getElementById("add-view").addEventListener("click", () => {
 positionPopover(document.getElementById("primary-settings"));
 document.getElementById("persona").value = state.viewer.persona;
 updatePrimaryLabel();
+updateViewerHelp();
 buildComparisonCards();
 
 const timeline = document.getElementById("timeline");

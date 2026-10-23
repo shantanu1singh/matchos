@@ -1,8 +1,8 @@
 """Language agent: a renderer, not a source of football truth.
 
 Microsoft Agent Framework wraps either a LiteLLM provider or a local
-fact-locked client in the same Agent. The enrichment executor discards any
-reply that introduces a number the verified moment does not contain.
+fact-locked client in the same Agent. The language guard discards any
+reply that introduces a number the verified moment does not contain before publication.
 """
 
 from __future__ import annotations
@@ -27,21 +27,24 @@ from agent_framework import (
     ResponseStream,
 )
 
+from matchos.teams import identity_context
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
-from matchos.schemas import VerifiedMoment, ViewerProfile
+from matchos.schemas import Overlay, VerifiedMoment, ViewerProfile
 
 INSTRUCTIONS = """You are the MatchOS language renderer.
 You receive one verified football moment as JSON plus a viewer profile.
+Use the roster for club and player names. Internal IDs are opaque slots, never shirt numbers.
 Write at most two short sentences in the requested language and persona.
 Use only numbers that already appear in the facts. Do not invent metrics, events, or causes.
+scoreRed/scoreBlue are the Liverpool/Manchester City scores; playersRed/playersBlue are the actual players still on the pitch. redCardsRed/redCardsBlue count dismissals. Use the current score and player advantage when relevant. A red card does not prove a later possession change was caused by it.
 Possession and press bypass facts are percentages with a % unit. Always retain the % unit; never write a fractional ratio such as 0.639 possession. Distances are metres and counts are integers.
 Casual: plain speech, almost no numbers.
-Analyst: the exact before-and-after metrics.
-Fan: same facts, framed for the viewer's team, never abusive or invented.
+Analyst: neutral coverage of both teams, explaining tactical changes using exact before-and-after metrics and the score/player-count context. No club allegiance; do not invent formations or tactical consequences.
+Fan: same facts, framed for the viewer's team: celebrate their goals, explain setbacks and verified player advantages, never abusive or invented.
 Player: what the focused player can take from the facts.
-Broadcaster: one headline, no adjectives you cannot prove.
+Broadcaster: one neutral headline for the whole audience, with no club allegiance and no adjectives you cannot prove.
 If the language is hi, write in Hindi. Otherwise write in English.
 Return only the sentence or headline, with no JSON and no preamble.
 """
@@ -184,7 +187,8 @@ def prompt_payload(moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     facts = {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
              for key, value in moment.facts.items()}
     return json.dumps({
-        "viewer": viewer.model_dump(),
+        "roster": identity_context(),
+        "viewer": viewer.model_profile(),
         "moment": {"id": moment.id, "type": moment.type, "frame": moment.frame,
                    "team_id": moment.team_id, "player_id": moment.player_id, "facts": facts},
         "units": {"possessionLast5": "percent", "pressBypassBefore": "percent",
@@ -243,3 +247,29 @@ async def personalize(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfil
     if checked != " ".join(text.strip().split()):
         logging.getLogger("matchos.model_calls").info("Reasoning text rejected by fact check for moment %s persona=%s; template=%s", moment.id, viewer.persona, checked)
     return checked
+
+
+async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
+                        provider: str, timeout_s: float = 15) -> Overlay:
+    """Prepare one complete card; never publish intermediate template copy."""
+    fallback = render_overlay(moment, viewer, rich=True, provider="template")
+    if agent is None:
+        fallback.source = "template"
+        return fallback
+    try:
+        text = await asyncio.wait_for(personalize(agent, moment, viewer), timeout=timeout_s)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        # Framework errors and the overall deadline also need a usable final card.
+        logging.getLogger(__name__).warning("Viewer language failed (%s); using persona fallback", type(exc).__name__)
+        from matchos.telemetry import record
+        record("viewer language fallback", {"momentId": moment.id, "viewer": viewer.model_profile()},
+               {"error": type(exc).__name__}, status="fallback")
+        fallback.source = "template"
+        return fallback
+    overlay = render_overlay(moment, viewer, rich=True, provider=provider)
+    overlay.body = text
+    if viewer.persona == "broadcaster":
+        overlay.headline = text
+    return overlay

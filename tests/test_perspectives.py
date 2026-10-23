@@ -52,14 +52,14 @@ def test_explanation_labels_model_preferences_and_preserves_exact_evidence():
     result = PipelineResult(kind='moment', candidates=VerifiedCandidates(candidates=candidates), decision=decision,
                             moment=chosen, producer=ProducerDecision(action='AIR',reason='Accepted'))
     before = chosen.model_dump()
-    description = explain(result, ViewerProfile(team_id='RED'))
+    description = explain(result, ViewerProfile(persona='fan', team_id='RED'))
     assert description['reasonSource'] == 'model'
     assert "viewer's team" in description['reason']
     assert description['evidence'] == [check.detail for check in chosen.checks][:2]
     assert description['held'][0]['id'] != chosen.id
     assert chosen.model_dump() == before
     # An unsupported model reason cannot masquerade as evidence of team relevance.
-    other = explain(result,ViewerProfile(team_id='BLUE'))
+    other = explain(result,ViewerProfile(persona='fan', team_id='BLUE'))
     assert "viewer's team" not in other['reason']
     result.producer = ProducerDecision(action='SUPPRESS',reason='Same story aired inside the last 90 seconds.')
     held = explain(result,ViewerProfile())

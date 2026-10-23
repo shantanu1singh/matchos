@@ -60,7 +60,7 @@ def test_frames_flow_while_decision_waits_and_pending_evidence_is_preserved(monk
     asyncio.run(run())
 
 
-def test_template_is_available_before_language_enrichment_finishes(monkeypatch):
+def test_frames_continue_until_final_language_result_is_ready(monkeypatch):
     async def run():
         session = _session(monkeypatch)
         waiting, release = asyncio.Event(), asyncio.Event()
@@ -72,24 +72,23 @@ def test_template_is_available_before_language_enrichment_finishes(monkeypatch):
 
         class SlowLanguageWorkflow:
             async def run(self, incoming, stream):
-                yield SimpleNamespace(data=PipelineResult(kind="moment", moment=moment))
                 waiting.set()
                 await release.wait()
-                yield SimpleNamespace(data=PipelineResult(kind="enrichment", moment=moment, moment_id=moment.id))
+                yield SimpleNamespace(data=PipelineResult(kind="moment", moment=moment))
 
         session.workflow = SlowLanguageWorkflow()
         try:
             await session.tick()
             await asyncio.wait_for(waiting.wait(), 1)
             _, _, outputs = await asyncio.wait_for(session.tick(), .5)
-            assert [output.kind for output in outputs] == ["moment"]
+            assert outputs == []
+            assert session.active is None
             assert not session._model_task.done()
-            session.take_air(outputs[0])
             session._pending_tick = None
             release.set()
             await asyncio.wait_for(session._model_task, 1)
             _, _, outputs = await session.tick()
-            assert [output.kind for output in outputs] == ["enrichment"]
+            assert [output.kind for output in outputs] == ["moment"]
         finally:
             await session.close()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from matchos.teams import team_name
 from matchos.pitch import event_label, pass_bypassed, shirt
 from matchos.schemas import (
     Check,
@@ -15,6 +16,9 @@ from matchos.schemas import (
     VerifiedCandidates,
 )
 from matchos.state_engine import StateEngine
+
+MAJOR_EVENT_WINDOW_MS = 60_000
+MAJOR_STORY_TTL_MS = 120_000
 
 FRAME_ORDER: list[MomentFrame] = [
     "GOAL",
@@ -141,8 +145,8 @@ class Verifier:
         line_now = roll.defensive_line_m or 0.0
         line_prev = roll.defensive_line_prev_m if roll.defensive_line_prev_m is not None else line_now
         facts: dict[str, float | int | str] = {
-            "defendingTeam": team.title(),
-            "attackingTeam": attacking.title(),
+            "defendingTeam": team_name(team),
+            "attackingTeam": team_name(attacking),
             "pressBypassBefore": round(roll.press_bypass_prev or 0.0, 3),
             "pressBypassNow": round(roll.press_bypass_rate or 0.0, 3),
             "pressBypassSample": roll.press_bypass_sample,
@@ -173,37 +177,45 @@ class Verifier:
         events: list[MatchEvent],
         comeback: bool,
     ) -> tuple[VerifiedMoment | None, list[Check]]:
-        goals = [event for event in events if event.type == "SHOT" and event.outcome == "GOAL"]
-        recent = [event for event in self.state_engine.events if event.type == "SHOT" and event.outcome == "GOAL" and state.timestamp_ms - event.timestamp_ms <= 15_000]
+        goals = [event for event in events if event.type == "SHOT" and event.outcome == "GOAL"
+                 and 0 <= state.timestamp_ms - event.timestamp_ms <= MAJOR_EVENT_WINDOW_MS]
+        recent = [event for event in self.state_engine.events if event.type == "SHOT" and event.outcome == "GOAL"
+                  and 0 <= state.timestamp_ms - event.timestamp_ms <= MAJOR_EVENT_WINDOW_MS]
         goals = goals or recent
         passed = bool(goals)
-        checks = [Check(name="goal_event", passed=passed, detail="Goal event inside the live tick." if passed else "No goal event.")]
+        checks = [Check(name="goal_event", passed=passed, detail="Goal event verified in the recent feed." if passed else "No goal event.")]
         if not passed:
             return None, checks
         goal = goals[-1]
-        diff = abs(state.score_red - state.score_blue)
-        is_comeback = diff <= 1 and (state.score_red + state.score_blue) >= 2
+        margin = (state.score_red - state.score_blue) * (1 if goal.team_id == "RED" else -1)
+        # A goal taking a level match into the lead is not a comeback.
+        is_comeback = margin == 0
         if comeback and not is_comeback:
             return None, checks + [Check(name="comeback_score", passed=False, detail="Scoreline is not a comeback.")]
         if comeback:
             checks.append(Check(name="comeback_score", passed=True, detail=f"{state.score_red}-{state.score_blue}"))
         facts = {
-            "scoringTeam": goal.team_id.title(),
+            "scoringTeam": team_name(goal.team_id),
             "scorer": goal.player_id or "",
             "scoreRed": state.score_red,
             "scoreBlue": state.score_blue,
             "minute": goal.minute,
+            "scoreBeforeRed": state.score_red - int(goal.team_id == "RED"),
+            "scoreBeforeBlue": state.score_blue - int(goal.team_id == "BLUE"),
         }
         frame: MomentFrame = "COMEBACK" if comeback else "GOAL"
         return self._moment(state, decision, "GOAL" if not comeback else "COMEBACK", frame, goal.team_id, goal.player_id, facts, [goal], [goal.player_id] if goal.player_id else []), checks
 
     def _card(self, state: MatchState, decision: MomentDecision, events: list[MatchEvent]) -> tuple[VerifiedMoment | None, list[Check]]:
-        cards = [event for event in events if event.type == "CARD" and event.qualifiers.get("card") == "red"]
+        cards = [event for event in events if event.type == "CARD" and event.qualifiers.get("card") == "red"
+                 and 0 <= state.timestamp_ms - event.timestamp_ms <= MAJOR_EVENT_WINDOW_MS]
+        cards = cards or [event for event in self.state_engine.events if event.type == "CARD" and event.qualifiers.get("card") == "red"
+                          and 0 <= state.timestamp_ms - event.timestamp_ms <= MAJOR_EVENT_WINDOW_MS]
         checks = [Check(name="red_card_event", passed=bool(cards), detail="Red card event present." if cards else "No red card.")]
         if not cards:
             return None, checks
         card = cards[-1]
-        facts = {"cardTeam": card.team_id.title(), "player": card.player_id or "", "minute": card.minute}
+        facts = {"cardTeam": team_name(card.team_id), "player": card.player_id or "", "minute": card.minute}
         return self._moment(state, decision, "RED_CARD", "RED_CARD", card.team_id, card.player_id, facts, [card], [card.player_id] if card.player_id else []), checks
 
     def _player(self, state: MatchState, decision: MomentDecision) -> tuple[VerifiedMoment | None, list[Check]]:
@@ -277,7 +289,7 @@ class Verifier:
         if len(evidence) < 2:
             return None, checks
         facts = {
-            "player": "RED 17",
+            "player": shirt("red_17"),
             "playerId": "red_17",
             "progressiveActions": player.progressive_actions,
             "boxEntries": player.box_entries,
@@ -297,8 +309,8 @@ class Verifier:
         if not passed:
             return None, checks
         facts = {
-            "leadingTeam": leading.title(),
-            "trailingTeam": ("Blue" if leading == "RED" else "Red"),
+            "leadingTeam": team_name(leading),
+            "trailingTeam": team_name("BLUE" if leading == "RED" else "RED"),
             "possessionLast5": round(share, 3),
             "finalThirdEntries": entries,
             "finalThirdEntriesBefore": prev,
@@ -313,7 +325,7 @@ class Verifier:
             return None, checks
         shot = shots[-1]
         facts = {
-            "team": shot.team_id.title(),
+            "team": team_name(shot.team_id),
             "player": shot.player_id or "",
             "outcome": shot.outcome or "",
             "minute": shot.minute,
@@ -333,7 +345,11 @@ class Verifier:
         highlight: list[str | None],
     ) -> VerifiedMoment:
         self._seq += 1
-        ttl_ms = 40_000
+        ttl_ms = MAJOR_STORY_TTL_MS if frame in {"GOAL", "COMEBACK", "RED_CARD"} else 40_000
+        # Match context is sourced from the same frozen deterministic state.
+        facts = {"scoreRed": state.score_red, "scoreBlue": state.score_blue,
+                 "playersRed": state.red.players_on_pitch, "playersBlue": state.blue.players_on_pitch,
+                 "redCardsRed": state.red.red_cards, "redCardsBlue": state.blue.red_cards, **facts}
         items = [
             EvidenceItem(
                 id=event.id,
@@ -363,7 +379,7 @@ class Verifier:
             evidence=[item.id for item in items],
             evidence_detail=items,
             valid_from_ms=state.timestamp_ms,
-            expires_at_ms=state.timestamp_ms + ttl_ms,
+            expires_at_ms=(min(event.timestamp_ms for event in evidence) if frame in {"GOAL", "COMEBACK", "RED_CARD"} and evidence else state.timestamp_ms) + ttl_ms,
             highlight_player_ids=[player for player in highlight if player],
             checks=[],
         )

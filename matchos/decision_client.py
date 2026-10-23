@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 import httpx
 
+from matchos.teams import identity_context
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
 from matchos.schemas import MatchState, MomentDecision, MomentFrame, VerifiedMoment, ViewerProfile
@@ -148,6 +149,7 @@ class GatewayDecisionClient:
 
 def _decision_state(state: MatchState, reasons: list[str], focus_player_id: str | None) -> dict:
     return {
+        "roster": identity_context(),
         "minute": state.minute,
         "score": {"RED": state.score_red, "BLUE": state.score_blue},
         "reasons": reasons,
@@ -241,15 +243,18 @@ def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer
     from matchos.language_agent import PERCENT_FACTS
     from matchos.producer import GAPS
     policies = {
-        "analyst": "Prioritize meaningful tactical or territorial changes with strong before-and-after evidence.",
-        "fan": "Prioritize the selected team's fortunes, including verified pressure from the opponent. Avoid repetitive emotional commentary.",
+        "analyst": "Cover both teams neutrally, with no club allegiance or preferred player. Prioritize meaningful tactical or territorial changes with strong before-and-after evidence; cover major goals and dismissals using their verified score and player-count context.",
+        "fan": "Prioritize the selected team's fortunes, including verified pressure from the opponent. A goal or dismissal for either side can change the supported team's score or player advantage; use that verified context. Avoid repetitive emotional commentary.",
         "player": "Prioritize direct evidence about the focused player. Prefer NONE for unrelated tactical stories unless there is a major match event.",
         "casual": "Interrupt for goals, red cards, comebacks or clearly significant chances. Prefer NONE for ordinary tactical fluctuations, gradual possession changes and repeated updates.",
-        "broadcaster": "Prioritize the strongest new story useful to a broad live audience. Prefer NONE if no timely broadcast cue is warranted.",
+        "broadcaster": "Cover the whole match neutrally, with no club allegiance or preferred player. Prioritize major events and the strongest timely new story useful to a broad live audience. Prefer NONE over repeating routine tactical or possession updates if no timely broadcast cue is warranted.",
     }
     return {"task": "Select from verified candidates; do not invent facts or choose unavailable candidates.",
+            "roster": identity_context(),
             "minute": state.minute, "score": {"RED": state.score_red, "BLUE": state.score_blue},
-            "viewer": viewer.model_dump(mode="json"),
+            "playersOnPitch": {"RED": state.red.players_on_pitch, "BLUE": state.blue.players_on_pitch},
+            "redCards": {"RED": state.red.red_cards, "BLUE": state.blue.red_cards},
+            "viewer": viewer.model_profile(),
             "editorialPolicy": {"guidance": policies[viewer.persona], "minimumGapSeconds": GAPS[viewer.persona], "timeUnit": "wall-clock seconds"}, **context,
             "verifiedCandidates": [
                 {"id": moment.id, "frame": moment.frame, "team": moment.team_id, "player": moment.player_id,
@@ -412,11 +417,14 @@ class LocalDecisionClient:
             raise ValueError("Editorial selection requires verified candidates")
         started = time.perf_counter()
         call = ModelCall("editorial selection", self.provider, _editorial_state(state, candidates, viewer, context))
-        scores = _frame_scores(state, context.get("triggerReasons", []), viewer.player_id)
-        chosen = max(candidates, key=lambda candidate: scores.get(candidate.frame, 0))
-        confidence = scores.get(chosen.frame, 0)
-        result = _parse_selection({"candidate": {"type": "choice", "choice": chosen.id, "confidence": confidence,
-                                                "probabilities": [{"value": candidate.id, "probability": scores.get(candidate.frame, 0)} for candidate in candidates]},
+        scores = _fallback_candidate_scores(state, candidates, viewer, context)
+        chosen = max(candidates, key=lambda candidate: scores[candidate.id])
+        confidence = scores[chosen.id]
+        threshold = {"analyst": .5, "fan": .5, "broadcaster": .65, "casual": .65, "player": .55}[viewer.persona]
+        selected = chosen.id if confidence >= threshold else "NONE"
+        result = _parse_selection({"candidate": {"type": "choice", "choice": selected, "confidence": confidence if selected != "NONE" else 1 - confidence,
+                                                "probabilities": [{"value": candidate.id, "probability": scores[candidate.id]} for candidate in candidates]
+                                                                 + [{"value": "NONE", "probability": _clamp(1 - confidence)}]},
                                    "importance": {"type": "score", "score": round(confidence * 5, 2)},
                                    "shouldSurface": {"type": "predicate", "probability": max(confidence, .9) if chosen.frame in {"GOAL", "COMEBACK", "RED_CARD"} else confidence}},
                                   candidates, self.provider, (time.perf_counter() - started) * 1000)
@@ -471,6 +479,41 @@ class LocalDecisionClient:
         )
         call.result(decision.model_dump(mode="json"))
         return decision
+
+
+def _fallback_candidate_scores(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict[str, float]:
+    """Offline editorial preferences; scores are heuristics, not calibrated probabilities."""
+    from matchos.producer import GAPS
+    recent = context.get("recentUpdates", [])
+    scores = {}
+    major = {"GOAL", "COMEBACK", "RED_CARD"}
+    for candidate in candidates:
+        frame = candidate.frame
+        # Score each player's own evidence rather than an inactive viewer focus.
+        base = _frame_scores(state, context.get("triggerReasons", []), candidate.player_id)
+        score = base.get(frame, 0)
+        if frame in major:
+            score = .95 if frame == "RED_CARD" else .97
+        else:
+            if frame == "SHOT_CHANCE":
+                score = .6  # The candidate already passed the shot evidence checks.
+            if viewer.persona == "analyst":
+                score = score + .08 if frame == "PRESS_BREAKDOWN" else score + .03 if frame == "MOMENTUM_SWING" else score * .85
+            elif viewer.persona == "broadcaster":
+                score = score + .1 if frame == "SHOT_CHANCE" else score * (.7 if frame == "PLAYER_IMPACT" else .85)
+            elif viewer.persona == "fan":
+                score = score + .08 if candidate.team_id == viewer.team_id else score * .92
+            elif viewer.persona == "player":
+                score = score + .1 if candidate.player_id == viewer.player_id else score * .5
+            elif viewer.persona == "casual":
+                score *= 1.1 if frame == "SHOT_CHANCE" else .6
+            if any(item.get("frame") == frame and item.get("secondsAgo", 1000) < 90 for item in recent):
+                score *= .35
+            if any(item.get("secondsAgo", 1000) < GAPS[viewer.persona] for item in recent):
+                score = 0
+        # Major live events must outrank even the strongest routine story.
+        scores[candidate.id] = round(_clamp(score, hi=1 if frame in major else .94), 3)
+    return scores
 
 
 def _frame_scores(state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> dict[str, float]:

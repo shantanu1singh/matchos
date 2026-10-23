@@ -1,24 +1,22 @@
 """Microsoft Agent Framework workflow for one live match tick.
 
 Code executors own state, triggering, candidate verification and production.
-The only model-shaped call on the way to a fast overlay is the typed
-editorial decision client, which selects from verified candidates. The language agent runs after that overlay is yielded.
+A typed editorial decision selects from verified candidates. The language agent
+prepares guarded persona copy before one complete overlay is yielded.
 """
 
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from typing_extensions import Never
 
 from agent_framework import (
-    AgentExecutorRequest,
-    AgentExecutorResponse,
     Case,
     Default,
     Executor,
-    Message,
     Workflow,
     WorkflowBuilder,
     WorkflowContext,
@@ -26,9 +24,9 @@ from agent_framework import (
 )
 
 from matchos.telemetry import record, quiet
-from matchos.copy import render_overlay
 from matchos.decision_client import DecisionClient
-from matchos.language_agent import Agent, build_language_executor, faithful_text, prompt_payload
+from matchos.language_agent import Agent, build_language_executor, final_overlay
+from matchos.llm_config import LLMConfig
 from matchos.producer import Producer
 from matchos.schemas import (
     MatchState,
@@ -45,7 +43,7 @@ from matchos.schemas import (
 )
 from matchos.state_engine import StateEngine
 from matchos.trigger_engine import TriggerEngine
-from matchos.verifier import Verifier
+from matchos.verifier import Verifier, MAJOR_EVENT_WINDOW_MS
 
 
 @dataclass
@@ -78,11 +76,11 @@ class MatchServices:
     producer: Producer
     language_provider: str
     agent: Agent | None = None
-    pending_moment: VerifiedMoment | None = None
-    pending_viewer: ViewerProfile | None = None
+    reasoning_timeout_s: float = 15
     recent_updates: list[dict] = field(default_factory=list)
     additional_focus_ids: list[str] = field(default_factory=list)
     shared_candidates_only: bool = False
+    observed_major_event_ids: set[str] = field(default_factory=set)
 
 
 def _fired(packet: object) -> bool:
@@ -143,6 +141,18 @@ class TriggerExecutor(Executor):
             "focus_between": focus.between_lines_last8 if focus else 0,
         }
         packet.trigger = self.services.trigger_engine.evaluate(packet.tick, state.deltas, samples)
+        # Seeking restores rolling evidence without replaying historical model calls.
+        # Recover a still-recent goal/dismissal even if it preceded this live tick.
+        recent_major = [event for event in self.services.state_engine.events
+                        if 0 <= state.timestamp_ms - event.timestamp_ms <= MAJOR_EVENT_WINDOW_MS
+                        and ((event.type == "SHOT" and event.outcome == "GOAL")
+                             or (event.type == "CARD" and event.qualifiers.get("card") == "red"))]
+        unseen = [event for event in recent_major if event.id not in self.services.observed_major_event_ids]
+        if unseen:
+            reasons = ["goal" if event.type == "SHOT" else "red_card" for event in unseen]
+            packet.trigger = TriggerResult(fired=True, reasons=list(dict.fromkeys([*packet.trigger.reasons, *reasons])))
+            self.services.trigger_engine.last_fire_ms = state.timestamp_ms
+        self.services.observed_major_event_ids.update(event.id for event in recent_major)
         packet.timings_ms["trigger"] = (time.perf_counter() - started) * 1000
         record("trigger", {"deltas": state.deltas, "samples": samples}, packet.trigger, packet.timings_ms["trigger"])
         await ctx.send_message(packet)
@@ -234,7 +244,7 @@ class ProducerExecutor(Executor):
         if decision is not None and decision.selected_candidate_id is None:
             packet.producer = ProducerDecision(action="SUPPRESS", reason="Decision model chose no update.")
         else:
-            packet.producer = self.services.producer.decide(
+            packet.producer = deepcopy(self.services.producer).decide(
                 verification.moment if verification else None,
                 bool(verification and verification.verified),
                 decision.should_surface if decision else 0.0,
@@ -247,30 +257,25 @@ class ProducerExecutor(Executor):
 
 
 class PublishExecutor(Executor):
-    def __init__(self, services: MatchServices, language_executor) -> None:
+    def __init__(self, services: MatchServices) -> None:
         super().__init__(id="publish")
         self.services = services
-        self.language_executor = language_executor
 
     @handler
-    async def publish(self, packet: PipelinePacket, ctx: WorkflowContext[AgentExecutorRequest, PipelineResult]) -> None:
+    async def publish(self, packet: PipelinePacket, ctx: WorkflowContext[Never, PipelineResult]) -> None:
         started = time.perf_counter()
         assert packet.moment is not None
-        overlay = render_overlay(packet.moment, packet.viewer, rich=False, provider="template")
-        packet.overlay = overlay
-        packet.timings_ms["template"] = (time.perf_counter() - started) * 1000
-        record("template", packet.moment, overlay, packet.timings_ms["template"])
-        self.services.pending_moment = packet.moment
-        self.services.pending_viewer = packet.viewer
-        await ctx.yield_output(self._result(packet, "moment"))
-        # Each enrichment stands alone. Prior moments must not leak into the prompt.
-        self.language_executor._cache.clear()
-        await ctx.send_message(
-            AgentExecutorRequest(
-                messages=[Message("user", [prompt_payload(packet.moment, packet.viewer)])],
-                should_respond=True,
-            )
-        )
+        packet.overlay = await final_overlay(self.services.agent, packet.moment, packet.viewer,
+                                             self.services.language_provider, self.services.reasoning_timeout_s)
+        packet.timings_ms["language"] = (time.perf_counter() - started) * 1000
+        record("final overlay", packet.moment, packet.overlay, packet.timings_ms["language"])
+        if packet.moment.expires_at_ms <= self.services.state_engine.state.timestamp_ms:
+            packet.producer = ProducerDecision(action="SUPPRESS", reason="This story expired while preparing its final text.")
+        else:
+            packet.producer = self.services.producer.decide(packet.moment, True, packet.decision.should_surface, packet.viewer)
+        if packet.producer.action != "AIR":
+            packet.overlay = None
+        await ctx.yield_output(self._result(packet, "moment" if packet.overlay else "trace"))
 
     def _result(self, packet: PipelinePacket, kind: str) -> PipelineResult:
         return PipelineResult(
@@ -312,37 +317,11 @@ class TraceExecutor(Executor):
         )
 
 
-class EnrichmentExecutor(Executor):
-    def __init__(self, services: MatchServices) -> None:
-        super().__init__(id="enrichment")
-        self.services = services
-
-    @handler
-    async def enrich(self, response: AgentExecutorResponse, ctx: WorkflowContext[Never, PipelineResult]) -> None:
-        moment = self.services.pending_moment
-        viewer = self.services.pending_viewer
-        if moment is None or viewer is None:
-            return
-        text = faithful_text(response.agent_response.text or "", moment, viewer)
-        overlay = render_overlay(moment, viewer, rich=True, provider=self.services.language_provider)
-        overlay.body = text
-        overlay.headline = text if viewer.persona == "broadcaster" else overlay.headline
-        await ctx.yield_output(
-            PipelineResult(
-                kind="enrichment",
-                moment=moment,
-                overlay=overlay,
-                moment_id=moment.id,
-                enrichment_text=text,
-            )
-        )
-
-
 def build_workflow(services: MatchServices | None = None, *, shared_candidates_only: bool = False) -> tuple[Workflow, MatchServices]:
     if services is None:
         services = new_services()
     services.shared_candidates_only = shared_candidates_only or services.shared_candidates_only
-    language_executor, agent, provider = build_language_executor()
+    _, agent, provider = build_language_executor()
     services.language_provider = provider
     services.agent = agent
     state = StateUpdateExecutor(services)
@@ -351,9 +330,8 @@ def build_workflow(services: MatchServices | None = None, *, shared_candidates_o
     decision = DecisionExecutor(services)
     verifier = VerificationExecutor(services)
     producer = ProducerExecutor(services)
-    publish = PublishExecutor(services, language_executor)
+    publish = PublishExecutor(services)
     trace = TraceExecutor()
-    enrich = EnrichmentExecutor(services)
     if services.shared_candidates_only:
         workflow = (WorkflowBuilder(start_executor=state)
                     .add_edge(state, trigger)
@@ -375,8 +353,6 @@ def build_workflow(services: MatchServices | None = None, *, shared_candidates_o
                 Default(target=trace),
             ],
         )
-        .add_edge(publish, language_executor)
-        .add_edge(language_executor, enrich)
         .build()
     )
     return workflow, services
@@ -386,10 +362,12 @@ def new_services() -> MatchServices:
     state_engine = StateEngine()
     from matchos.decision_client import build_decision_client
 
+    config = LLMConfig.from_env()
     return MatchServices(
         state_engine=state_engine,
         trigger_engine=TriggerEngine(),
-        decisions=build_decision_client(),
+        decisions=build_decision_client(config),
+        reasoning_timeout_s=config.reasoning_timeout_s,
         verifier=Verifier(state_engine),
         producer=Producer(),
         language_provider="local-renderer",

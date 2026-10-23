@@ -33,7 +33,7 @@ SCENARIOS: dict[str, Scenario] = {
     "press_collapse": Scenario(
         id="press_collapse",
         label="Press collapse",
-        description="Blue start with a high press. From 55' their line drops and Red begin to play through it.",
+        description="City's press drops after 55'. Liverpool score around 65'; City receive one red card at 68'. Watch the personas respond to the changing match.",
         start_minute=50,
         warmup_from_minute=42,
         default_speed=1,
@@ -43,7 +43,7 @@ SCENARIOS: dict[str, Scenario] = {
     "substitute_impact": Scenario(
         id="substitute_impact",
         label="Substitute impact",
-        description="Red send on a quicker wide player at 65'. The feed is not told that this matters.",
+        description="Liverpool send on a quicker wide player at 65'. The feed is not told that this matters.",
         start_minute=62,
         warmup_from_minute=55,
         default_speed=1,
@@ -53,7 +53,7 @@ SCENARIOS: dict[str, Scenario] = {
     "late_comeback": Scenario(
         id="late_comeback",
         label="Late comeback",
-        description="Red trail 0–2 at 75', change shape, and are given two real chances late.",
+        description="Liverpool trail 0–2 at 75', change shape, and are given two real chances late.",
         start_minute=74,
         warmup_from_minute=70,
         default_speed=1,
@@ -63,7 +63,7 @@ SCENARIOS: dict[str, Scenario] = {
     "red_card": Scenario(
         id="red_card",
         label="Red card chaos",
-        description="Blue go down to ten. The remaining block has to cover more grass.",
+        description="Manchester City go down to ten. The remaining block has to cover more grass.",
         start_minute=32,
         warmup_from_minute=25,
         default_speed=1,
@@ -128,6 +128,15 @@ def style_for(scenario_id: str, minute: float, team: TeamId) -> dict[str, float]
     if scenario_id == "substitute_impact" and team == "RED" and minute >= 65:
         style["width"] = 0.78
         style["tempo"] = 0.82
+    if scenario_id == "press_collapse" and minute >= 68:
+        # The dismissal changes the simulated shape and play, not the insight labels.
+        if team == "BLUE":
+            style["press"] = 0.20
+            style["defensive_line"] = 0.32
+            style["width"] = 0.46
+        else:
+            style["width"] = 0.76
+            style["tempo"] = 0.86
     return style
 
 

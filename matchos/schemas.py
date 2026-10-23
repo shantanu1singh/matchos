@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 TeamId = Literal["RED", "BLUE"]
 Persona = Literal["casual", "analyst", "fan", "player", "broadcaster"]
@@ -79,6 +79,7 @@ class MatchEvent(BaseModel):
 
 
 class TrackingPlayer(BaseModel):
+    name: str = ""
     player_id: str
     team_id: TeamId
     number: int
@@ -136,6 +137,8 @@ class Tick(BaseModel):
 
 
 class TeamRollup(BaseModel):
+    players_on_pitch: int = 11
+    red_cards: int = 0
     possession_last5: float = 0.5
     final_third_entries_last5: int = 0
     final_third_entries_prev5: int = 0
@@ -269,7 +272,7 @@ class Overlay(BaseModel):
     moment_id: str
     persona: Persona
     language: Language
-    team_id: TeamId
+    team_id: TeamId | None
     player_id: str | None = None
     kicker: str
     headline: str
@@ -282,9 +285,32 @@ class Overlay(BaseModel):
 
 class ViewerProfile(BaseModel):
     persona: Persona = "casual"
-    team_id: TeamId = "BLUE"
+    team_id: TeamId | None = "RED"
     language: Language = "en"
     player_id: str = "red_7"
+
+    @model_validator(mode="after")
+    def normalize_allegiance(self):
+        # Also normalize older clients that still send a team for these roles.
+        if self.persona in {"analyst", "broadcaster"}:
+            self.team_id = None
+        elif self.team_id is None:
+            self.team_id = "RED"
+        return self
+
+    def model_profile(self) -> dict:
+        """Send only preferences relevant to editorial selection and language."""
+        profile = self.model_dump(mode="json")
+        profile["scope"] = "whole_match"
+        if self.persona != "fan":
+            profile.pop("team_id")
+        else:
+            profile["scope"] = "supported_team"
+        if self.persona != "player":
+            profile.pop("player_id")
+        else:
+            profile["scope"] = "focused_player"
+        return profile
 
 
 class PipelineResult(BaseModel):

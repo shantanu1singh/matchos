@@ -13,6 +13,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
+from matchos.teams import PLAYERS, shirt_number
 from matchos.animation import plan_arrival
 from matchos.pitch import (
     ANCHORS,
@@ -121,7 +122,7 @@ class MatchSimulator:
                 player = SimPlayer(
                     player_id=f"{team.lower()}_{number}",
                     team_id=team,  # type: ignore[arg-type]
-                    number=number,
+                    number=shirt_number(f"{team.lower()}_{number}", number),
                     role=role,
                     x=0.0,
                     y=0.0,
@@ -234,6 +235,7 @@ class MatchSimulator:
                     player_id=player.player_id,
                     team_id=player.team_id,
                     number=player.number,
+                    name=PLAYERS.get(player.player_id, {}).get("name", ""),
                     role=player.role,
                     x=round(player.x, 2),
                     y=round(player.y, 2),
@@ -321,7 +323,7 @@ class MatchSimulator:
         return clamp(x, 1.0, PITCH_X - 1.0), clamp(y, 1.5, PITCH_Y - 1.5)
 
     def _blue_down_a_player(self) -> bool:
-        return self.scenario_id == "red_card" and self.minute() >= 36
+        return len(self._on_pitch("BLUE")) < 11
 
     def _move_players(self, dt_s: float) -> None:
         flight = self.flight
@@ -1267,6 +1269,15 @@ class MatchSimulator:
     def _scripts(self) -> list[MatchEvent]:
         events: list[MatchEvent] = []
         minute_ms = self.clock_ms
+        if self.scenario_id == "press_collapse":
+            if "lab_goal65" not in self.done_scripts and minute_ms >= 65 * 60_000:
+                scripted = self._script_goal("red_9", "lab_goal65")
+                events.extend(scripted)
+                if any(event.type == "SHOT" and event.outcome == "GOAL" for event in scripted):
+                    self.done_scripts.add("lab_goal65")
+            if "lab_card68" not in self.done_scripts and minute_ms >= 68 * 60_000:
+                events.extend(self._red_card("blue_8"))
+                self.done_scripts.add("lab_card68")
         if self.scenario_id == "substitute_impact" and "sub" not in self.done_scripts and minute_ms >= 65 * 60_000:
             events.extend(self._substitute("red_11", "red_17"))
             self.done_scripts.add("sub")
@@ -1305,7 +1316,7 @@ class MatchSimulator:
         on = SimPlayer(
             player_id=on_id,
             team_id=off.team_id,
-            number=17,
+            number=shirt_number(on_id, 17),
             role=off.role,
             x=off.x,
             y=off.y,
@@ -1342,7 +1353,7 @@ class MatchSimulator:
         return [foul, card]
 
     def _script_goal(self, scorer_id: str, script_key: str) -> list[MatchEvent]:
-        """Stage a deterministic comeback through visible football actions.
+        """Stage a deterministic goal through visible football actions.
 
         The old implementation could credit a player with a shot from wherever
         the ball happened to be. Here the scenario first wins possession if
@@ -1437,6 +1448,7 @@ class MatchSimulator:
                     player_id=player.player_id,
                     team_id=player.team_id,
                     number=player.number,
+                    name=PLAYERS.get(player.player_id, {}).get("name", ""),
                     role=player.role,
                     x=round(slot.x, 2),
                     y=round(slot.y, 2),

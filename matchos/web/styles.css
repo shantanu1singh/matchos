@@ -4,8 +4,8 @@
   --ink: #f3f6f2;
   --muted: #9aafa4;
   --line: rgba(232, 240, 232, 0.12);
-  --red: #ff5d52;
-  --blue: #5b93ff;
+  --red: #e94c55;
+  --blue: #8cc8eb;
   --gold: #e6c36a;
   --grass-a: #146845;
   --grass-b: #18784e;
@@ -106,6 +106,8 @@ button { cursor: pointer; }
 .scorebug .side b { font-size: 28px; font-weight: 640; }
 .scorebug .red b { color: var(--red); }
 .scorebug .blue b { color: var(--blue); }
+.scorebug .side .red-card-count { display: grid; place-items: center; width: 15px; height: 21px; border-radius: 3px; background: #c52d3b; color: #fff; font: 600 11px "IBM Plex Mono", monospace; letter-spacing: 0; }
+.scorebug .side .red-card-count[hidden] { display: none; }
 .clock {
   min-width: 92px; display: grid; place-items: center;
   font-family: "IBM Plex Mono", monospace;
@@ -372,7 +374,7 @@ select, input {
 /* One shared match, three independently edited perspectives. */
 #panel-watch { grid-template-columns: minmax(0, 1fr) minmax(360px, 33%); gap: 16px; }
 .rail { gap: 10px; }
-.persona-panel { padding: 11px; border-radius: 16px; transition: border-color .2s; }
+.persona-panel { min-width: 0; padding: 11px; border-radius: 16px; transition: border-color .2s; }
 .card-top { margin-bottom: 4px; }
 .persona-panel .settings-button { width: 28px; height: 28px; font-size: 22px; }
 .card-top b { display: none; }
@@ -383,6 +385,10 @@ select, input {
 .status-update { color: var(--gold); }
 .status-quiet { color: var(--muted); }
 .editorial-status > span { text-transform: uppercase; letter-spacing: .07em; }
+.held-update { display: flex; align-items: center; gap: 7px; margin-top: 7px; padding: 5px 7px; border-left: 2px solid var(--gold); border-radius: 0 6px 6px 0; background: rgba(230,195,106,.05); color: var(--muted); }
+.held-update > span { flex: none; color: var(--gold); font: 9px "IBM Plex Mono", monospace; text-transform: uppercase; }
+.held-update > p { flex: 1; min-width: 0; margin: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.held-update > time { flex: none; font: 9px "IBM Plex Mono", monospace; }
 .persona-panel .pulse { gap: 5px; margin-top: 6px; }
 .persona-panel .pulse span { font-size: 10px; padding: 3px 7px; }
 .persona-panel .why { margin-top: 4px; }
@@ -397,7 +403,7 @@ select, input {
 .editorial-details li { margin-bottom: 5px; }
 .raw-event { flex: none; padding: 10px 14px; font-size: 11px; }
 .raw-event > summary { cursor: pointer; color: var(--muted); font: 11px "IBM Plex Mono", monospace; }
-#extra-views { gap: 10px; }
+#extra-views { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; }
 .comparison-note { font-size: 11px; }
 @keyframes viewer-selection { from { border-color: var(--gold); box-shadow: 0 0 0 1px #e6c36a44; } to { border-color: var(--line); box-shadow: none; } }
 .selection-flash { animation: viewer-selection 1.2s ease-out; }
@@ -417,3 +423,6 @@ select, input {
   .persona-panel .proof > summary { padding: 5px 8px; font-size: 10px; }
   .persona-panel .pulse span { font-size: 9px; padding: 3px 6px; }
 }
+
+/* Hidden persona settings must stay out of grid/flex control layouts. */
+.controls [hidden] { display: none !important; }

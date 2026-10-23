@@ -2,7 +2,7 @@
 
 Real-time personalized match intelligence on a synthetic football match.
 
-Twenty-two players and a ball move on a 2D tactical board. The same feed — provider-neutral events plus 105×68m tracking — is what MatchOS reads. When the match changes in a way that can be proved, a verified moment is overlaid and then rephrased for whoever is watching.
+Liverpool and Manchester City play a simulated match. Twenty-two players and a ball move on a 2D tactical board. The same feed — provider-neutral events plus 105×68m tracking — is what MatchOS reads. When the match changes in a way that can be proved, a verified moment is overlaid and then rephrased for whoever is watching.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the system design, Mermaid diagrams, and component responsibilities.
 
@@ -17,13 +17,14 @@ state update (code)
       → verified candidates (code)
       → one typed editorial selection call
       → producer (code)
-      → fast template overlay
       → language agent (Gemini 3.8 Flash on Vertex AI when configured)
+      → validated persona text or fallback
+      → publish one finished card
 ```
 
 When evidence produces candidates, each configured viewer makes an independent decision call that chooses a verified candidate or `NONE`. Triggers without a supported candidate skip the model call. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
 
-The live feed sends frames every 100 ms independently of the model workflow. One shared evidence workflow runs at a time; separate background workers select and render for each viewer. Feed events and tracking samples arriving during evidence processing are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Each viewer receives a template after their selection and producer rules clear, with language enrichment arriving later. Expired moments and results for an old viewer profile are discarded. Viewer changes cancel only the changed perspective and select again from the latest verified pool; pause controls do not wait for model calls.
+The live feed sends frames every 100 ms independently of the model workflow. One shared evidence workflow runs at a time; separate background workers select and render for each viewer. Feed events and tracking samples arriving during evidence processing are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Each viewer publishes one finished card after its selected story clears production rules and its language response passes validation. The last aired card stays visible while the next response is prepared; no intermediate template is sent. Failures or the configured reasoning deadline produce one persona-specific fallback. Air-time and recent-story history start only when the final card is ready. Expired moments and results for an old viewer profile are discarded. Viewer changes cancel only the changed perspective and select again from the latest verified pool; pause controls do not wait for model calls.
 
 ## Run
 
@@ -37,11 +38,30 @@ Open http://localhost:8000.
 
 Use the same Python environment to install dependencies and start the app. If a reasoning dependency is missing, MatchOS logs the active Python path and uses the fact renderer. To run with another environment, install with that environment's `python -m pip install -r requirements.txt` before starting `python -m matchos`.
 
-The default lab match is `press_collapse` with seed `47129` at 1×. Blue’s press starts high. From 55' the block drops and Red play through it. MatchOS is not told the scenario name.
+The default lab match is `press_collapse` with seed `47129` at 1×. Manchester City’s press starts high. From 55' the block drops and Liverpool play through it. The same default lab also includes these synthetic turning points:
+
+| Match time (default seed) | Feed event | Match effect |
+|---|---|---|
+| 65:03 | Alexander Isak scores after a visible setup pass | Liverpool lead 2–1 |
+| 68:00 | Mateo Kovacic receives a red card | City have ten players and sit deeper/narrower |
+
+The goal is staged from 65' and its exact second can vary with a different seed. These are simulated events, not claims about a real fixture. They enter the normal feed, rolling state, evidence checks, decision calls and persona rendering; scenario labels are not sent to the models. The scoreboard shows red-card counts, and each persona's live stat capsules show the current player advantage after a dismissal. Analyst copy explains the score/player-count context, the Liverpool fan view frames the advantage for their team, and Broadcaster gives a neutral event headline.
+
+Routine candidates have a 40-second **match-time** validity window; major goal/dismissal stories have 120 seconds, anchored to the actual event. At 20× these windows are only two and six real seconds. Decision/language latency can therefore make a story expire before publication; the old aired card remains, and the held notice explains which wait exceeded the window. Slow remote models are easier to watch at 1× or 2×. Already stale/covered stories skip model calls. Major evidence remains discoverable in the rolling feed for 60 match seconds and is deduplicated by source event ID for each viewer, so a busy worker can recover a recent event without airing it repeatedly.
 
 ## Viewer modes
 
 Casual, analyst, home fan, player focus, and broadcaster all read the same verified facts. Each viewer can choose a different story or no interruption. The same immutable candidate pool supplies all viewers; the model is not forced to disagree. Why this decision explains selection and suppression, while Facts & evidence exposes the exact underlying checks and events.
+
+Analyst and Broadcaster model inputs omit team allegiance and inactive player focus. Fan inputs retain the supported team; Player inputs retain the focused player. The local fallback also uses persona preferences, recent-story history and interruption cadence, and can choose `NONE`. Its scores are editorial heuristics, not calibrated model probabilities. Different personas may still choose the same supported story.
+
+## Demo squads
+
+The default views are neutral Analyst, Liverpool Home fan, and neutral Broadcaster. Analyst and Broadcaster have no team selector and show statistics for both sides. Team selections, pitch labels, evidence, and model prompts use the club and player identities in [`matchos/teams.py`](matchos/teams.py). The selected squads use [2026/27 Premier League shirt numbers](https://www.premierleague.com/en/news/4725682), checked on 23 October 2026. These are demo selections, not a real fixture or confirmed starting lineups; match events and player abilities are generated by the simulator.
+
+`RED` maps to Liverpool and `BLUE` to Manchester City. Player IDs such as `red_7` are stable simulation slots, **not shirt numbers**. Always use the roster metadata for names and numbers; this also covers the substitute and keeps replay scripts stable.
+
+The Producer tab is a read-only history of the primary viewer's production decisions: aired, suppressed, or rejected updates, model frame scores, and verification checks. Telemetry provides execution inputs and outputs across all viewers.
 
 ## LLM configuration
 
@@ -124,11 +144,11 @@ skipped.
 Playback controls float over the pitch. While dragging the timeline, a preview
 above the thumb shows the time playback will resume from.
 
-The shared pitch fills roughly two-thirds of the desktop view; three compact viewer cards stack on the right. Analyst, Blue supporter and Casual open by default. Each card has its own persona/team/language/player settings in the ellipsis popover. Remove an extra card there or use the plus button to add it back.
+The shared pitch fills roughly two-thirds of the desktop view; three compact viewer cards stack on the right. Neutral Analyst, Liverpool Home fan and neutral Broadcaster open by default. Each card has its own persona/team/language/player settings in the ellipsis popover. Remove an extra card there or use the plus button to add it back.
 
 Every viewer independently selects a candidate or `NONE` from the same verified pool, with separate recent-update history and producer rules. Each card may therefore show a different story, the same story, or no interruption. A slow selection or language response never blocks another viewer or the pitch. Each worker has one pending snapshot; a busy worker coalesces newer snapshots instead of cancelling its current request or queuing every frame. Removing/changing a perspective cancels its outdated work; unchanged perspectives keep their history.
 
-**Why this decision?** shows the chosen story, evidence summaries, and candidates held back. Model preferences are labelled separately from factual checks, producer policy and local fallback selection. A suppressed follow-up keeps an existing valid story visible until it expires, with the latest held decision in the explanation. No candidate is invented to force visual differences. Each extra viewer adds its own decision call per processed candidate pool, plus a language call only when its producer airs a story.
+**Why this decision?** shows the chosen story, evidence summaries, and candidates held back. Model preferences are labelled separately from factual checks, producer policy and local fallback selection. The last aired story stays visible until a new finished story replaces it or the viewer/match is reset. After its live validity window it is labelled Last aired; this does not make expired candidates eligible to air again. Later suppressions appear in a separate row below the message with their reason and match time, while Facts & evidence stays attached to the aired story. No candidate is invented to force visual differences. Each extra viewer adds its own decision call per processed candidate pool, plus a language call only when its producer airs a story.
 
 Each viewer card shows live stat capsules for its persona and selected team or
 player. **Facts & evidence** opens the exact facts, source events and verification
