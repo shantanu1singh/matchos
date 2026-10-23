@@ -33,8 +33,8 @@ flowchart LR
     end
 
     subgraph Providers["Configured model providers"]
-        Decision["Cloudflare Clef Flash or Vercel Laya"]
-        Language["LiteLLM: Vertex Gemini or another provider"]
+        Decision["Foundry Decision-1 (default) / Clef / Laya"]
+        Language["Agent Framework: Foundry gpt-6-luna / LiteLLM"]
     end
 
     UI <-->|"Commands, frames, updates, traces"| Server
@@ -56,11 +56,11 @@ The backend is one process. Each WebSocket connection owns an independent match 
 | Simulator | Generates repeatable player movement, ball movement, events, and tracking from a scenario and seed. | [`simulator.py`](matchos/simulator.py), [`scenarios.py`](matchos/scenarios.py) |
 | State engine | Computes rolling possession, press bypass, defensive lines, entries, player involvement, and changes over time. | [`state_engine.py`](matchos/state_engine.py), [`pitch.py`](matchos/pitch.py) |
 | Trigger engine | Uses deterministic changes, sample thresholds, major events, and cooldowns to decide when model evaluation is worthwhile. | [`trigger_engine.py`](matchos/trigger_engine.py) |
-| Decision client | Selects a verified candidate or NONE and scores editorial importance through Cloudflare, Vercel, or existing local fallback logic. | [`decision_client.py`](matchos/decision_client.py) |
+| Decision client | Selects a verified candidate or NONE and scores editorial importance through Azure Foundry, Cloudflare, Vercel, or existing local fallback logic. | [`decision_client.py`](matchos/decision_client.py) |
 | Verifier | Builds all supported candidates from deterministic state and events before model selection; attaches facts, checks, and evidence references. | [`verifier.py`](matchos/verifier.py) |
 | Producer | Applies importance, novelty, persona relevance, and cadence rules to air, suppress, or reject a moment. | [`producer.py`](matchos/producer.py) |
 | Copy renderer | Builds immediate, fact-based overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
-| Language agent | Uses an Agent Framework agent with a LiteLLM chat client to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
+| Language agent | Uses an Agent Framework agent and its Azure Responses client (or the retained LiteLLM adapter) to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
 | Workflow | Runs shared state, triggering and candidate verification; supports the complete single-viewer graph for direct workflow integrations. | [`workflow.py`](matchos/workflow.py) |
 | Perspective worker | Selects and renders independently for one viewer, with private producer/history, one pending pool and cancellation. | [`perspective.py`](matchos/perspective.py) |
 | Editorial explanation | Builds evidence summaries and held-candidate explanations; distinguishes model preference, producer policy and local fallback. | [`editorial.py`](matchos/editorial.py) |
@@ -179,14 +179,14 @@ Pause stops the feed task without waiting for outstanding model calls. Resume re
 
 ## Model providers and configuration
 
-**Microsoft Agent Framework** owns workflow orchestration and the language agent. **LiteLLM** supplies interchangeable reasoning completions. Decision providers use native asynchronous HTTP adapters because their typed decision endpoints have provider-specific schemas.
+**Microsoft Agent Framework** owns workflow orchestration and calls the Azure generative deployment with its official `OpenAIChatClient` (Responses API). **Azure Core** supplies async authenticated SDK transport for Foundry Decision-1’s native `/providers/microsoft/v1/systemone` endpoint. Decision-1 uses bounded questions rather than chat. **LiteLLM**, Cloudflare and Vercel remain selectable adapters. [`azure_foundry.py`](matchos/azure_foundry.py) contains the Microsoft adapters.
 
 | Role | Configured default | Alternatives / fallback |
 |---|---|---|
-| Editorial selection | Cloudflare Workers AI `@cf/cloudflare/clef-flash` | Vercel AI Gateway `convaiinnovations/laya-free` / `convaiinnovations/laya`; local typed decision logic. |
-| Language rendering | LiteLLM `vertex_ai/gemini-3.8-flash` | Another configured LiteLLM provider/model; local fact renderer. |
+| Editorial selection | Azure Foundry `Decision-1` | Cloudflare Workers AI `@cf/cloudflare/clef-flash`; Vercel AI Gateway `convaiinnovations/laya-free` / `convaiinnovations/laya`; local typed decision logic. |
+| Language rendering | Azure Foundry `gpt-6-luna` via Agent Framework | LiteLLM `vertex_ai/gemini-3.8-flash` or another configured LiteLLM provider/model; local fact renderer. |
 
-These are repository configuration defaults, rather than a guarantee of provider model availability. Provider configuration changes require a restart. Environment precedence is shell environment → `.env.local` → `.env` → defaults. Vertex uses Google credentials such as Application Default Credentials; decision adapters use the selected provider's credentials.
+These are repository configuration defaults, rather than a guarantee of provider model availability. Provider configuration changes require a restart. Environment precedence is shell environment → `.env.local` → `.env` → defaults. Azure accepts a resource API key or async DefaultAzureCredential (Entra). Resource endpoints and credentials can be shared or overridden per deployment. `DECISION_PROVIDER` and `REASONING_PROVIDER` select adapters independently; Vertex still uses Google credentials such as Application Default Credentials. Calls have overall deadlines and no SDK retries; transports and credential sessions close on success, failure or cancellation.
 
 ## Telemetry and diagnostics
 

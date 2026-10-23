@@ -1,4 +1,4 @@
-"""One typed decision request per trigger via Cloudflare or Vercel."""
+"""Native typed decisions via Azure Foundry, Cloudflare, or Vercel."""
 
 from __future__ import annotations
 
@@ -55,6 +55,12 @@ def _questions() -> list[dict]:
 class GatewayDecisionClient:
     """Native typed decisions; Laya must not be sent to chat/completions."""
 
+    native_systemone = False
+
+    @property
+    def request_model(self) -> str:
+        return self.model
+
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
         self.provider = f"vercel:{config.decision_model}"
@@ -69,25 +75,21 @@ class GatewayDecisionClient:
         started = time.perf_counter()
         questions = _selection_questions(candidates)
         editorial = _editorial_state(state, candidates, viewer, context)
-        cloudflare = isinstance(self, CloudflareDecisionClient)
-        payload = ({"model": self.model.rsplit("/", 1)[-1], "state": editorial,
-                    "questions": _cloudflare_questions(questions)} if cloudflare else
+        native = self.native_systemone
+        payload = ({"model": self.request_model, "state": editorial,
+                    "questions": _systemone_questions(questions)} if native else
                    {"model": self.model, "input": json.dumps(editorial), "questions": questions})
         call = ModelCall("editorial selection", self.provider, payload,
-                         secrets=(self.config.gateway_api_key, self.config.cloudflare_api_token))
+                         secrets=(self.api_key, self.config.gateway_api_key, self.config.cloudflare_api_token))
         try:
-            async with httpx.AsyncClient(timeout=self.config.decision_timeout_s) as client:
-                response = await client.post(self.endpoint, json=payload,
-                                             headers={"Authorization": f"Bearer {self.api_key}"})
-                response.raise_for_status()
-                body = response.json()
+            body = await self._request(payload)
             call.result(body)
-            answers = _selection_answers(body, cloudflare)
+            answers = _selection_answers(body, native)
             return _parse_selection(answers, candidates, self.provider, (time.perf_counter() - started) * 1000)
         except asyncio.CancelledError:
             call.result({"reason": "session or request cancelled"}, phase="CANCELLED")
             raise
-        except (httpx.HTTPError, KeyError, TypeError, ValueError, AttributeError) as exc:
+        except Exception as exc:
             call.result({"error": _failure_detail(exc, self.config)}, phase="ERROR")
             logger.warning("Editorial model %s failed (%s); using the existing local fallback", self.model, _failure_detail(exc, self.config))
             decision = await self._fallback.select(state, candidates, viewer, context)
@@ -95,6 +97,13 @@ class GatewayDecisionClient:
             decision.latency_ms = round((time.perf_counter() - started) * 1000, 3)
             call.result(decision.model_dump(mode="json"), phase="FALLBACK")
             return decision
+
+    async def _request(self, payload: dict) -> dict:
+        async with httpx.AsyncClient(timeout=self.config.decision_timeout_s) as client:
+            response = await client.post(self.endpoint, json=payload,
+                                         headers={"Authorization": f"Bearer {self.api_key}"})
+            response.raise_for_status()
+            return response.json()
 
     def _payload(self, state: MatchState, reasons: list[str], focus_player_id: str | None) -> dict:
         return {
@@ -110,16 +119,9 @@ class GatewayDecisionClient:
         started = time.perf_counter()
         payload = self._payload(state, reasons, focus_player_id)
         call = ModelCall("decision", self.provider, payload,
-                         secrets=(self.config.gateway_api_key, self.config.cloudflare_api_token))
+                         secrets=(self.api_key, self.config.gateway_api_key, self.config.cloudflare_api_token))
         try:
-            async with httpx.AsyncClient(timeout=self.config.decision_timeout_s) as client:
-                response = await client.post(
-                    self.endpoint,
-                    json=payload,
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                )
-                response.raise_for_status()
-                body = response.json()
+            body = await self._request(payload)
             call.result(body)
             decision = self._parse_response(body, (time.perf_counter() - started) * 1000)
             if decision.primary_frame == "PLAYER_IMPACT":
@@ -134,7 +136,7 @@ class GatewayDecisionClient:
         except asyncio.CancelledError:
             call.result({"reason": "session or request cancelled"}, phase="CANCELLED")
             raise
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+        except Exception as exc:
             call.result({"error": _failure_detail(exc, self.config)}, phase="ERROR")
             logger.warning(
                 "Decision model %s failed (%s); using the local model",
@@ -160,7 +162,7 @@ def _decision_state(state: MatchState, reasons: list[str], focus_player_id: str 
     }
 
 
-def _cloudflare_questions(questions_list: list[dict] | None = None) -> dict:
+def _systemone_questions(questions_list: list[dict] | None = None) -> dict:
     questions = {}
     for question in questions_list if questions_list is not None else _questions():
         converted = {"type": question["type"], "instructions": question["instructions"]}
@@ -177,6 +179,12 @@ def _cloudflare_questions(questions_list: list[dict] | None = None) -> dict:
 class CloudflareDecisionClient(GatewayDecisionClient):
     """Share transport and fallback logic, adapting the Workers AI schema."""
 
+    native_systemone = True
+
+    @property
+    def request_model(self) -> str:
+        return self.model.rsplit("/", 1)[-1]
+
     def __init__(self, config: LLMConfig) -> None:
         super().__init__(config)
         if config.cloudflare_model not in {"@cf/cloudflare/clef", "@cf/cloudflare/clef-flash"}:
@@ -191,38 +199,42 @@ class CloudflareDecisionClient(GatewayDecisionClient):
         return {
             "model": self.model.rsplit("/", 1)[-1],
             "state": _decision_state(state, reasons, focus_player_id),
-            "questions": _cloudflare_questions(),
+            "questions": _systemone_questions(),
         }
 
     def _parse_response(self, body: dict, latency_ms: float) -> MomentDecision:
-        if not isinstance(body, dict):
-            raise ValueError("Invalid Cloudflare response envelope")
-        if body.get("success") is False:
-            raise ValueError("Cloudflare rejected the decision request")
-        result = body.get("result", body)
-        if not isinstance(result, dict) or not isinstance(result.get("answers"), dict):
-            raise ValueError("Invalid Cloudflare answers")
-        answers = result["answers"]
-        normalized = []
-        for name, question in _cloudflare_questions().items():
-            answer = answers[name]
-            if not isinstance(answer, dict):
-                raise ValueError("Invalid Cloudflare answer")
-            if answer["type"] != question["type"]:
-                raise ValueError("Invalid Cloudflare decision answer type")
-            if question["type"] == "noul":
-                normalized.append({"name": name, "type": "predicate", "probability": answer["noul"]})
-            elif question["type"] == "choice":
-                if not isinstance(answer["probabilities"], dict):
-                    raise ValueError("Invalid Cloudflare choice probabilities")
-                normalized.append({
-                    "name": name, "type": "choice", "choice": answer["choice"],
-                    "confidence": answer["confidence"],
-                    "probabilities": [{"value": key, "probability": probability} for key, probability in answer["probabilities"].items()],
-                })
-            else:
-                normalized.append({"name": name, "type": "score", "score": answer["score"]})
-        return _parse_gateway({"answers": normalized}, self.provider, latency_ms)
+        return _parse_systemone(body, self.provider, latency_ms)
+
+
+def _parse_systemone(body: dict, provider: str, latency_ms: float) -> MomentDecision:
+    if not isinstance(body, dict):
+        raise ValueError("Invalid SystemOne response envelope")
+    if body.get("success") is False:
+        raise ValueError("SystemOne rejected the decision request")
+    result = body.get("result", body)
+    if not isinstance(result, dict) or not isinstance(result.get("answers"), dict):
+        raise ValueError("Invalid SystemOne answers")
+    answers = result["answers"]
+    normalized = []
+    for name, question in _systemone_questions().items():
+        answer = answers[name]
+        if not isinstance(answer, dict):
+            raise ValueError("Invalid SystemOne answer")
+        if answer["type"] != question["type"]:
+            raise ValueError("Invalid SystemOne decision answer type")
+        if question["type"] == "noul":
+            normalized.append({"name": name, "type": "predicate", "probability": answer["noul"]})
+        elif question["type"] == "choice":
+            if not isinstance(answer["probabilities"], dict):
+                raise ValueError("Invalid SystemOne choice probabilities")
+            normalized.append({
+                "name": name, "type": "choice", "choice": answer["choice"],
+                "confidence": answer["confidence"],
+                "probabilities": [{"value": key, "probability": probability} for key, probability in answer["probabilities"].items()],
+            })
+        else:
+            normalized.append({"name": name, "type": "score", "score": answer["score"]})
+    return _parse_gateway({"answers": normalized}, provider, latency_ms)
 
 
 def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
@@ -265,11 +277,11 @@ def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer
                 for moment in candidates]}
 
 
-def _selection_answers(body: dict, cloudflare: bool) -> dict:
-    if not cloudflare:
+def _selection_answers(body: dict, native_systemone: bool) -> dict:
+    if not native_systemone:
         return {answer["name"]: answer for answer in body["answers"]}
     if body.get("success") is False:
-        raise ValueError("Cloudflare rejected selection")
+        raise ValueError("SystemOne rejected selection")
     raw = body.get("result", body)["answers"]
     if raw["candidate"]["type"] != "choice" or raw["importance"]["type"] != "score" or raw["shouldSurface"]["type"] != "noul":
         raise ValueError("Invalid selection answer types")
@@ -318,6 +330,13 @@ def _parse_selection(answers: dict, candidates: list[VerifiedMoment], provider: 
 
 
 def _failure_detail(exc: Exception, config: LLMConfig) -> str:
+    # Azure SDK exceptions may contain response bodies or credentials. Keep diagnostics structural.
+    from azure.core.exceptions import AzureError
+    if isinstance(exc, AzureError):
+        status = getattr(exc, "status_code", None)
+        return f"HTTP {status}" if status else f"Azure SDK failure: {type(exc).__name__}"
+    if isinstance(exc, TimeoutError):
+        return f"TimeoutError; DECISION_TIMEOUT_S={config.decision_timeout_s:g}"
     if isinstance(exc, httpx.HTTPStatusError):
         response = exc.response
         detail = f"HTTP {response.status_code}"
@@ -346,6 +365,12 @@ def build_decision_client(config: LLMConfig | None = None) -> DecisionClient:
     config = config or LLMConfig.from_env()
     if config.decision_provider == "local":
         return LocalDecisionClient()
+    if config.decision_provider == "azure":
+        if not config.azure_configured("decision"):
+            logger.warning("Azure decision is not configured; set AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_API_KEY (or AZURE_AUTH_MODE=entra). Using local decisions")
+            return LocalDecisionClient()
+        from matchos.azure_foundry import FoundryDecisionClient
+        return FoundryDecisionClient(config)
     if config.decision_provider == "cloudflare":
         if not config.cloudflare_account_id or not config.cloudflare_api_token:
             return LocalDecisionClient()

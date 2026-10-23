@@ -1,4 +1,7 @@
-agent-framework-core>=1.19
+agent-framework-core>=1.22,<2
+agent-framework-openai>=1.17,<2
+azure-core[aio]>=1.38,<2
+azure-identity>=1.25,<2
 litellm>=1.104.2,<2
 google-auth>=2.29
 python-dotenv>=1.0,<2

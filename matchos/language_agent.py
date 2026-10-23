@@ -1,6 +1,6 @@
 """Language agent: a renderer, not a source of football truth.
 
-Microsoft Agent Framework wraps either a LiteLLM provider or a local
+Microsoft Agent Framework wraps either its native Azure client, a LiteLLM provider, or a local
 fact-locked client in the same Agent. The language guard discards any
 reply that introduces a number the verified moment does not contain before publication.
 """
@@ -226,10 +226,17 @@ def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecu
     config = config or LLMConfig.from_env()
     provider = "local-renderer"
     if config.reasoning_enabled:
-        client = LiteLLMChatClient(config)
-        provider = f"litellm:{config.reasoning_model}"
+        if config.reasoning_provider == "azure":
+            from matchos.azure_foundry import FoundryLanguageClient
+            client = FoundryLanguageClient(config)
+            provider = f"azure-foundry:{config.azure_reasoning_deployment}"
+        else:
+            client = LiteLLMChatClient(config)
+            provider = f"litellm:{config.reasoning_model}"
     else:
         client = LocalFactsChatClient()
+        if config.reasoning_provider == "azure" and config.reasoning_model != "local":
+            logging.getLogger(__name__).warning("Azure reasoning is not configured; set AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_API_KEY (or AZURE_AUTH_MODE=entra). Using the fact renderer")
     agent = Agent(
         client=client,
         name="matchos-language",

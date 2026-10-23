@@ -49,7 +49,7 @@ def test_cloudflare_native_contract(monkeypatch, model, wrapped):
         return httpx.Response(200, json={"success": True, "result": result, "errors": []} if wrapped else result)
 
     _mock_client(monkeypatch, respond)
-    config = LLMConfig(cloudflare_model=model, cloudflare_account_id="test-account", cloudflare_api_token="test-token")
+    config = LLMConfig(decision_provider="cloudflare", cloudflare_model=model, cloudflare_account_id="test-account", cloudflare_api_token="test-token")
     state = StateEngine().state
     state.players["blue_9"] = PlayerRollup(team_id="BLUE", number=9)
     decision = asyncio.run(build_decision_client(config).decide(state, ["player_involvement"], "blue_9"))
@@ -95,7 +95,7 @@ def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failu
         return httpx.Response(200, json={"success": True, "result": result})
 
     _mock_client(monkeypatch, respond)
-    config = LLMConfig(cloudflare_account_id="test-account", cloudflare_api_token=token)
+    config = LLMConfig(decision_provider="cloudflare", cloudflare_account_id="test-account", cloudflare_api_token=token)
     decision = asyncio.run(build_decision_client(config).decide(StateEngine().state, ["goal"]))
     assert decision.primary_frame == "GOAL"
     assert decision.provider == "local-decision-fallback:cloudflare:@cf/cloudflare/clef-flash"
@@ -108,7 +108,7 @@ def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failu
 
 
 def test_switching_providers_preserves_both_credentials():
-    config = LLMConfig(cloudflare_account_id="test-account", cloudflare_api_token="cf-token", gateway_api_key="vercel-token")
+    config = LLMConfig(decision_provider="cloudflare", cloudflare_account_id="test-account", cloudflare_api_token="cf-token", gateway_api_key="vercel-token")
     assert isinstance(build_decision_client(config), CloudflareDecisionClient)
     vercel = build_decision_client(replace(config, decision_provider="vercel"))
     assert type(vercel) is GatewayDecisionClient
@@ -123,7 +123,7 @@ def test_cloudflare_settings_load_from_env_local(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "environ", {})
     monkeypatch.setattr("matchos.llm_config.ENV_DIR", tmp_path)
     (tmp_path / ".env.local").write_text(
-        "CLOUDFLARE_ACCOUNT_ID=test-account\nCLOUDFLARE_AUTH_TOKEN=cf-token\nAI_GATEWAY_API_KEY=vercel-token\n"
+        "DECISION_PROVIDER=cloudflare\nCLOUDFLARE_ACCOUNT_ID=test-account\nCLOUDFLARE_AUTH_TOKEN=cf-token\nAI_GATEWAY_API_KEY=vercel-token\n"
     )
     config = LLMConfig.from_env()
     assert isinstance(build_decision_client(config), CloudflareDecisionClient)

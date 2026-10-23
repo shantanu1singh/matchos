@@ -29,7 +29,7 @@ def test_config_automatically_loads_project_files_from_another_cwd(monkeypatch, 
     other_directory.mkdir()
     monkeypatch.chdir(other_directory)
     (tmp_path / ".env.local").write_text(
-        "AI_GATEWAY_API_KEY=test-key\nVERTEXAI_PROJECT=test-project\n"
+        "REASONING_PROVIDER=litellm\nAI_GATEWAY_API_KEY=test-key\nVERTEXAI_PROJECT=test-project\n"
         "DECISION_TIMEOUT_S=3\n"
     )
     config = llm_config.LLMConfig.from_env()

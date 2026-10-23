@@ -110,7 +110,7 @@ def test_reasoning_through_agent_executor_and_fact_guard(monkeypatch, reply):
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="" if reply == "empty" else reply))])
 
     monkeypatch.setattr(litellm, "acompletion", complete)
-    config = LLMConfig(vertex_project="test-project", reasoning_timeout_s=.02)
+    config = LLMConfig(reasoning_provider="litellm", vertex_project="test-project", reasoning_timeout_s=.02)
     executor, agent, provider = build_language_executor(config)
     moment, viewer = _moment(), ViewerProfile()
     text = asyncio.run(personalize(agent, moment, viewer))
@@ -139,7 +139,7 @@ def test_reasoning_stream_with_replacement_provider(monkeypatch):
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Blue's press has dropped."))])
 
     monkeypatch.setattr(litellm, "acompletion", complete)
-    config = LLMConfig(reasoning_model="openai/example", reasoning_api_key="test-key", reasoning_base_url="https://example.test/v1")
+    config = LLMConfig(reasoning_provider="litellm", reasoning_model="openai/example", reasoning_api_key="test-key", reasoning_base_url="https://example.test/v1")
     _, agent, _ = build_language_executor(config)
 
     async def run():
@@ -165,7 +165,7 @@ def test_missing_litellm_preserves_streaming_response(monkeypatch, caplog):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib, "import_module", without_litellm)
-    _, agent, _ = build_language_executor(LLMConfig(vertex_project="test-project"))
+    _, agent, _ = build_language_executor(LLMConfig(reasoning_provider="litellm", vertex_project="test-project"))
     moment, viewer = _moment(), ViewerProfile()
 
     async def run():
@@ -183,15 +183,19 @@ def test_missing_litellm_preserves_streaming_response(monkeypatch, caplog):
 def test_config_defaults_and_provider_swap(monkeypatch, tmp_path):
     # User secret files must not affect an offline defaults test.
     monkeypatch.setattr("matchos.llm_config.ENV_DIR", tmp_path)
-    for name in ["DECISION_PROVIDER", "CLOUDFLARE_MODEL", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AUTH_TOKEN", "AI_GATEWAY_API_KEY", "DECISION_MODEL", "REASONING_MODEL", "REASONING_API_KEY", "REASONING_BASE_URL", "VERTEXAI_PROJECT", "GOOGLE_CLOUD_PROJECT", "VERTEXAI_LOCATION"]:
+    for name in ["DECISION_PROVIDER", "REASONING_PROVIDER", "AZURE_FOUNDRY_ENDPOINT", "AZURE_DECISION_ENDPOINT", "AZURE_REASONING_ENDPOINT", "CLOUDFLARE_MODEL", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AUTH_TOKEN", "AI_GATEWAY_API_KEY", "DECISION_MODEL", "REASONING_MODEL", "REASONING_API_KEY", "REASONING_BASE_URL", "VERTEXAI_PROJECT", "GOOGLE_CLOUD_PROJECT", "VERTEXAI_LOCATION"]:
         monkeypatch.delenv(name, raising=False)
     config = LLMConfig.from_env()
     assert config.decision_model == "convaiinnovations/laya-free"
-    assert config.decision_provider == "cloudflare"
+    assert config.decision_provider == "azure"
+    assert config.reasoning_provider == "azure"
+    assert config.azure_decision_deployment == "Decision-1"
+    assert config.azure_reasoning_deployment == "gpt-6-luna"
     assert config.cloudflare_model == "@cf/cloudflare/clef-flash"
     assert config.reasoning_model == "vertex_ai/gemini-3.8-flash"
     assert not config.reasoning_enabled
     assert isinstance(build_decision_client(config), LocalDecisionClient)
+    monkeypatch.setenv("REASONING_PROVIDER", "litellm")
     monkeypatch.setenv("REASONING_MODEL", "openai/example-model")
     monkeypatch.setenv("REASONING_API_KEY", "test-key")
     monkeypatch.setenv("REASONING_BASE_URL", "https://example.test/v1")
@@ -220,7 +224,7 @@ def test_gateway_logs_actionable_error_without_api_key(monkeypatch, caplog):
     assert "[REDACTED]" in caplog.text
 
 
-@pytest.mark.parametrize("config", [LLMConfig(), LLMConfig(vertex_project="test-project")])
+@pytest.mark.parametrize("config", [LLMConfig(), LLMConfig(reasoning_provider="litellm", vertex_project="test-project")])
 def test_chat_client_uses_framework_invocation_layer(config, caplog):
     _, agent, _ = build_language_executor(config)
     assert "does not support function invoking" not in caplog.text

@@ -65,59 +65,68 @@ The Producer tab is a read-only history of the primary viewer's production decis
 
 ## LLM configuration
 
-The Python backend uses **LiteLLM** for provider-neutral reasoning completions and retains Microsoft Agent Framework for workflow orchestration. Decisions default to Cloudflare Workers AI's `@cf/cloudflare/clef-flash`. Native HTTP adapters handle Cloudflare's typed decision schema and Vercel's `/v1/decisions` schema. Both select from the same verified candidate IDs, with an explicit `NONE` option.
+The default providers are **Azure Foundry `Decision-1`** for editorial selection and **`gpt-6-luna`** for persona language. **Microsoft Agent Framework** runs the workflow and calls the generative deployment through its official `OpenAIChatClient` (Responses API). Decision-1 uses Foundry's native typed `/providers/microsoft/v1/systemone` API through Microsoft's **Azure Core async SDK**; it is not sent to chat completions. All decision providers select from the same verified candidate IDs, with an explicit `NONE` option.
+
+Cloudflare Clef, Vercel Laya and the LiteLLM/Vertex adapter remain available. All model calls are asynchronous, have overall deadlines and no automatic SDK retries, and retain correlated terminal logs and execution telemetry. Missing configuration or remote errors use the existing local fallback; startup/session logs identify the active providers.
+
+Install the Microsoft provider dependencies into the interpreter that runs the app:
+
+```bash
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Add these settings to the project-root `.env.local` (merge them into an existing file to preserve old credentials):
+
+```dotenv
+DECISION_PROVIDER=azure
+REASONING_PROVIDER=azure
+AZURE_FOUNDRY_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com
+AZURE_FOUNDRY_API_KEY=YOUR-RESOURCE-KEY
+AZURE_AUTH_MODE=key
+AZURE_DECISION_DEPLOYMENT=Decision-1
+AZURE_REASONING_DEPLOYMENT=gpt-6-luna
+```
+
+In Foundry, use each deployment's **Get code / endpoint and samples** panel to find the resource endpoint and key. Use the HTTPS resource root, such as `https://RESOURCE.services.ai.azure.com` or `https://RESOURCE.openai.azure.com`; omit project paths, `/openai/v1`, and `/providers/microsoft/v1/systemone`. Deployment names are case sensitive. The code appends the appropriate API path. An Azure subscription ID, resource group, and Foundry project ID are not needed for inference.
+
+If the deployments are on different resources, set `AZURE_DECISION_ENDPOINT` / `AZURE_DECISION_API_KEY` and `AZURE_REASONING_ENDPOINT` / `AZURE_REASONING_API_KEY`. Each override falls back to the shared setting above when absent.
+
+For **Microsoft Entra authentication**, set `AZURE_AUTH_MODE=entra`, omit API keys and run `az login` locally with an identity permitted to call both deployments. The async `DefaultAzureCredential` also supports managed identity and service principals (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`). Tokens are acquired and refreshed by the Azure SDK. An expired or unauthorized identity falls back locally with an error log.
 
 | Variable | Effect |
 |---|---|
-| `DECISION_PROVIDER` | `cloudflare` (default), `vercel`, or `local`. |
-| `CLOUDFLARE_ACCOUNT_ID` | Account ID for Workers AI REST calls. |
-| `CLOUDFLARE_API_TOKEN` | Workers AI API token. `CLOUDFLARE_AUTH_TOKEN` is also accepted. |
+| `DECISION_PROVIDER` | `azure` (default), `cloudflare`, `vercel`, or `local`. |
+| `REASONING_PROVIDER` | `azure` (default), `litellm`, or `local`. |
+| `AZURE_FOUNDRY_ENDPOINT` | Shared HTTPS Azure resource root. |
+| `AZURE_FOUNDRY_API_KEY` | Shared resource API key; used only with `AZURE_AUTH_MODE=key`. |
+| `AZURE_AUTH_MODE` | `key` (default) or `entra`. |
+| `AZURE_DECISION_DEPLOYMENT` | Exact decision deployment name; defaults to `Decision-1`. |
+| `AZURE_REASONING_DEPLOYMENT` | Exact generative deployment name; defaults to `gpt-6-luna`. |
+| `AZURE_DECISION_ENDPOINT`, `AZURE_DECISION_API_KEY` | Optional decision resource overrides. |
+| `AZURE_REASONING_ENDPOINT`, `AZURE_REASONING_API_KEY` | Optional generative resource overrides. |
+| `AZURE_OPENAI_API_VERSION` | Agent Framework's Azure Responses API version; defaults to `preview`. Does not affect the Decision-1 endpoint. |
+| `DECISION_TIMEOUT_S` | Overall decision deadline; defaults to `10` seconds. |
+| `REASONING_TIMEOUT_S` | Overall reasoning deadline; defaults to `15` seconds. |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Credentials when `DECISION_PROVIDER=cloudflare`. `CLOUDFLARE_AUTH_TOKEN` is also accepted. |
 | `CLOUDFLARE_MODEL` | Defaults to `@cf/cloudflare/clef-flash`; also accepts `@cf/cloudflare/clef`. |
 | `AI_GATEWAY_API_KEY` | Gateway key when `DECISION_PROVIDER=vercel`. |
-| `DECISION_MODEL` | Vercel decision model; defaults to `convaiinnovations/laya-free`. Set `convaiinnovations/laya` to use Laya, another Gateway decision model slug to swap models, or `local` for offline decisions. |
-| `AI_GATEWAY_BASE_URL` | Decisions API base URL; defaults to `https://ai-gateway.vercel.sh/v1`. |
-| `DECISION_TIMEOUT_S` | Decision request timeout in seconds; defaults to `10`. Frames continue during model waits. |
-| `VERTEXAI_PROJECT` | Google Cloud project that enables Vertex reasoning. `GOOGLE_CLOUD_PROJECT` is also accepted. |
-| `VERTEXAI_LOCATION` | Defaults to `global`; choose a location supported by your model. |
-| `REASONING_MODEL` | LiteLLM provider/model identifier; defaults to `vertex_ai/gemini-3.8-flash`. Set `local` for offline rendering. |
-| `REASONING_API_KEY` | Optional key for a replacement reasoning provider. Native provider credential environment variables also work through LiteLLM. |
-| `REASONING_BASE_URL` | Optional API base URL for a replacement reasoning provider. |
-| `REASONING_TIMEOUT_S` | Reasoning deadline in seconds; defaults to `15`, with no automatic retries. |
+| `DECISION_MODEL` | Vercel decision model; defaults to `convaiinnovations/laya-free`. |
+| `AI_GATEWAY_BASE_URL` | Vercel Decisions base URL; defaults to `https://ai-gateway.vercel.sh/v1`. |
+| `VERTEXAI_PROJECT`, `VERTEXAI_LOCATION` | Vertex project and location (`global` by default); `GOOGLE_CLOUD_PROJECT` is accepted. |
+| `REASONING_MODEL` | Model when `REASONING_PROVIDER=litellm`; retained default `vertex_ai/gemini-3.8-flash`. `local` forces offline rendering for either provider. Azure uses `AZURE_REASONING_DEPLOYMENT`. |
+| `REASONING_API_KEY`, `REASONING_BASE_URL` | Optional replacement LiteLLM provider credentials and endpoint. |
 
-For Vertex, use Application Default Credentials (for local development, run `gcloud auth application-default login`), a workload identity, or `GOOGLE_APPLICATION_CREDENTIALS` pointing to your credential file. Enable the Vertex AI API and billing for the project.
+To switch back, set `DECISION_PROVIDER=cloudflare` or `vercel`, and/or `REASONING_PROVIDER=litellm`. Existing Cloudflare, Gateway, and Vertex credentials stay in place. Vertex uses Application Default Credentials (`gcloud auth application-default login` locally), workload identity, or `GOOGLE_APPLICATION_CREDENTIALS`. Other LiteLLM provider prefixes still work through `REASONING_MODEL`, e.g. `openai/<model-id>` with `REASONING_BASE_URL` and `REASONING_API_KEY`. Use `DECISION_PROVIDER=local` and `REASONING_PROVIDER=local` for offline operation.
+
+The app automatically loads `.env` and `.env.local` from the project root, including when started through Uvicorn. Precedence is **shell environment > `.env.local` > `.env` > defaults**. Both secret files are ignored by Git. Explicit provider values in an existing file override the new Azure defaults; update those lines as shown above. Restart the app after changing settings.
 
 ```bash
-export CLOUDFLARE_ACCOUNT_ID="your_account_id"
-export CLOUDFLARE_API_TOKEN="your_workers_ai_token"
-export VERTEXAI_PROJECT="your_gcp_project"
-export VERTEXAI_LOCATION="global"
 .venv/bin/python -m matchos
 ```
 
-To swap the reasoning provider to an OpenAI-compatible service, set `REASONING_MODEL=openai/<model-id>`, `REASONING_BASE_URL`, and `REASONING_API_KEY`. Other LiteLLM provider prefixes (such as `anthropic/` or `bedrock/`) use that provider's credentials. These changes need no workflow edits.
+Candidates pass evidence checks before selection. Unknown candidate IDs, refused responses, and non-finite or out-of-range probabilities cannot reach publication. The language agent only renders verified facts and its output still passes the fact-faithfulness check. A `401` indicates rejected credentials, `403` indicates missing access, `404` suggests the wrong resource/path or deployment, and a timeout can be adjusted with the deadline variables above. Unauthenticated deployments have not been live-tested; contract tests mock only network and credential boundaries.
 
-Without credentials for the selected decision provider, decisions use the local typed-probability model. Without a Vertex project, the default reasoning configuration uses the local fact renderer. Remote failures fall back to those same local implementations. Invalid or refused decision answers also fall back; non-finite or out-of-range probabilities cannot reach the verifier. Candidates pass deterministic evidence checks before selection; the adapter rejects unknown candidate IDs and invalid probabilities, and language copy still passes the fact-faithfulness check. The language agent only renders verified facts; there is no separate reasoning stage in this application.
-
-The old `JEV_*` and `FOUNDRY_*` settings have been replaced by the variables above. The app automatically loads `.env` and `.env.local` from the project root when reading LLM configuration, including when started through Uvicorn. Precedence is **shell environment > `.env.local` > `.env` > defaults**. Both secret files are ignored by Git. Restart the app after changing them.
-
-To configure credentials in a file:
-
-```bash
-cp .env.example .env.local
-# Edit .env.local with your Cloudflare credentials and Google Cloud project.
-gcloud auth application-default login
-.venv/bin/python -m matchos
-```
-
-For Cloudflare, open **Workers AI → Use REST API** in your dashboard and create a Workers AI API token for the selected account. The token needs **Workers AI Read** and **Workers AI Edit** permissions. Copy the Account ID into `CLOUDFLARE_ACCOUNT_ID` and the token into `CLOUDFLARE_API_TOKEN`. No Cloudflare Worker deployment or Gateway ID is required.
-
-To switch back to Vercel, set `DECISION_PROVIDER=vercel`. Your existing `AI_GATEWAY_API_KEY` and `DECISION_MODEL` settings are retained and only used for that provider. Cloudflare credentials remain configured for switching back. Use `DECISION_PROVIDER=local` to force offline decisions. Restart after switching providers.
-
-Provider-native credentials such as `GOOGLE_APPLICATION_CREDENTIALS` or `ANTHROPIC_API_KEY` can also be placed in these files.
-
-If remote decisions fall back, the log includes the HTTP error or timeout reason. A `403` with `customer_verification_required` means Vercel requires a credit card on the Gateway account, even for the free model. Complete account verification in the Vercel dashboard. A `401` indicates a rejected API key; a timeout can be adjusted with `DECISION_TIMEOUT_S`.
-
-Provider references: [Clef Flash API and schemas](https://developers.cloudflare.com/workers-ai/models/clef-flash/), [Cloudflare REST credentials](https://developers.cloudflare.com/workers-ai/get-started/rest-api/), [Vercel Decisions API](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-decisions), [Laya Free](https://vercel.com/ai-gateway/models/laya-free), [LiteLLM Vertex support](https://docs.litellm.ai/docs/providers/vertex), [Gemini 3.8 Flash](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-8-flash).
+Provider references: [Microsoft Decision-1 API and authentication](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision), [Microsoft Agent Framework Azure client migration](https://learn.microsoft.com/en-us/agent-framework/support/upgrade/python-2026-significant-changes), [Cloudflare Clef Flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/), [Vercel Decisions API](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-decisions), [LiteLLM Vertex support](https://docs.litellm.ai/docs/providers/vertex).
 
 ## Contracts
 
@@ -196,4 +205,4 @@ After a trigger, the verifier checks every supported story category and builds e
 
 The producer retains its novelty, relevance, cadence, and on-air rules after model selection. It may suppress the selected candidate but does not substitute a different story. Model importance and selection confidence affect presentation priority; selection confidence is an editorial model score, not a probability that verified facts are true. Viewer cards share candidate verification and perform separate editorial selections. Telemetry includes the entire candidate set and the editorial selection input/output.
 
-Cloudflare remains the default, Vercel remains available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.
+Azure Foundry is the default, Cloudflare and Vercel remain available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.

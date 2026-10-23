@@ -28,7 +28,7 @@ def configure_model_logging() -> None:
 
 configure_model_logging()
 
-_SENSITIVE = {"authorization", "api_key", "apikey", "access_token", "refresh_token", "credentials",
+_SENSITIVE = {"authorization", "api-key", "api_key", "apikey", "access_token", "refresh_token", "credentials",
               "password", "token", "secret", "client_secret", "private_key"}
 
 
