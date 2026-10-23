@@ -1,8 +1,8 @@
 """Microsoft Agent Framework workflow for one live match tick.
 
-Code executors own state, triggering, verification and production.
+Code executors own state, triggering, candidate verification and production.
 The only model-shaped call on the way to a fast overlay is the typed
-decision client. The language agent runs after that overlay is yielded.
+editorial decision client, which selects from verified candidates. The language agent runs after that overlay is yielded.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from matchos.schemas import (
     TriggerResult,
     VerificationResult,
     VerifiedMoment,
+    VerifiedCandidates,
     ViewerProfile,
 )
 from matchos.state_engine import StateEngine
@@ -59,6 +60,7 @@ class PipelinePacket:
     viewer: ViewerProfile
     state: MatchState | None = None
     trigger: TriggerResult | None = None
+    candidates: VerifiedCandidates | None = None
     decision: MomentDecision | None = None
     verification: VerificationResult | None = None
     producer: ProducerDecision | None = None
@@ -78,6 +80,7 @@ class MatchServices:
     agent: Agent | None = None
     pending_moment: VerifiedMoment | None = None
     pending_viewer: ViewerProfile | None = None
+    recent_updates: list[dict] = field(default_factory=list)
 
 
 def _fired(packet: object) -> bool:
@@ -158,9 +161,29 @@ class DecisionExecutor(Executor):
     async def decide(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
         state = packet.state or self.services.state_engine.state
         reasons = packet.trigger.reasons if packet.trigger else []
-        packet.decision = await self.services.decisions.decide(state, reasons, packet.viewer.player_id)
-        packet.timings_ms["decision"] = packet.decision.latency_ms
-        record("decision contract", {"reasons": reasons, "player": packet.viewer.player_id}, packet.decision, packet.decision.latency_ms)
+        candidates = packet.candidates.candidates if packet.candidates else []
+        if candidates:
+            now = time.monotonic()
+            history = [{**{key: value for key, value in update.items() if key != "aired_at"},
+                        "secondsAgo": round(now - update["aired_at"], 1)} for update in self.services.recent_updates[-10:]]
+            context = {"triggerReasons": reasons, "recentUpdates": history}
+            packet.decision = await self.services.decisions.select(state, candidates, packet.viewer, context)
+            packet.timings_ms["decision"] = packet.decision.latency_ms
+            chosen = next((candidate for candidate in candidates if candidate.id == packet.decision.selected_candidate_id), None)
+            if packet.decision.selected_candidate_id is not None and chosen is None:
+                raise ValueError("Decision selected an unverified candidate")
+            if chosen is not None:
+                packet.moment = chosen.model_copy(update={"importance": packet.decision.importance / 5,
+                                                        "confidence": packet.decision.primary_frame_confidence})
+                packet.verification = VerificationResult(verified=True, moment=packet.moment, checks=chosen.checks)
+            else:
+                # Abstention is an editorial outcome, not failed factual verification.
+                packet.verification = None
+            record("editorial selection", {"candidateIds": [candidate.id for candidate in candidates], "viewer": packet.viewer.model_dump(), **context}, packet.decision, packet.decision.latency_ms)
+        else:
+            packet.verification = VerificationResult(verified=False, checks=packet.candidates.checks if packet.candidates else [],
+                                                     reason="No candidate passed the evidence checks; model call skipped.")
+            record("editorial selection", {"candidateIds": []}, {"skipped": True, "reason": packet.verification.reason})
         await ctx.send_message(packet)
 
 
@@ -173,13 +196,9 @@ class VerificationExecutor(Executor):
     async def verify(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
         started = time.perf_counter()
         state = packet.state or self.services.state_engine.state
-        assert packet.decision is not None
-        packet.verification = self.services.verifier.verify(state, packet.decision, packet.tick.events)
-        if packet.verification.moment is not None:
-            packet.verification.moment.checks = list(packet.verification.checks)
-            packet.moment = packet.verification.moment
+        packet.candidates = self.services.verifier.candidates(state, packet.tick.events, packet.viewer.player_id)
         packet.timings_ms["verifier"] = (time.perf_counter() - started) * 1000
-        record("verifier", packet.decision, packet.verification, packet.timings_ms["verifier"])
+        record("verified candidates", {"state": state.model_dump(mode="json"), "events": [event.model_dump(mode="json") for event in packet.tick.events], "focusPlayer": packet.viewer.player_id}, packet.candidates, packet.timings_ms["verifier"])
         await ctx.send_message(packet)
 
 
@@ -193,13 +212,16 @@ class ProducerExecutor(Executor):
         started = time.perf_counter()
         verification = packet.verification
         decision = packet.decision
-        packet.producer = self.services.producer.decide(
-            verification.moment if verification else None,
-            bool(verification and verification.verified),
-            decision.should_surface if decision else 0.0,
-            packet.viewer,
-            verification.reason if verification else None,
-        )
+        if decision is not None and decision.selected_candidate_id is None:
+            packet.producer = ProducerDecision(action="SUPPRESS", reason="Decision model chose no update.")
+        else:
+            packet.producer = self.services.producer.decide(
+                verification.moment if verification else None,
+                bool(verification and verification.verified),
+                decision.should_surface if decision else 0.0,
+                packet.viewer,
+                verification.reason if verification else None,
+            )
         packet.timings_ms["producer"] = (time.perf_counter() - started) * 1000
         record("producer", packet.verification, packet.producer, packet.timings_ms["producer"])
         await ctx.send_message(packet)
@@ -235,6 +257,7 @@ class PublishExecutor(Executor):
         return PipelineResult(
             kind=kind,  # type: ignore[arg-type]
             trigger=packet.trigger,
+            candidates=packet.candidates,
             decision=packet.decision,
             verification=packet.verification,
             producer=packet.producer,
@@ -258,6 +281,7 @@ class TraceExecutor(Executor):
             PipelineResult(
                 kind="trace",
                 trigger=packet.trigger,
+                candidates=packet.candidates,
                 decision=packet.decision,
                 verification=packet.verification,
                 producer=packet.producer,
@@ -314,9 +338,9 @@ def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, Mat
         WorkflowBuilder(start_executor=state)
         .add_edge(state, trigger)
         .add_edge(trigger, quiet, condition=_quiet)
-        .add_edge(trigger, decision, condition=_fired)
-        .add_edge(decision, verifier)
-        .add_edge(verifier, producer)
+        .add_edge(trigger, verifier, condition=_fired)
+        .add_edge(verifier, decision)
+        .add_edge(decision, producer)
         .add_switch_case_edge_group(
             producer,
             [

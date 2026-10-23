@@ -14,14 +14,14 @@ Microsoft Agent Framework runs one workflow per live tick:
 state update (code)
   → trigger (code)
       → quiet end, or
-      → one typed decision call
-      → verifier (code)
+      → verified candidates (code)
+      → one typed editorial selection call
       → producer (code)
       → fast template overlay
       → language agent (Gemini 3.8 Flash on Vertex AI when configured)
 ```
 
-There is one decision call on the way to the overlay. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
+When evidence produces candidates, one decision call chooses a verified candidate or `NONE`. Triggers without a supported candidate skip the model call. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
 
 The live feed sends frames every 100 ms independently of the model workflow. One background workflow runs at a time; feed events and tracking samples arriving during a model call are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Template overlays are delivered as soon as verification completes, with language enrichment arriving later. Expired moments and results for an old viewer profile are discarded. Viewer changes show a template immediately and enrich in the background; pause controls do not wait for model calls.
 
@@ -45,7 +45,7 @@ Casual, analyst, home fan, player focus, and broadcaster all read the same verif
 
 ## LLM configuration
 
-The Python backend uses **LiteLLM** for provider-neutral reasoning completions and retains Microsoft Agent Framework for workflow orchestration. Decisions default to Cloudflare Workers AI's `@cf/cloudflare/clef-flash`. Native HTTP adapters handle Cloudflare's typed decision schema and Vercel's `/v1/decisions` schema; the verifier receives the same contract from either provider.
+The Python backend uses **LiteLLM** for provider-neutral reasoning completions and retains Microsoft Agent Framework for workflow orchestration. Decisions default to Cloudflare Workers AI's `@cf/cloudflare/clef-flash`. Native HTTP adapters handle Cloudflare's typed decision schema and Vercel's `/v1/decisions` schema. Both select from the same verified candidate IDs, with an explicit `NONE` option.
 
 | Variable | Effect |
 |---|---|
@@ -76,7 +76,7 @@ export VERTEXAI_LOCATION="global"
 
 To swap the reasoning provider to an OpenAI-compatible service, set `REASONING_MODEL=openai/<model-id>`, `REASONING_BASE_URL`, and `REASONING_API_KEY`. Other LiteLLM provider prefixes (such as `anthropic/` or `bedrock/`) use that provider's credentials. These changes need no workflow edits.
 
-Without credentials for the selected decision provider, decisions use the local typed-probability model. Without a Vertex project, the default reasoning configuration uses the local fact renderer. Remote failures fall back to those same local implementations. Invalid or refused decision answers also fall back; non-finite or out-of-range probabilities cannot reach the verifier. The verifier and fact-faithfulness check still apply to remote results. The language agent only renders verified facts; there is no separate reasoning stage in this application.
+Without credentials for the selected decision provider, decisions use the local typed-probability model. Without a Vertex project, the default reasoning configuration uses the local fact renderer. Remote failures fall back to those same local implementations. Invalid or refused decision answers also fall back; non-finite or out-of-range probabilities cannot reach the verifier. Candidates pass deterministic evidence checks before selection; the adapter rejects unknown candidate IDs and invalid probabilities, and language copy still passes the fact-faithfulness check. The language agent only renders verified facts; there is no separate reasoning stage in this application.
 
 The old `JEV_*` and `FOUNDRY_*` settings have been replaced by the variables above. The app automatically loads `.env` and `.env.local` from the project root when reading LLM configuration, including when started through Uvicorn. Precedence is **shell environment > `.env.local` > `.env` > defaults**. Both secret files are ignored by Git. Restart the app after changing them.
 
@@ -171,3 +171,11 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 ```
 
 This uses Microsoft Agent Framework's native OpenTelemetry instrumentation with MatchOS parent spans and stage events. Sensitive prompt/response capture is disabled for external export; full sanitized inputs/outputs remain in the local inspector. External collection is optional; the built-in view needs no account or extra package.
+
+### Editorial selection
+
+After a trigger, the verifier checks every supported story category and builds evidence-backed candidates. The decision model receives those candidate IDs, verified facts/checks, viewer persona and team/player preferences, match time/score, trigger reasons, and the last ten aired updates with elapsed time. It chooses which candidate is most worth showing now, or `NONE`, and supplies editorial importance and interruption probability. It does not decide whether possession or bypass thresholds were crossed.
+
+The producer retains its novelty, relevance, cadence, and on-air rules after model selection. It may suppress the selected candidate but does not substitute a different story. Model importance and selection confidence affect presentation priority; selection confidence is an editorial model score, not a probability that verified facts are true. Comparison cards render the same selected moment and do not repeat selection. Telemetry includes the entire candidate set and the editorial selection input/output.
+
+Cloudflare remains the default, Vercel remains available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.

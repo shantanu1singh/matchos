@@ -54,8 +54,8 @@ The backend is one process. Each WebSocket connection owns an independent match 
 | Simulator | Generates repeatable player movement, ball movement, events, and tracking from a scenario and seed. | [`simulator.py`](matchos/simulator.py), [`scenarios.py`](matchos/scenarios.py) |
 | State engine | Computes rolling possession, press bypass, defensive lines, entries, player involvement, and changes over time. | [`state_engine.py`](matchos/state_engine.py), [`pitch.py`](matchos/pitch.py) |
 | Trigger engine | Uses deterministic changes, sample thresholds, major events, and cooldowns to decide when model evaluation is worthwhile. | [`trigger_engine.py`](matchos/trigger_engine.py) |
-| Decision client | Produces a validated frame selection and probability contract through Cloudflare, Vercel, or local logic. | [`decision_client.py`](matchos/decision_client.py) |
-| Verifier | Tests proposed claims against deterministic state and events; constructs facts, checks, and evidence references. | [`verifier.py`](matchos/verifier.py) |
+| Decision client | Selects a verified candidate or NONE and scores editorial importance through Cloudflare, Vercel, or existing local fallback logic. | [`decision_client.py`](matchos/decision_client.py) |
+| Verifier | Builds all supported candidates from deterministic state and events before model selection; attaches facts, checks, and evidence references. | [`verifier.py`](matchos/verifier.py) |
 | Producer | Applies importance, novelty, persona relevance, and cadence rules to air, suppress, or reject a moment. | [`producer.py`](matchos/producer.py) |
 | Copy renderer | Builds immediate, fact-based overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
 | Language agent | Uses an Agent Framework agent with a LiteLLM chat client to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
@@ -71,8 +71,8 @@ flowchart TD
     State["state_update: deterministic rolling state"]
     Trigger{"trigger: meaningful change?"}
     Quiet["quiet: stop without a model call"]
-    Decision["decision: typed frame probabilities"]
-    Verify["verifier: evidence checks and VerifiedMoment"]
+    Decision["decision: choose verified candidate ID or NONE"]
+    Verify["verifier: evidence checks and candidate set"]
     Produce{"producer: AIR, SUPPRESS, or REJECT"}
     Trace["trace: retain candidate and rejection / suppression reason"]
     Publish["publish: immediate template overlay"]
@@ -82,17 +82,19 @@ flowchart TD
 
     Tick --> State --> Trigger
     Trigger -->|"No"| Quiet
-    Trigger -->|"Yes"| Decision --> Verify --> Produce
+    Trigger -->|"Yes"| Verify
+    Verify -->|"Candidates available"| Decision --> Produce
+    Verify -->|"No candidates"| Skip["Skip model selection"] --> Produce
     Produce -->|"SUPPRESS / REJECT"| Trace
     Produce -->|"AIR"| Publish --> Agent --> Guard --> Enriched
 ```
 
 The workflow mixes deterministic code executors with two model roles:
 
-- **Decision:** chooses a candidate story using aggregate state and trigger reasons. Remote output must satisfy the typed contract; invalid output, timeouts, or missing credentials fall back to local decisions.
+- **Decision:** chooses which verified candidate is worth showing to the viewer now, or `NONE`. It receives candidate facts/checks, persona preferences, match time/score, and recent aired updates. It scores editorial importance and interruption probability. Unknown candidate IDs or invalid responses use the existing local fallback, restricted to verified candidates; the model cannot invent a new candidate.
 - **Language:** renders an already verified moment for the requested persona and language. It does not compute the canonical match metrics. Provider failures use local copy; unsupported numbers or fractional possession/bypass values cause the enrichment guard to use a verified template.
 
-The producer runs after verification. A separate session gate also prevents an ordinary update from replacing a graphic already on air too soon; major moments can interrupt. A workflow `AIR` result therefore does not guarantee final display.
+The producer runs after evidence verification and editorial selection. Choosing `NONE` suppresses the update without generating language copy; producer suppression does not rerank other candidates. A separate session gate also prevents an ordinary update from replacing a graphic already on air too soon; major moments can interrupt. A workflow `AIR` result therefore does not guarantee final display.
 
 ### Data and units
 
@@ -102,12 +104,13 @@ The producer runs after verification. A separate session gate also prevents an o
 |---|---|
 | `Tick` | A current `TrackingFrame`, discrete `MatchEvent` records, and tracking samples. |
 | `MatchState` | Deterministic team/player aggregates, score, time, and metric deltas. |
-| `MomentDecision` | Candidate frame, probability scores, selected team/player, provider, and latency. |
+| `VerifiedCandidates` | All candidates supported by deterministic checks, plus diagnostics for rejected categories. |
+| `MomentDecision` | Selected candidate ID (or none), candidate/frame preference scores, editorial importance, interruption probability, provider, and latency. |
 | `VerifiedMoment` | Canonical facts, evidence IDs/details, verification checks, confidence, and validity interval. |
 | `ProducerDecision` | Air/suppress/reject action, reason, priority, and eligible personas. |
 | `Overlay` / `PipelineResult` | Presentation content and workflow outputs delivered to the UI. |
 
-Tracking coordinates and distances use metres on a 105 × 68 metre pitch. Canonical possession and bypass rates remain fractions for arithmetic and verification. The **language prompt** converts those facts to percentage strings, such as `0.639` → `64%`; counts remain counts and distances remain metres. The decision adapter continues to receive its numeric state contract. Facts & evidence exposes the original verified data, while live stat capsules follow current state.
+Tracking coordinates and distances use metres on a 105 × 68 metre pitch. Canonical possession and bypass rates remain fractions for arithmetic and verification. The **language prompt** converts those facts to percentage strings, such as `0.639` → `64%`; counts remain counts and distances remain metres. Editorial selection also receives percentage-formatted verified facts. Selected moment confidence reflects model preference, not the factual accuracy of the canonical evidence. Facts & evidence exposes the original verified data, while live stat capsules follow current state.
 
 ## Async execution and persona comparisons
 
@@ -131,14 +134,21 @@ sequenceDiagram
         Session->>Worker: Start worker if idle
         Worker->>Worker: Update workflow state and evaluate trigger
         opt Trigger fires
-            Worker->>Model: Typed decision request
-            Note over Feed,Model: Frames continue while the model is awaited
-            Model-->>Worker: Decision or local fallback
-            Worker->>Worker: Verify, produce, render template
-            Worker-->>Session: Queue fast overlay for feed delivery
-            Worker->>Model: Render verified facts for primary persona
-            Model-->>Worker: Prose or fallback
-            Worker-->>Session: Queue guarded enrichment for feed delivery
+            Worker->>Worker: Verify all supported story candidates
+            Note over Worker,Model: No supported candidates means no model call
+            opt Verified candidates available
+                Worker->>Model: Select candidate or NONE using viewer and recent updates
+                Note over Feed,Model: Frames continue while the model is awaited
+                Model-->>Worker: Editorial choice or local fallback
+                Worker->>Worker: Resolve selected ID and apply producer rules
+                opt Candidate selected and AIR
+                    Worker->>Worker: Render fast template
+                    Worker-->>Session: Queue fast overlay for feed delivery
+                    Worker->>Model: Render verified facts for primary persona
+                    Model-->>Worker: Prose or fallback
+                    Worker-->>Session: Queue guarded enrichment for feed delivery
+                end
+            end
         end
     end
 ```
@@ -159,7 +169,7 @@ Pause stops the feed task without waiting for outstanding model calls. Resume re
 
 | Role | Configured default | Alternatives / fallback |
 |---|---|---|
-| Decision | Cloudflare Workers AI `@cf/cloudflare/clef-flash` | Vercel AI Gateway `convaiinnovations/laya-free` / `convaiinnovations/laya`; local typed decision logic. |
+| Editorial selection | Cloudflare Workers AI `@cf/cloudflare/clef-flash` | Vercel AI Gateway `convaiinnovations/laya-free` / `convaiinnovations/laya`; local typed decision logic. |
 | Language rendering | LiteLLM `vertex_ai/gemini-3.8-flash` | Another configured LiteLLM provider/model; local fact renderer. |
 
 These are repository configuration defaults, rather than a guarantee of provider model availability. Provider configuration changes require a restart. Environment precedence is shell environment → `.env.local` → `.env` → defaults. Vertex uses Google credentials such as Application Default Credentials; decision adapters use the selected provider's credentials.

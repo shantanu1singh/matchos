@@ -161,6 +161,11 @@ class MatchSession:
         if self.active is None or self.on_air_at == 0 or major or now - self.on_air_at >= 40:
             self.active = result
             self.on_air_at = now
+            self.services.recent_updates.append({"aired_at": now, "momentId": result.moment.id,
+                                                "frame": result.moment.frame, "team": result.moment.team_id,
+                                                "player": result.moment.player_id, "viewer": self.viewer.model_dump(),
+                                                "headline": result.overlay.headline if result.overlay else ""})
+            self.services.recent_updates = self.services.recent_updates[-10:]
             return True
         if result.producer is not None:
             result.producer.action = "SUPPRESS"

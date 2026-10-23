@@ -336,7 +336,7 @@ function renderProof(host, moment, overlay, viewKey) {
   const evidence = (moment.evidence_detail || []).map(item => `<li><b>${clockOf(item.timestamp_ms)}</b> ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)}<small>${escapeHtml(item.id)}</small></li>`).join("");
   const checks = (moment.checks || []).map(check => `<li><b>${check.passed ? "PASS" : "FAIL"}</b> ${escapeHtml(check.name)}: ${escapeHtml(check.detail)}</li>`).join("");
   host.innerHTML = `<details class="proof" data-proof="${escapeHtml(key)}" ${state.expandedProof.has(key) ? "open" : ""}>
-    <summary>Facts &amp; evidence <span>${Math.round(moment.confidence * 100)}% confidence</span></summary>
+    <summary>Facts &amp; evidence <span>${Math.round(moment.confidence * 100)}% selection confidence</span></summary>
     <div class="proof-content"><p class="kicker">Verified at ${clockOf(moment.valid_from_ms)}</p>${stats}
     <p class="proof-label">Facts behind this update</p>${facts || '<p class="evidence">No additional facts.</p>'}
     <p class="proof-label">Source events</p><ul class="evidence">${evidence || '<li>No event details attached.</li>'}</ul>
@@ -390,7 +390,7 @@ function renderCandidates() {
     return;
   }
   list.innerHTML = state.candidates.map((result, index) => {
-    const frame = result.moment?.frame || result.decision?.primary_frame || "QUIET";
+    const frame = result.moment?.frame || (result.decision ? "NO UPDATE" : "NO VERIFIED CANDIDATE");
     const action = result.producer?.action || "TRACE";
     const confidence = result.decision ? result.decision.primary_frame_confidence.toFixed(2) : "—";
     return `<button class="candidate ${index === state.selected ? "on" : ""}" data-index="${index}" type="button">
@@ -422,8 +422,9 @@ function renderDetail() {
     : "";
   host.innerHTML = `
     <p class="kicker">${escapeHtml(result.kind)} · ${escapeHtml(decision?.provider || "")}</p>
-    <h2>${escapeHtml((result.moment?.frame || decision?.primary_frame || "No moment").replaceAll("_", " "))}</h2>
+    <h2>${escapeHtml((result.moment?.frame || (decision?.selected_candidate_id ? decision.primary_frame : "No update")).replaceAll("_", " "))}</h2>
     <p class="body">${escapeHtml(result.producer?.reason || result.verification?.reason || "Trigger did not continue.")}</p>
+    ${result.candidates ? `<p class="proof-label">${result.candidates.candidates.length} verified candidates · ${decision?.selected_candidate_id ? "Selected " + escapeHtml(decision.selected_candidate_id) : "No selection"}</p>` : ""}
     ${bars}
     ${checks}`;
 }

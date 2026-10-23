@@ -183,8 +183,10 @@ class QuestionAnswer(BaseModel):
 
 
 class MomentDecision(BaseModel):
-    """Typed probabilities from the single decision call. No prose."""
+    """Typed probabilities and editorial selection. No generated match facts."""
 
+    selected_candidate_id: str | None = None
+    candidate_scores: dict[str, float] = Field(default_factory=dict)
     tactical_shift: float
     momentum_shift: float
     player_story: float
@@ -237,6 +239,11 @@ class VerifiedMoment(BaseModel):
     checks: list[Check] = Field(default_factory=list)
 
 
+class VerifiedCandidates(BaseModel):
+    candidates: list[VerifiedMoment] = Field(default_factory=list)
+    checks: list[Check] = Field(default_factory=list)
+
+
 class VerificationResult(BaseModel):
     verified: bool
     moment: VerifiedMoment | None = None
@@ -282,6 +289,7 @@ class ViewerProfile(BaseModel):
 class PipelineResult(BaseModel):
     kind: Literal["moment", "trace", "enrichment"]
     trigger: TriggerResult | None = None
+    candidates: VerifiedCandidates | None = None
     decision: MomentDecision | None = None
     verification: VerificationResult | None = None
     producer: ProducerDecision | None = None

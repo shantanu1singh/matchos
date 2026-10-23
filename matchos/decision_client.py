@@ -14,7 +14,7 @@ import httpx
 
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
-from matchos.schemas import MatchState, MomentDecision, MomentFrame
+from matchos.schemas import MatchState, MomentDecision, MomentFrame, VerifiedMoment, ViewerProfile
 
 logger = logging.getLogger(__name__)
 FRAMES = get_args(MomentFrame)
@@ -30,6 +30,8 @@ QUESTIONS = {
 
 
 class DecisionClient(Protocol):
+    async def select(self, state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> MomentDecision: ...
+
     async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision: ...
 
 
@@ -59,6 +61,39 @@ class GatewayDecisionClient:
         self.endpoint = f"{config.decision_base_url}/decisions"
         self.api_key = config.gateway_api_key
         self._fallback = LocalDecisionClient()
+
+    async def select(self, state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> MomentDecision:
+        if not candidates:
+            raise ValueError("Editorial selection requires verified candidates")
+        started = time.perf_counter()
+        questions = _selection_questions(candidates)
+        editorial = _editorial_state(state, candidates, viewer, context)
+        cloudflare = isinstance(self, CloudflareDecisionClient)
+        payload = ({"model": self.model.rsplit("/", 1)[-1], "state": editorial,
+                    "questions": _cloudflare_questions(questions)} if cloudflare else
+                   {"model": self.model, "input": json.dumps(editorial), "questions": questions})
+        call = ModelCall("editorial selection", self.provider, payload,
+                         secrets=(self.config.gateway_api_key, self.config.cloudflare_api_token))
+        try:
+            async with httpx.AsyncClient(timeout=self.config.decision_timeout_s) as client:
+                response = await client.post(self.endpoint, json=payload,
+                                             headers={"Authorization": f"Bearer {self.api_key}"})
+                response.raise_for_status()
+                body = response.json()
+            call.result(body)
+            answers = _selection_answers(body, cloudflare)
+            return _parse_selection(answers, candidates, self.provider, (time.perf_counter() - started) * 1000)
+        except asyncio.CancelledError:
+            call.result({"reason": "session or request cancelled"}, phase="CANCELLED")
+            raise
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, AttributeError) as exc:
+            call.result({"error": _failure_detail(exc, self.config)}, phase="ERROR")
+            logger.warning("Editorial model %s failed (%s); using the existing local fallback", self.model, _failure_detail(exc, self.config))
+            decision = await self._fallback.select(state, candidates, viewer, context)
+            decision.provider = f"local-decision-fallback:{self.provider}"
+            decision.latency_ms = round((time.perf_counter() - started) * 1000, 3)
+            call.result(decision.model_dump(mode="json"), phase="FALLBACK")
+            return decision
 
     def _payload(self, state: MatchState, reasons: list[str], focus_player_id: str | None) -> dict:
         return {
@@ -123,9 +158,9 @@ def _decision_state(state: MatchState, reasons: list[str], focus_player_id: str 
     }
 
 
-def _cloudflare_questions() -> dict:
+def _cloudflare_questions(questions_list: list[dict] | None = None) -> dict:
     questions = {}
-    for question in _questions():
+    for question in questions_list if questions_list is not None else _questions():
         converted = {"type": question["type"], "instructions": question["instructions"]}
         if question["type"] == "predicate":
             converted["type"] = "noul"
@@ -186,6 +221,76 @@ class CloudflareDecisionClient(GatewayDecisionClient):
             else:
                 normalized.append({"name": name, "type": "score", "score": answer["score"]})
         return _parse_gateway({"answers": normalized}, self.provider, latency_ms)
+
+
+def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
+    return [
+        {"name": "candidate", "type": "choice",
+         "instructions": "Choose the single verified candidate most worth showing NOW to this viewer, or NONE. Judge interest, novelty, team/player relevance, match phase and recent updates. All candidates have already passed evidence checks; do not re-detect events. Goals and red cards usually deserve immediate attention. Prefer NONE to repetitive or unhelpful interruptions.",
+         "choices": [{"value": moment.id} for moment in candidates] + [{"value": "NONE"}]},
+        {"name": "importance", "type": "score", "instructions": "Editorial importance of the chosen candidate for this viewer, from 0 to 5; 0 for NONE.",
+         "levels": [{"label": str(level)} for level in range(6)]},
+        {"name": "shouldSurface", "type": "predicate", "instructions": "Is the chosen verified candidate worth interrupting this viewer now, considering recent updates? Answer no for NONE."},
+    ]
+
+
+def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict:
+    from matchos.language_agent import PERCENT_FACTS
+    return {"task": "Select from verified candidates; do not invent facts or choose unavailable candidates.",
+            "minute": state.minute, "score": {"RED": state.score_red, "BLUE": state.score_blue},
+            "viewer": viewer.model_dump(mode="json"), **context,
+            "verifiedCandidates": [
+                {"id": moment.id, "frame": moment.frame, "team": moment.team_id, "player": moment.player_id,
+                 "facts": {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
+                           for key, value in moment.facts.items()},
+                 "checks": [check.model_dump(mode="json") for check in moment.checks],
+                 "evidence": [item.model_dump(mode="json") for item in moment.evidence_detail]}
+                for moment in candidates]}
+
+
+def _selection_answers(body: dict, cloudflare: bool) -> dict:
+    if not cloudflare:
+        return {answer["name"]: answer for answer in body["answers"]}
+    if body.get("success") is False:
+        raise ValueError("Cloudflare rejected selection")
+    raw = body.get("result", body)["answers"]
+    if raw["candidate"]["type"] != "choice" or raw["importance"]["type"] != "score" or raw["shouldSurface"]["type"] != "noul":
+        raise ValueError("Invalid selection answer types")
+    choice = raw["candidate"]
+    return {"candidate": {**choice, "probabilities": [{"value": key, "probability": value} for key, value in choice["probabilities"].items()]},
+            "importance": raw["importance"],
+            "shouldSurface": {"type": "predicate", "probability": raw["shouldSurface"]["noul"]}}
+
+
+def _parse_selection(answers: dict, candidates: list[VerifiedMoment], provider: str, latency_ms: float) -> MomentDecision:
+    for name, kind in (("candidate", "choice"), ("importance", "score"), ("shouldSurface", "predicate")):
+        if answers[name]["type"] != kind:
+            raise ValueError("Invalid selection answer")
+    choice = answers["candidate"]
+    available = {moment.id: moment for moment in candidates}
+    selected = choice["choice"]
+    if selected not in {*available, "NONE"}:
+        raise ValueError("Selection is not a verified candidate")
+    scores = {item["value"]: _bounded(item["probability"]) for item in choice["probabilities"]}
+    if set(scores) - {*available, "NONE"}:
+        raise ValueError("Unverified candidate in selection probabilities")
+    confidence = _bounded(choice.get("confidence", scores.get(selected, 0)))
+    scores.setdefault(selected, confidence)
+    importance = _bounded(answers["importance"]["score"], 5)
+    surface = _bounded(answers["shouldSurface"]["probability"])
+    moment = available.get(selected)
+    frame_scores = {}
+    for candidate in candidates:
+        frame_scores[candidate.frame] = max(frame_scores.get(candidate.frame, 0), scores.get(candidate.id, 0))
+    return MomentDecision(selected_candidate_id=moment.id if moment else None, candidate_scores=scores,
+                          tactical_shift=sum(score for frame, score in frame_scores.items() if frame == "PRESS_BREAKDOWN"),
+                          momentum_shift=frame_scores.get("MOMENTUM_SWING", 0),
+                          player_story=max(frame_scores.get("PLAYER_IMPACT", 0), frame_scores.get("SUBSTITUTE_IMPACT", 0)),
+                          importance=importance if moment else 0, should_surface=surface if moment else 0,
+                          primary_frame=moment.frame if moment else candidates[0].frame,
+                          primary_frame_confidence=confidence, frame_scores=frame_scores,
+                          team_id=moment.team_id if moment else None, player_id=moment.player_id if moment else None,
+                          provider=provider, latency_ms=round(latency_ms, 3))
 
 
 def _failure_detail(exc: Exception, config: LLMConfig) -> str:
@@ -281,6 +386,23 @@ class LocalDecisionClient:
     """Deterministic typed-probability model for offline use."""
 
     provider = "local-decision"
+
+    async def select(self, state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> MomentDecision:
+        """Keep offline/failure behavior, restricted to evidence-backed candidates."""
+        if not candidates:
+            raise ValueError("Editorial selection requires verified candidates")
+        started = time.perf_counter()
+        call = ModelCall("editorial selection", self.provider, _editorial_state(state, candidates, viewer, context))
+        scores = _frame_scores(state, context.get("triggerReasons", []), viewer.player_id)
+        chosen = max(candidates, key=lambda candidate: scores.get(candidate.frame, 0))
+        confidence = scores.get(chosen.frame, 0)
+        result = _parse_selection({"candidate": {"type": "choice", "choice": chosen.id, "confidence": confidence,
+                                                "probabilities": [{"value": candidate.id, "probability": scores.get(candidate.frame, 0)} for candidate in candidates]},
+                                   "importance": {"type": "score", "score": round(confidence * 5, 2)},
+                                   "shouldSurface": {"type": "predicate", "probability": max(confidence, .9) if chosen.frame in {"GOAL", "COMEBACK", "RED_CARD"} else confidence}},
+                                  candidates, self.provider, (time.perf_counter() - started) * 1000)
+        call.result(result.model_dump(mode="json"))
+        return result
 
     async def decide(self, state: MatchState, reasons: list[str], focus_player_id: str | None = None) -> MomentDecision:
         started = time.perf_counter()

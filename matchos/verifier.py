@@ -12,6 +12,7 @@ from matchos.schemas import (
     MomentFrame,
     VerificationResult,
     VerifiedMoment,
+    VerifiedCandidates,
 )
 from matchos.state_engine import StateEngine
 
@@ -32,7 +33,26 @@ class Verifier:
         self.state_engine = state_engine
         self._seq = 0
 
+    def candidates(self, state: MatchState, events: list[MatchEvent], focus_player_id: str) -> VerifiedCandidates:
+        """Check every supported story before asking a model for editorial preference."""
+        result = VerifiedCandidates()
+        for frame in FRAME_ORDER:
+            # Existing evidence functions share a decision-shaped input for player focus.
+            # These neutral placeholders are not model probabilities or editorial scores.
+            seed = MomentDecision(tactical_shift=0, momentum_shift=0, player_story=0,
+                                  importance=0, primary_frame=frame, primary_frame_confidence=0,
+                                  should_surface=0, frame_scores={}, player_id=focus_player_id,
+                                  provider="evidence-candidate", latency_ms=0)
+            moment, checks = self._check_frame(frame, state, seed, events)
+            result.checks.extend(checks)
+            if moment is not None:
+                # Failed checks for alternative teams stay in the set diagnostics.
+                moment.checks = [check for check in checks if check.passed]
+                result.candidates.append(moment)
+        return result
+
     def verify(self, state: MatchState, decision: MomentDecision, events: list[MatchEvent]) -> VerificationResult:
+        """Legacy frame-decision helper; the live workflow builds candidates first."""
         ranked = sorted(
             FRAME_ORDER,
             key=lambda frame: (frame == decision.primary_frame, decision.frame_scores.get(frame, 0.0)),
