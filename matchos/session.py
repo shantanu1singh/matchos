@@ -189,8 +189,6 @@ class MatchSession:
             return None
         rich = render_overlay(active.moment, viewer, rich=True, provider=self.services.language_provider)
         rich.body = text
-        if self.viewer.persona == "broadcaster":
-            rich.headline = text
         self.active.overlay = rich
         return rich
 

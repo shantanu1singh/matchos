@@ -44,9 +44,10 @@ Casual: plain speech, almost no numbers.
 Analyst: neutral coverage of both teams, explaining tactical changes using exact before-and-after metrics and the score/player-count context. No club allegiance; do not invent formations or tactical consequences.
 Fan: same facts, framed for the viewer's team: celebrate their goals, explain setbacks and verified player advantages, never abusive or invented.
 Player: what the focused player can take from the facts.
-Broadcaster: one neutral headline for the whole audience, with no club allegiance and no adjectives you cannot prove.
+Broadcaster: write supporting copy beneath the supplied presentation.headline, for a neutral live commentary audience. Use one or two short sentences, at most 45 words, and one key statistic or before-and-after comparison. Explain the story plainly; do not repeat the headline or score already in it. Avoid technical metric lists and decimal distances; use rounded metres. Exact supporting metrics remain in Facts & evidence. Do not claim causation, urgency, a chance or a goal that the facts do not establish.
+For PRESS_BREAKDOWN, pressBypassBefore/Now measure attackingTeam playing through defendingTeam's first pressing line. The defensiveLine fields belong to defendingTeam. Do not attribute that defensive line to the attacking team.
 If the language is hi, write in Hindi. Otherwise write in English.
-Return only the sentence or headline, with no JSON and no preamble.
+Return only the supporting sentences, with no JSON, headline or preamble.
 """
 
 
@@ -186,6 +187,15 @@ def prompt_payload(moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     # Keep canonical facts untouched for arithmetic and evidence inspection.
     facts = {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
              for key, value in moment.facts.items()}
+    fallback = render_overlay(moment, viewer, rich=True, provider="template")
+    presentation = {}
+    if viewer.persona == "broadcaster":
+        facts = {key: round(value) if key.endswith("M") and isinstance(value, (int, float)) else value
+                 for key, value in facts.items()}
+        presentation = {"presentation": {"headline": fallback.headline,
+                                         "purpose": "What should the audience notice right now?",
+                                         "output": "Supporting copy only; one key statistic or comparison.",
+                                         "distancePrecision": "Rounded metres; canonical values stay in evidence."}}
     return json.dumps({
         "roster": identity_context(),
         "viewer": viewer.model_profile(),
@@ -193,7 +203,8 @@ def prompt_payload(moment: VerifiedMoment, viewer: ViewerProfile) -> str:
                    "team_id": moment.team_id, "player_id": moment.player_id, "facts": facts},
         "units": {"possessionLast5": "percent", "pressBypassBefore": "percent",
                   "pressBypassNow": "percent", "distances": "metres"},
-        "fallbackText": render_overlay(moment, viewer, rich=True, provider="template").body,
+        "fallbackText": fallback.body,
+        **presentation,
     }, default=str)
 
 
@@ -214,8 +225,16 @@ def faithful_text(text: str, moment: VerifiedMoment, viewer: ViewerProfile) -> s
               for ratio in (float(value), round(float(value), 2))}
     fractional = any(float(number) in ratios and 0 < float(number) < 1
                      for number in re.findall(r"(?<![\d.])\d+\.\d+(?![\d.])", cleaned))
-    accepted = bool(cleaned and not fractional and prose_is_faithful(cleaned, moment))
-    result = cleaned if accepted else render_overlay(moment, viewer, rich=True, provider="template").body
+    fallback = render_overlay(moment, viewer, rich=True, provider="template")
+    broadcast_ok = True
+    if viewer.persona == "broadcaster":
+        headline = fallback.headline.casefold().rstrip(".!।")
+        repeated_headline = cleaned.casefold().startswith(headline)
+        decimal_distance = bool(re.search(r"\d+\.\d+\s*(?:m\b|met(?:re|er)s?\b|मीटर)", cleaned, re.IGNORECASE))
+        sentences = [part for part in re.split(r"[.!?।]+(?:\s|$)", cleaned) if part.strip()]
+        broadcast_ok = not repeated_headline and not decimal_distance and len(cleaned.split()) <= 45 and len(sentences) <= 2
+    accepted = bool(cleaned and not fractional and broadcast_ok and prose_is_faithful(cleaned, moment))
+    result = cleaned if accepted else fallback.body
     from matchos.telemetry import record
     record("language fact guard", {"text": cleaned, "canonicalFacts": moment.facts},
            {"accepted": accepted, "text": result}, status="complete" if accepted else "fallback")
@@ -277,6 +296,4 @@ async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: Vie
         return fallback
     overlay = render_overlay(moment, viewer, rich=True, provider=provider)
     overlay.body = text
-    if viewer.persona == "broadcaster":
-        overlay.headline = text
     return overlay

@@ -259,7 +259,7 @@ def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer
         "fan": "Prioritize the selected team's fortunes, including verified pressure from the opponent. A goal or dismissal for either side can change the supported team's score or player advantage; use that verified context. Avoid repetitive emotional commentary.",
         "player": "Prioritize direct evidence about the focused player. Prefer NONE for unrelated tactical stories unless there is a major match event.",
         "casual": "Interrupt for goals, red cards, comebacks or clearly significant chances. Prefer NONE for ordinary tactical fluctuations, gradual possession changes and repeated updates.",
-        "broadcaster": "Cover the whole match neutrally, with no club allegiance or preferred player. Prioritize major events and the strongest timely new story useful to a broad live audience. Prefer NONE over repeating routine tactical or possession updates if no timely broadcast cue is warranted.",
+        "broadcaster": "Cover the whole match neutrally, with no club allegiance or preferred player. Ask: what should the audience notice right now? Prioritize goals, dismissals, score changes and clear new turning points that make a useful live commentary cue. Tactical changes deserve airtime when they establish a clear match story, not merely because another metric changed. Prefer NONE over routine possession fluctuations or repeats. Use only the supplied evidence; do not invent drama, chances or causal links.",
     }
     return {"task": "Select from verified candidates; do not invent facts or choose unavailable candidates.",
             "roster": identity_context(),

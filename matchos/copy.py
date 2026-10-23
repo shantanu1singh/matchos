@@ -98,6 +98,7 @@ def _allowed_numbers(moment: VerifiedMoment) -> set[float]:
             allowed.add(round(number, 2))
             allowed.add(float(round(number)))
             allowed.add(abs(number))
+            allowed.add(float(round(abs(number))))
             allowed.add(float(round(abs(number), 1)))
             if 0.0 <= abs(number) <= 1.5:
                 pct = abs(number) * 100
@@ -163,6 +164,8 @@ def _copy(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[st
     language = viewer.language
     persona = viewer.persona
     frame = moment.frame
+    if persona == "broadcaster":
+        return _broadcast(moment, viewer)
     if frame == "PRESS_BREAKDOWN":
         return _press(moment, viewer, rich)
     if frame == "PLAYER_IMPACT":
@@ -176,6 +179,60 @@ def _copy(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[st
     if frame == "RED_CARD":
         return _card(moment, viewer, rich)
     return _shot(moment, language, persona, rich)
+
+
+def _broadcast(moment: VerifiedMoment, viewer: ViewerProfile) -> tuple[str, str, str]:
+    """A match story above one supporting fact; exact metrics stay in evidence."""
+    facts, language = moment.facts, viewer.language
+    hindi = language == "hi"
+    score = f"{facts['scoreRed']}–{facts['scoreBlue']}" if 'scoreRed' in facts and 'scoreBlue' in facts else ""
+    context = (f"{score} पर, " if hindi else f"At {score}, ") if score else ""
+    kicker = "ऑन एयर" if hindi else "On air"
+    if moment.frame == "PRESS_BREAKDOWN":
+        attacking, defending = (_side(facts[key], language) for key in ("attackingTeam", "defendingTeam"))
+        before, now = _pct(facts['pressBypassBefore']), _pct(facts['pressBypassNow'])
+        if hindi:
+            return kicker, f"{context}{attacking} {defending} की प्रेस के पार निकल रहे हैं", f"हाल की कोशिशों में पहली प्रेस लाइन को भेदने की दर {before}% से बढ़कर {now}% हुई है।"
+        return kicker, f"{context}{attacking} are getting through {defending}'s press", f"{attacking} have played through the first line on {now}% of recent attempts, up from {before}%."
+    if moment.frame == "MOMENTUM_SWING":
+        team, share = _side(facts['leadingTeam'], language), _pct(facts['possessionLast5'])
+        if hindi:
+            return kicker, f"{context}{team} का दबाव बढ़ रहा है", f"पिछले पाँच मिनट में गेंद पर उनका {share}% कब्ज़ा रहा है।"
+        return kicker, f"{context}{team} are building pressure", f"They have held {share}% of the ball over the last five minutes."
+    if moment.frame in {"GOAL", "COMEBACK"}:
+        team = _side(facts['scoringTeam'], language)
+        scorer = shirt(str(facts.get('scorer') or '')) or team
+        red, blue = int(facts['scoreRed']), int(facts['scoreBlue'])
+        own, other = (red, blue) if team_name(str(facts['scoringTeam'])) == team_name('RED') else (blue, red)
+        if hindi:
+            headline = f"{team} ने {score} पर बराबरी की" if own == other else f"{team} का गोल, स्कोर {score}"
+            return kicker, headline, f"{scorer} ने {facts['minute']}वें मिनट में गोल किया।"
+        headline = (f"{team} draw level at {score}" if own == other else
+                    f"{team} take a {score} lead" if own > other and own - other == 1 else
+                    f"{team} extend their lead to {score}" if own > other else f"{team} pull a goal back: {score}")
+        return kicker, headline, f"{scorer} scores at {facts['minute']}′."
+    if moment.frame == "RED_CARD":
+        team = _side(facts['cardTeam'], language)
+        side = 'Red' if team_name(str(facts['cardTeam'])) == team_name('RED') else 'Blue'
+        remaining = int(facts.get(f'players{side}', 10))
+        player = shirt(str(facts.get('player') or '')) or team
+        if hindi:
+            return kicker, f"{team} अब {remaining} खिलाड़ियों से खेलेंगे", f"{player} को लाल कार्ड मिला। {team} के पास अब {remaining} खिलाड़ी हैं।"
+        return kicker, f"{team} down to {remaining}", f"{player} is sent off, leaving {team} with {remaining} players."
+    if moment.frame == "PLAYER_IMPACT":
+        player = _player_label(facts, language)
+        if hindi:
+            return kicker, f"{context}{player} खेल में ज़्यादा शामिल हो रहे हैं", f"पिछले आठ मिनट में उन्हें लाइनों के बीच {facts['betweenLinesLast8']} बार गेंद मिली है।"
+        return kicker, f"{context}{player} is getting more involved", f"He has received the ball between the lines {facts['betweenLinesLast8']} times in the last eight minutes."
+    if moment.frame == "SUBSTITUTE_IMPACT":
+        player = _player_label(facts, language)
+        if hindi:
+            return kicker, f"{context}{player} के आने के बाद आगे बढ़ती टीम", f"मैदान पर आने के बाद उन्होंने {facts['boxEntries']} बार गेंद बॉक्स में पहुँचाई है।"
+        return kicker, f"{context}{player} is involved after coming on", f"He has contributed {facts['boxEntries']} box entries since coming on."
+    _, _, body = _shot(moment, language, 'broadcaster', True)
+    team = _side(facts['team'], language)
+    headline = f"{context}{team} का शॉट" if hindi else f"{context}{team} have a shot"
+    return kicker, headline, body
 
 
 def _press(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[str, str, str]:
@@ -211,8 +268,6 @@ def _press(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[s
         if persona == "player":
             body = f"प्रेस के पीछे जगह खुल रही है। {attacking} की एंट्री {entries_before} से {entries} हो गई हैं।"
             return "खिलाड़ी", "लाइनों के बीच जगह", body
-        if persona == "broadcaster":
-            return "ऑन एयर", f"{attacking} {defending} की प्रेस के पार", f"बाईपास {before}% → {now}%"
         body = f"खेल बदल रहा है। {attacking} को ज़्यादा जगह मिल रही है और {defending} गहराई में धकेले जा रहे हैं।" if drop < -1 else f"खेल बदल रहा है। {attacking} को {defending} की प्रेस के पार निकलना आसान लग रहा है।"
         return "मैच", "खेल बदल रहा है", body
     if persona == "analyst":
@@ -230,8 +285,6 @@ def _press(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[s
     if persona == "player":
         body = f"Space is opening behind the first line. {attacking} final-third entries have gone from {entries_before} to {entries}."
         return "Player", "Space between the lines", body
-    if persona == "broadcaster":
-        return "On air", f"{attacking} playing through {defending} press", f"Bypass {before}% → {now}%"
     if drop < -1:
         body = f"The game is changing. {attacking} are finding much more space and pushing {defending} deeper."
     else:
@@ -296,8 +349,6 @@ def _goal(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[st
     red, blue = int(facts['scoreRed']), int(facts['scoreBlue'])
     leader = _side("RED" if red > blue else "BLUE", language)
     score_line = f"Liverpool {score} Manchester City"
-    if persona == "broadcaster":
-        return "On air", f"Goal: {scorer}", f"{scorer} scores. {score_line}."
     if persona == "analyst":
         body = f"{scorer} scores at {facts['minute']}′. {score_line}."
         if "playersRed" in facts:
@@ -324,8 +375,6 @@ def _card(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[st
     player = shirt(str(facts.get("player") or "")) or team
     if language == "hi":
         return "कार्ड", f"{team} अब {remaining} से", f"{player} को लाल कार्ड मिला। {team} अब {remaining} खिलाड़ियों से खेलेंगे।"
-    if persona == "broadcaster":
-        return "On air", f"{team} down to {remaining}", f"{player} sent off. {team} down to {remaining}."
     if persona == "analyst":
         return "Analyst", f"Dismissal: {team}", f"{player} is sent off at {facts['minute']}′. {team} now have {remaining} players against {other_team}'s {other_count}."
     if persona == "fan":
