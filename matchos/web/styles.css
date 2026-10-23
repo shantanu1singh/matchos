@@ -131,8 +131,6 @@ button { cursor: pointer; }
 .raw-event li { color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .raw-event li.now { color: var(--ink); }
 .raw-event li b { font-weight: 500; color: var(--gold); }
-.raw-event .path { color: #d5e2da; }
-.raw-event #raw-anim { margin: 8px 0 0; color: #d5e2da; }
 
 .event-flash {
   position: absolute;
@@ -300,7 +298,14 @@ select, input {
 .persona-panel { border-radius: 18px; border: 1px solid var(--line); background: var(--card); padding: 12px; flex: none; }
 .card-top { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .card-top > div { display: grid; gap: 5px; min-width: 0; }
-.view-label { font-size: 12px; font-weight: 500; line-height: 1.5; color: #d5e2da; }
+.view-label { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; font-weight: 500; line-height: 1.5; color: #d5e2da; }
+.persona-icon { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 8px; background: #ffffff08; border: 1px solid currentColor; color: var(--muted); }
+.persona-icon svg { display: block; }
+.persona-icon--analyst { color: var(--gold); }
+.persona-icon--broadcaster { color: #b4a4e6; }
+.persona-icon--fan { color: #e68b91; }
+.persona-icon--player { color: var(--blue); }
+.persona-icon--casual { color: #92c9af; }
 .card-top b { color: var(--gold); font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
 .settings-button { font-weight: 640; font-size: 24px; }
 .persona-panel .card h2 { font-size: 24px; }

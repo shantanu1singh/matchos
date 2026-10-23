@@ -89,7 +89,11 @@ def test_telemetry_websocket_on_paused_match(monkeypatch):
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.receive_json()
         ws.send_json({"type":"start", "scenario":"balanced", "seed":7, "speed":1})
-        ws.send_json({"type":"pause"})
+        ws.send_json({"type":"control", "action":"pause"})
+        while True:
+            message = ws.receive_json()
+            if message["type"] == "status" and message["running"] is False:
+                break
         ws.send_json({"type":"telemetry", "since":0})
         while True:
             message = ws.receive_json()

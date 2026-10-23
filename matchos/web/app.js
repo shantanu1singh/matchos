@@ -184,11 +184,6 @@ function shirt(id) {
   return `${teamLabel(team)} ${number}`;
 }
 
-function xy(point) {
-  if (!point || point.x == null || point.y == null) return "";
-  return `${Number(point.x).toFixed(1)},${Number(point.y).toFixed(1)}`;
-}
-
 function clockOf(ms) {
   const minute = String(Math.floor(ms / 60000)).padStart(2, "0");
   const second = String(Math.floor((ms / 1000) % 60)).padStart(2, "0");
@@ -199,44 +194,16 @@ function eventLine(event) {
   const who = shirt(event.player_id) || teamLabel(event.team_id);
   const target = event.target_player_id ? ` → ${shirt(event.target_player_id)}` : "";
   const outcome = event.outcome ? `  ${event.outcome}` : "";
-  const from = xy(event.location);
-  const to = xy(event.end_location);
-  const path = from && to ? `<span class="path">${escapeHtml(`${from} → ${to}`)}</span>` : "";
-  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}`)}${path}`;
-}
-
-function playerPoint(id) {
-  const players = state.frame && state.frame.players;
-  if (!players || !id) return null;
-  const player = players.find((item) => item.player_id === id);
-  return player ? { x: player.x, y: player.y } : null;
-}
-
-function metres(a, b) {
-  if (!a || !b || a.x == null || b.x == null) return null;
-  return Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
+  return `<b>${escapeHtml(event.type)}</b> ${escapeHtml(`${clockOf(event.timestamp_ms)}  ${who}${target}${outcome}`)}`;
 }
 
 function renderRaw() {
   const log = document.getElementById("raw-log");
-  const anim = document.getElementById("raw-anim");
-  if (!log || !anim) return;
+  if (!log) return;
   const rows = state.raw.slice(-5).reverse();
   log.innerHTML = rows.length
     ? rows.map((event, index) => `<li class="${index === 0 ? "now" : ""}">${eventLine(event)}</li>`).join("")
     : "<li>Waiting for the first event</li>";
-  const action = state.frame && state.frame.action;
-  if (!action) {
-    anim.textContent = "Animation  no ball flight";
-    return;
-  }
-  const runner = playerPoint(action.receiver_id);
-  const gap = metres(runner, action.end);
-  const meets = action.receiver_id
-    ? ` · meets ${shirt(action.receiver_id)}${runner ? ` now ${xy(runner)}` : ""}${gap == null ? "" : ` · ${gap.toFixed(1)}m from end`}`
-    : "";
-  const ball = state.frame.ball ? ` · ball now ${xy(state.frame.ball)}` : "";
-  anim.textContent = `Animation  ${action.kind}  ${xy(action.start)} → ${xy(action.end)}${meets}${ball}`;
 }
 
 function resetUiState() {
@@ -938,8 +905,20 @@ function viewerLabel(viewer) {
   return `${personaNames[viewer.persona]} · ${isNeutralViewer(viewer) ? "Neutral" : teamLabel(viewer.team_id, true)} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
 }
 
+function viewerLabelMarkup(viewer) {
+  const icons = {
+    analyst: '<path d="M4 4v16h16M8 16v-4m5 4V8m5 8V4"/>',
+    broadcaster: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11v1a6 6 0 0 0 12 0v-1m-6 7v3m-4 0h8"/>',
+    fan: '<path d="M5 21V4m0 1c5-5 9 5 14 0v10c-5 5-9-5-14 0"/>',
+    player: '<path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>',
+    casual: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  };
+  const persona = Object.hasOwn(icons, viewer.persona) ? viewer.persona : "casual";
+  return `<span class="persona-icon persona-icon--${persona}" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">${icons[persona]}</svg></span><span>${escapeHtml(viewerLabel(viewer))}</span>`;
+}
+
 function updatePrimaryLabel() {
-  document.getElementById("primary-label").textContent = viewerLabel(state.viewer);
+  document.getElementById("primary-label").innerHTML = viewerLabelMarkup(state.viewer);
 }
 
 function renderComparison(onlyIndex = null, fresh = false) {
@@ -986,7 +965,7 @@ function buildComparisonCards() {
   const host = document.getElementById("extra-views");
   host.innerHTML = state.comparisonViewers.map((viewer, index) => `
     <section class="persona-panel">
-      <div class="card-top"><span class="view-label" id="view-label-${index}">${escapeHtml(viewerLabel(viewer))}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
+      <div class="card-top"><span class="view-label" id="view-label-${index}">${viewerLabelMarkup(viewer)}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
       <article class="card empty" id="compare-card-${index}" aria-live="polite"></article>
       <div class="why hidden" id="view-proof-${index}"></div>
       <div class="pulse" id="view-pulse-${index}" aria-label="Live match statistics"></div>
@@ -1008,7 +987,7 @@ function buildComparisonCards() {
       const viewer = state.comparisonViewers[index];
       viewer[select.dataset.field] = select.value;
       normalizeViewer(viewer);
-      panel.querySelector(".view-label").textContent = viewerLabel(viewer);
+      panel.querySelector(".view-label").innerHTML = viewerLabelMarkup(viewer);
       const teamSelect = panel.querySelector('[data-field="team_id"]');
       teamSelect.closest("label").hidden = isNeutralViewer(viewer);
       teamSelect.disabled = isNeutralViewer(viewer);
