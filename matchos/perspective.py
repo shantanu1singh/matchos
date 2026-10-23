@@ -58,7 +58,7 @@ class Perspective:
             try:
                 with self.session.telemetry.capture("Viewer editorial selection", {
                     "timestamp_ms": batch.state.timestamp_ms, "viewer": self.viewer.model_dump(), "viewIndex": self.index,
-                    "demoCheckpoint": getattr(self.session, "demo_step", None)}):
+                    "demoCheckpoint": getattr(self.session, "demo_step", None)}, parent=batch.trace_context):
                     await self.process(batch)
             except asyncio.CancelledError:
                 raise
@@ -74,6 +74,8 @@ class Perspective:
                       if candidate.expires_at_ms > self.session.live_state_engine.state.timestamp_ms
                       and not self.producer.has_aired(candidate)]
         result = PipelineResult(kind="trace", candidates=batch.candidates, state=batch.state, trigger=batch.trigger)
+        record("viewer context", {"viewer": self.viewer.model_profile(), "state": batch.state,
+                                  "candidates": batch.candidates}, None)
         if not candidates:
             if batch.candidates.candidates:
                 result.producer = ProducerDecision(action="SUPPRESS", reason="Available stories have already aired or their live window has passed.")
@@ -125,5 +127,6 @@ class Perspective:
                         self.recent = (self.recent + [{"aired_at": now, "frame": result.moment.frame,
                                                       "momentId": result.moment.id, "headline": overlay.headline}])[-10:]
         record("viewer production", {"viewer": self.viewer.model_dump(), "candidateIds": [candidate.id for candidate in candidates]},
-               {"selection": result.decision.model_dump(), "producer": result.producer.model_dump(), "explanation": explain(result, self.viewer)})
+               {"selection": result.decision.model_dump(), "producer": result.producer.model_dump(),
+                "moment": result.moment, "overlay": result.overlay, "explanation": explain(result, self.viewer)})
         await self.emit(result)

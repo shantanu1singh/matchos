@@ -1,0 +1,14 @@
+{
+  "version": "1",
+  "description": "Eight authored regression scenarios, each evaluated for Broadcaster, Liverpool fan and Analyst. Expectations are a starting rubric for review, not human-labelled ground truth or measured model performance.",
+  "cases": [
+    {"id": "press", "scenario": "press_collapse", "timestamp_ms": 3840000, "mode": "fresh", "expected_frames": ["PRESS_BREAKDOWN", "MOMENTUM_SWING"], "expected_publication": "AIR", "required_candidate": "PRESS_BREAKDOWN", "rubric": "A new, evidenced pressing or momentum change merits a fresh update. Explain only what the selected facts establish."},
+    {"id": "goal", "scenario": "press_collapse", "timestamp_ms": 3904000, "mode": "fresh", "expected_frames": ["GOAL", "COMEBACK"], "expected_publication": "AIR", "required_candidate": "GOAL", "rubric": "The new Liverpool goal and 2–1 score should take priority over routine tactical updates. Do not invent the finish or its tactical cause."},
+    {"id": "dismissal", "scenario": "press_collapse", "timestamp_ms": 4081000, "mode": "fresh", "expected_frames": ["RED_CARD"], "expected_publication": "AIR", "required_candidate": "RED_CARD", "rubric": "City's new dismissal and player disadvantage deserve an update. Do not claim a tactical outcome has already happened without supporting evidence."},
+    {"id": "quiet", "scenario": "balanced", "timestamp_ms": 0, "mode": "fresh", "expected_frames": ["NONE"], "expected_publication": "HOLD", "rubric": "An uneventful opening with no verified candidates should not call either model or invent an update."},
+    {"id": "recent-update", "scenario": "press_collapse", "timestamp_ms": 3840000, "mode": "recent", "expected_frames": ["NONE"], "expected_publication": "HOLD", "required_candidate": "PRESS_BREAKDOWN", "rubric": "These same verified stories were just aired five real seconds ago. Respect the viewer's interruption cadence; choose NONE."},
+    {"id": "expired", "scenario": "press_collapse", "timestamp_ms": 3840000, "mode": "expired", "expected_frames": ["NONE"], "expected_publication": "HOLD", "rubric": "Every candidate's live window has expired. Skip model calls and retain the previous aired card rather than publishing stale evidence."},
+    {"id": "goal-already-aired", "scenario": "press_collapse", "timestamp_ms": 3904000, "mode": "major-aired", "expected_frames": ["NONE"], "expected_publication": "HOLD", "required_candidate": "GOAL", "rubric": "The exact goal event has already aired and other updates are still fresh. Do not repeat the goal or immediately interrupt with a routine story."},
+    {"id": "dismissal-already-aired", "scenario": "press_collapse", "timestamp_ms": 4081000, "mode": "major-aired", "expected_frames": ["NONE"], "expected_publication": "HOLD", "required_candidate": "RED_CARD", "rubric": "The exact dismissal has already aired and other updates are still fresh. Do not repeat the red card or fabricate another development."}
+  ]
+}

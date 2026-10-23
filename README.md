@@ -201,21 +201,53 @@ Capture stays in memory for each WebSocket session: the last 40 meaningful runs 
 
 Possession and press bypass facts sent to the language model use percentages (`64%`), while canonical evidence retains fractions (`0.639`). Distances keep metres and counts stay integers. A fractional possession/bypass response is rejected in favor of verified template copy.
 
-For persistent external telemetry, install the optional OpenTelemetry dependencies:
+For Foundry tracing and grading, install the optional SDK dependencies:
 
 ```sh
-.venv/bin/python -m pip install -e '.[telemetry]'
+.venv/bin/python -m pip install -r requirements-observability.txt
 ```
 
-Then configure your collector in `.env.local` and restart:
+Connect an Application Insights resource to your Foundry project, then add its connection string to `.env.local` and restart:
 
 ```dotenv
 MATCHOS_OTEL_ENABLED=1
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+APPLICATIONINSIGHTS_CONNECTION_STRING=YOUR_APPLICATION_INSIGHTS_CONNECTION_STRING
+# Opt in to sanitized deterministic inputs, model requests/responses and viewer copy:
+MATCHOS_TRACE_CONTENT=1
 ```
 
-This uses Microsoft Agent Framework's native OpenTelemetry instrumentation with MatchOS parent spans and stage events. Sensitive prompt/response capture is disabled for external export; full sanitized inputs/outputs remain in the local inspector. External collection is optional; the built-in view needs no account or extra package.
+This exports through Microsoft Agent Framework's OpenTelemetry setup and Azure Monitor's background trace exporter. Shared evidence, independent viewer agents, deterministic stages and custom Decision-1 calls are correlated. Provider spans include response/error/fallback phases and token usage when returned. The Telemetry tab and exported JSON expose trace IDs for lookup in Application Insights/Foundry. Pending calls close on cancellation; shutdown flushes queued spans off the event loop.
+
+Content export is off by default. `MATCHOS_TRACE_CONTENT=1` exports MatchOS-sanitized payloads, bounded to 12,000 characters per content field; native SDK sensitive logging stays disabled. Credentials and connection strings are redacted. Full local payloads remain available in the inspector. An OTLP collector is still supported with `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_PROTOCOL`, instead of or alongside Azure Monitor. Export is optional and doesn't make local session state persistent. See [Foundry setup and evaluations](evals/README.md).
+
+### Evaluations and grading
+
+Run eight deterministic match/history conditions across three viewers (24 rows) through the actual perspective workers:
+
+```sh
+# Offline regression baseline, no paid model inference:
+.venv/bin/python -m matchos.evaluation run --local
+# Use your configured providers, including Azure Decision-1 and language deployment:
+.venv/bin/python -m matchos.evaluation run
+# Or a small cloud smoke test:
+.venv/bin/python -m matchos.evaluation run --case goal --output evals/results/azure-goal.json
+```
+
+Reports include actual outputs, mechanical checks, authored editorial expectations, latency and fallbacks. JSON, Markdown and Foundry-ready JSONL are saved under ignored `evals/results/`. Failed checks produce exit code 1; setup errors produce 2. These fixtures are an authored regression rubric, not a human-reviewed benchmark. Passing the offline baseline does not establish cloud model quality.
+
+For separate Foundry cloud grading, set the **project** endpoint and a supported judge deployment, run `az login`, then submit saved outputs:
+
+```dotenv
+AZURE_AI_PROJECT_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT
+MATCHOS_EVAL_JUDGE_DEPLOYMENT=YOUR-JUDGE-DEPLOYMENT
+```
+
+```sh
+.venv/bin/python -m matchos.evaluation submit evals/results/latest.json
+.venv/bin/python -m matchos.evaluation status evals/results/latest.foundry.json
+```
+
+Foundry runs four model graders—editorial selection, persona quality, semantic grounding and restraint—plus the mechanical-check result. Submission is asynchronous, uses the Foundry Projects SDK with Entra authentication, and makes billable judge calls. It never reruns inference or adds grading latency to live play. Fetch status again later for completion, per-row scores/reasons and the Foundry report URL. See [the full setup and limitations](evals/README.md).
 
 ### Editorial selection
 

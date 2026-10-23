@@ -7,6 +7,10 @@ from contextvars import ContextVar
 import time
 import uuid
 
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind, StatusCode
+from matchos.observability import content_attribute, message_attribute, parent_context
+
 _current = ContextVar("matchos_trace", default=None)
 
 
@@ -25,17 +29,49 @@ class Telemetry:
         self.active = {}
         self.latest_quiet = None
         self.revision = 0
+        self._cloud_calls = {}
 
     def touch(self, run):
         self.revision += 1
         run["revision"] = self.revision
 
     @contextmanager
-    def capture(self, label, metadata):
-        from opentelemetry import trace
-        with trace.get_tracer("matchos").start_as_current_span(label):
-            with self._capture(label, metadata) as run:
-                yield run
+    def capture(self, label, metadata, *, parent=None):
+        # Provider exception strings can contain arbitrary content. Record only their
+        # class/status below, rather than OTel's automatic exception stack capture.
+        with trace.get_tracer("matchos").start_as_current_span(
+            label, context=parent_context(parent), record_exception=False, set_status_on_exception=False,
+        ) as span:
+            viewer = metadata.get("viewer", {})
+            attributes = {"matchos.session.id": self.id}
+            for key, value in metadata.items():
+                if isinstance(value, (str, int, float, bool)):
+                    attributes[f"matchos.{key}"] = value
+            if viewer:
+                attributes["matchos.persona"] = viewer.get("persona", "unknown")
+            if label == "Viewer editorial selection":
+                role = viewer.get("persona", "unknown")
+                attributes.update({"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": f"matchos-{role}",
+                                   "gen_ai.agent.id": f"matchos-{role}:1", "gen_ai.conversation.id": self.id})
+            span.set_attributes(attributes)
+            content_attribute(span, "matchos.metadata", metadata)
+            run = None
+            try:
+                with self._capture(label, metadata) as run:
+                    ctx = span.get_span_context()
+                    if ctx.is_valid:
+                        run.update(trace_id=f"{ctx.trace_id:032x}", span_id=f"{ctx.span_id:016x}")
+                    yield run
+            finally:
+                if run is not None:
+                    span.set_attribute("matchos.status", run["status"])
+                    if run["status"] == "error":
+                        span.set_status(StatusCode.ERROR, run.get("error", "error"))
+                    for key in [key for key in self._cloud_calls if key[0] == run["id"]]:
+                        call = self._cloud_calls.pop(key)
+                        if call["status"] == "request":
+                            call["span"].set_attribute("matchos.status", run["status"] if run["status"] != "complete" else "incomplete")
+                        call["span"].end(end_time=call["end"] or time.time_ns())
 
     @contextmanager
     def _capture(self, label, metadata):
@@ -92,8 +128,69 @@ def record(name, inputs, outputs, duration_ms=0, *, status="complete", call_id=N
     # Defensive bound for repeated provider events within a single run.
     run["steps"] = run["steps"][-40:]
     store.touch(run)
-    from opentelemetry import trace
     trace.get_current_span().add_event(name, {"matchos.status": status, "matchos.duration_ms": duration_ms, "matchos.call_id": call_id or ""})
+    _export_step(store, run, name, inputs, outputs, duration_ms, status, call_id, secrets)
+
+
+def _export_step(store, run, name, inputs, outputs, duration_ms, status, call_id, secrets):
+    """Model spans remain open through response parsing and possible fallback.
+
+    They end at their last recorded phase, even when the enclosing viewer later
+    waits for language. Everything is queued by the SDK, never exported inline.
+    """
+    root = trace.get_current_span()
+    if not root.is_recording():
+        return
+    now = time.time_ns()
+    tracer = trace.get_tracer("matchos")
+    if call_id:
+        key = (run["id"], call_id)
+        call = store._cloud_calls.get(key)
+        if call is None:
+            kind, _, model = name.partition(": ")
+            provider = "azure.ai.inference" if model.startswith("azure-foundry:") else model.split(":", 1)[0]
+            span = tracer.start_span(name, kind=SpanKind.CLIENT, attributes={
+                "matchos.call.id": call_id, "matchos.call.kind": kind,
+                "gen_ai.operation.name": "chat" if kind == "reasoning" else "matchos.select_story",
+                "gen_ai.provider.name": provider, "gen_ai.request.model": model,
+            })
+            call = store._cloud_calls[key] = {"span": span, "end": None, "status": status}
+            content_attribute(span, "matchos.input", inputs, secrets)
+        span = call["span"]
+        call.update(end=None if status == "request" else now, status=status)
+        span.set_attribute("matchos.status", status)
+        span.add_event(status, {"matchos.duration_ms": duration_ms})
+        if status != "request":
+            content_attribute(span, "matchos.output", outputs, secrets)
+        if status in {"error", "fallback"}:
+            span.set_status(StatusCode.ERROR, "provider failure" if status == "error" else "local fallback")
+        if status == "fallback":
+            span.set_attribute("matchos.fallback", True)
+            root.set_attribute("matchos.fallback", True)
+        if isinstance(outputs, dict):
+            usage = outputs.get("usage") or outputs.get("usage_details") or {}
+            if not isinstance(usage, dict):
+                usage = {}
+            for suffix, names in {"input_tokens": ("input_tokens", "prompt_tokens", "input_token_count"),
+                                  "output_tokens": ("output_tokens", "completion_tokens", "output_token_count")}.items():
+                for field in names:
+                    if isinstance(usage.get(field), int):
+                        span.set_attribute(f"gen_ai.usage.{suffix}", usage[field])
+                        break
+    else:
+        span = tracer.start_span(name, start_time=now - int(max(0, duration_ms) * 1_000_000), attributes={
+            "matchos.status": status, "matchos.duration_ms": duration_ms})
+        content_attribute(span, "matchos.input", inputs, secrets)
+        content_attribute(span, "matchos.output", outputs, secrets)
+        span.end(end_time=now)
+    if name == "viewer context":
+        message_attribute(root, "gen_ai.input.messages", inputs, "user")
+    elif name == "viewer production":
+        payload = safe(outputs, secrets)
+        message_attribute(root, "gen_ai.output.messages", payload, "assistant")
+        root.set_attribute("matchos.publication", payload.get("producer", {}).get("action", "unknown"))
+        selected = (payload.get("selection") or {}).get("selected_candidate_id")
+        root.set_attribute("matchos.selected_candidate", selected or "NONE")
 
 
 def quiet():

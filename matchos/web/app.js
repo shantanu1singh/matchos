@@ -1372,7 +1372,7 @@ function renderTelemetryRun(run) {
   }
   host.dataset.run = run.id; host.dataset.revision = String(run.revision);
   host.children[0].textContent = run.label;
-  host.children[1].textContent = `${run.id} · ${run.status}${run.error ? " · " + run.error : ""}${run.quiet ? " · Trigger did not fire; no model call" : ""}`;
+  host.children[1].textContent = `${run.id} · ${run.status}${run.error ? " · " + run.error : ""}${run.quiet ? " · Trigger did not fire; no model call" : ""}${run.trace_id ? " · Trace ID " + run.trace_id : ""}`;
   const summary = host.children[2];
   summary.replaceChildren(...executionSummary(run).map(([label, value]) => {
     const item = document.createElement("div"), title = document.createElement("dt"), detail = document.createElement("dd");

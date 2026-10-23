@@ -1,0 +1,6 @@
+opentelemetry-sdk>=1.39,<2
+opentelemetry-exporter-otlp-proto-http>=1.39,<2
+azure-monitor-opentelemetry-exporter>=1.0.0b48,<2
+# 2.3+ requires OpenAI 3.x, while the retained LiteLLM adapter requires 2.x.
+azure-ai-projects>=2.2,<2.3
+openai>=2.54,<3

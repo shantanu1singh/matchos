@@ -24,6 +24,7 @@ from agent_framework import (
 )
 
 from matchos.telemetry import record, quiet
+from matchos.observability import trace_carrier
 from matchos.decision_client import DecisionClient
 from matchos.language_agent import Agent, build_language_executor, final_overlay
 from matchos.llm_config import LLMConfig
@@ -233,7 +234,7 @@ class VerificationExecutor(Executor):
         packet.timings_ms["verifier"] = (time.perf_counter() - started) * 1000
         record("verified candidates", {"state": state.model_dump(mode="json"), "events": [event.model_dump(mode="json") for event in packet.tick.events], "focusPlayer": packet.viewer.player_id}, packet.candidates, packet.timings_ms["verifier"])
         # Publish an immutable shared pool before any viewer's model call starts.
-        await ctx.yield_output(PipelineResult(kind="candidates", candidates=packet.candidates.model_copy(deep=True),
+        await ctx.yield_output(PipelineResult(kind="candidates", trace_context=trace_carrier(), candidates=packet.candidates.model_copy(deep=True),
                                              state=state.model_copy(deep=True), trigger=packet.trigger))
         await ctx.send_message(packet)
 

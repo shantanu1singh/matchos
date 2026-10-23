@@ -211,6 +211,8 @@ flowchart LR
     Download["Export captured JSON"]
     OTel["Optional Agent Framework OpenTelemetry"]
     Collector["Configured OTLP collector"]
+    Insights["Azure Monitor Application Insights"]
+    Foundry["Foundry trace viewer"]
 
     Runs --> Context
     Stages --> Context
@@ -219,15 +221,38 @@ flowchart LR
     Context --> Store
     Store -->|"WebSocket polling while visible"| Inspector --> Download
     Runs --> OTel
-    Stages -->|"Stage events and timings"| OTel
+    Stages -->|"Child spans and timings"| OTel
+    Calls -->|"Custom provider spans"| OTel
     OTel --> Collector
+    OTel -->|"Background batch export"| Insights --> Foundry
 ```
 
 Local traces retain the last **40 meaningful completed runs**, active meaningful runs, and the latest quiet evaluation. Requests and responses share a call ID and appear together, including intermediate error/fallback events. State-stage input includes the current frame, events, sample count, and latest 30 samples; its output contains the aggregated deterministic state. Trace capture does not await network export. The inspector requests incremental snapshots once per second while visible.
 
 Terminal logs include model inputs, outputs, elapsed time, cancellation, and fallback outcomes, with credentials redacted. The local inspector uses the same sanitizer. Trace history is session-local and in memory; JSON export preserves the captured history before a reset or disconnect.
 
-Optional external collection uses Agent Framework's native OpenTelemetry instrumentation, MatchOS parent spans, and stage events. Enable it with the `telemetry` dependency extra and `MATCHOS_OTEL_ENABLED=1`, then configure an OTLP endpoint. External sensitive prompt/response capture is disabled; full sanitized payloads are available in the local inspector. See [execution telemetry setup](README.md#execution-telemetry).
+Optional external collection uses Agent Framework's native OpenTelemetry instrumentation, MatchOS parent spans, deterministic child spans and custom provider spans. `observability.py` configures Azure Monitor export when an Application Insights connection string is present, retaining OTLP collector support. `PipelineResult.trace_context` carries internal W3C context from shared evidence into asynchronous viewer workers; it is excluded from client payloads. Viewer agents emit GenAI `invoke_agent` spans, while native Decision-1 calls have explicit selection spans rather than pretending to be chat completions. Local trace IDs match cloud operation IDs.
+
+Export requires `MATCHOS_OTEL_ENABLED=1` and the optional tracing SDKs. SDK sensitive logging remains off. MatchOS can explicitly export sanitized, bounded content with `MATCHOS_TRACE_CONTENT=1`; otherwise cloud spans contain timing/status metadata. The background exporter does not block frames. Shutdown flushes are performed in a thread. See [execution telemetry setup](README.md#execution-telemetry).
+
+### Evaluation path
+
+```mermaid
+flowchart LR
+    Cases["Authored cases: match checkpoints and editorial history"]
+    Replay["Seeded simulator replay and normal evidence workflow"]
+    Workers["Actual Perspective workers: select, produce, render"]
+    Checks["Mechanical checks and authored expectations"]
+    Saved["JSON, Markdown and JSONL reports"]
+    Graders["Foundry cloud graders: editorial, persona, grounding, restraint"]
+    Results["Foundry report, scores and per-row reasons"]
+    Cases --> Replay --> Workers --> Checks --> Saved
+    Saved -->|"Explicit CLI submission; no inference replay"| Graders --> Results
+```
+
+`evaluation.py` evaluates eight conditions for all three default viewers, using fresh editorial workers and cached deterministic evidence per checkpoint. Quiet and expired cases verify that model calls are skipped; recent updates and already-aired major events exercise restraint. Mechanical checks cover pool membership, evidence checks, supported numbers, profile matching, freshness, publication expectations, latency and provider fallback. Non-applicable copy checks on held rows are excluded from their denominators. This numeric check is not a semantic proof.
+
+Foundry Projects SDK submits the actual saved outputs to the project Evals API. Four custom score-model graders assess subjective quality, and a string-check grader carries the mechanical result. The asynchronous cloud run is separate from live playback; status retrieval saves scores, reasons and the portal report URL. Fixtures are authored starting expectations, not human-reviewed labels; the local baseline, remote inference and cloud judge results are reported separately. See [`evals/README.md`](evals/README.md).
 
 ## Current boundaries
 

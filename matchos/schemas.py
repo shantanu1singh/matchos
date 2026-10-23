@@ -314,6 +314,7 @@ class ViewerProfile(BaseModel):
 
 
 class PipelineResult(BaseModel):
+    trace_context: dict[str, str] = Field(default_factory=dict, exclude=True)
     kind: Literal["candidates", "moment", "trace", "enrichment"]
     trigger: TriggerResult | None = None
     candidates: VerifiedCandidates | None = None

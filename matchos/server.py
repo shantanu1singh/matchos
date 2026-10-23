@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +18,7 @@ from matchos.editorial import explain
 from matchos.perspective import Perspective
 from matchos.llm_config import load_env_files
 from matchos.model_logging import configure_model_logging, logger as model_logger
+from matchos.observability import configure_observability, flush_observability
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
@@ -29,12 +29,13 @@ WEB = Path(__file__).resolve().parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_env_files()
-    if os.getenv("MATCHOS_OTEL_ENABLED", "").lower() in {"1", "true"}:
-        from agent_framework.observability import configure_otel_providers
-        configure_otel_providers(service_name="matchos", enable_sensitive_data=False)
+    configure_observability()
     configure_model_logging()
     model_logger.info("Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable)
-    yield
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(flush_observability)
 
 
 app = FastAPI(title="MatchOS", lifespan=lifespan)

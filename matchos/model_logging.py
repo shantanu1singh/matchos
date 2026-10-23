@@ -29,11 +29,13 @@ def configure_model_logging() -> None:
 configure_model_logging()
 
 _SENSITIVE = {"authorization", "api-key", "api_key", "apikey", "access_token", "refresh_token", "credentials",
-              "password", "token", "secret", "client_secret", "private_key"}
+              "password", "token", "secret", "client_secret", "private_key", "connection_string"}
 
 
 def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
     def clean(value):
+        if hasattr(value, "model_dump"):
+            return clean(value.model_dump(mode="json"))
         if isinstance(value, dict):
             return {str(key): "[REDACTED]" if str(key).lower() in _SENSITIVE else clean(item)
                     for key, item in value.items()}
@@ -44,7 +46,7 @@ def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
     text = json.dumps(clean(payload), ensure_ascii=False, default=str)
     native_secrets = tuple(value for key, value in os.environ.items()
                            if key.endswith(("API_KEY", "API_TOKEN", "AUTH_TOKEN", "SECRET_ACCESS_KEY",
-                                            "ACCESS_KEY_ID", "SESSION_TOKEN")) and value)
+                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING")) and value)
     for secret in sorted(set(secrets + native_secrets), key=len, reverse=True):
         if secret:
             text = text.replace(secret, "[REDACTED]")
