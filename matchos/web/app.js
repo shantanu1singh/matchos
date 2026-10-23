@@ -4,14 +4,17 @@ const state = {
   seeking: false,
   scrubbing: false,
   comparisonMoment: null,
-  comparisonViewers: [],
+  comparisonViewers: [{ persona: "fan", team_id: "BLUE", language: "en", player_id: "blue_9" }, { persona: "casual", team_id: "BLUE", language: "en", player_id: "blue_9" }],
+  viewerDisplays: {},
+  primaryEditorial: null,
+  comparisonEditorial: [],
   comparisonOverlays: [],
   scenarios: [],
   scenario: "press_collapse",
   seed: 47129,
   speed: 1,
   running: false,
-  viewer: { persona: "casual", team_id: "BLUE", language: "en", player_id: "red_7" },
+  viewer: { persona: "analyst", team_id: "BLUE", language: "en", player_id: "red_7" },
   frame: null,
   prev: null,
   moment: null,
@@ -45,6 +48,32 @@ function send(payload) {
 }
 
 function onMessage(message) {
+  if (message.type === "viewer_update") {
+    if (state.seeking) return;
+    const viewer = message.index === 0 ? state.viewer : state.comparisonViewers[message.index - 1];
+    if (!viewer || JSON.stringify(message.profile) !== JSON.stringify(viewer)) {
+      // Compare fields rather than relying on JSON object key order.
+      if (!viewer || ["persona", "team_id", "language", "player_id"].some(key => message.profile?.[key] !== viewer[key])) return;
+    }
+    if (message.index === 0) {
+      state.primaryEditorial = message;
+      state.moment = message.explanation.status === "update" ? message.result.moment : null;
+      state.overlay = message.explanation.status === "update" ? message.result.overlay : null;
+      renderInsight(message.phase !== "enrichment");
+    } else {
+      state.comparisonEditorial[message.index - 1] = message;
+      renderComparison(message.index - 1, message.phase !== "enrichment");
+    }
+    return;
+  }
+  if (message.type === "enrichment") {
+    if (state.seeking) return;
+    if (state.primaryEditorial?.result.moment?.id !== message.result.moment_id || !state.moment) return;
+    state.primaryEditorial.result.overlay = message.result.overlay;
+    state.overlay = message.result.overlay;
+    renderInsight(false);
+    return;
+  }
   if (message.type === "telemetry") { receiveTelemetry(message); return; }
   if (message.type === "seeking") { setLive("Seeking…"); return; }
   if (message.type === "seeked") {
@@ -102,6 +131,13 @@ function onMessage(message) {
     if (shown.length) state.raw = state.raw.concat(shown).slice(-12);
     renderRaw();
     renderPulse();
+    for (const [key, display] of Object.entries(state.viewerDisplays)) {
+      if (display.result.moment.expires_at_ms <= state.frame.timestamp_ms) {
+        delete state.viewerDisplays[key];
+        if (key === "primary") renderInsight(false);
+        else renderComparison(Number(key.split("-")[1]));
+      }
+    }
     updateScore();
     if (!state.scrubbing) {
       document.getElementById("timeline").value = state.frame.timestamp_ms;
@@ -113,28 +149,7 @@ function onMessage(message) {
   }
   if (message.type === "moment") {
     pushCandidate(message.result);
-    if (message.result.producer && message.result.producer.action === "AIR") {
-      state.moment = message.result.moment;
-      state.overlay = message.result.overlay;
-      state.whyOpen = false;
-      const timings = message.result.timings_ms || {};
-      const fast = Math.round(timings.fast || timings.template || 0);
-      document.getElementById("latency").textContent = fast ? `fast ${fast} ms` : "fast";
-      renderInsight(true);
-    }
     renderCandidates();
-    return;
-  }
-  if (message.type === "enrichment") {
-    const overlay = message.result.overlay;
-    const moment = message.result.moment;
-    const momentId = moment && moment.id;
-    const revision = state.revision;
-    window.setTimeout(() => {
-      if (state.revision !== revision || !state.moment || state.moment.id !== momentId) return;
-      state.overlay = overlay;
-      renderInsight(false);
-    }, 700);
     return;
   }
   if (message.type === "reframe") {
@@ -214,6 +229,9 @@ function renderRaw() {
 
 function resetUiState() {
   state.revision += 1;
+  state.primaryEditorial = null;
+  state.viewerDisplays = {};
+  state.comparisonEditorial = [];
   state.comparisonMoment = null;
   state.comparisonOverlays = [];
   state.pulse = null;
@@ -258,6 +276,7 @@ function resetUiState() {
     <h2>Nothing has cleared the producer yet.</h2>`;
   renderCandidates();
   renderRaw();
+  renderInsight(false);
 }
 
 function startMatch() {
@@ -294,28 +313,46 @@ function updateScore() {
   document.getElementById("clock").textContent = `${minute}:${second}`;
 }
 
+function storyName(frame) {
+  return ({PRESS_BREAKDOWN:"Press breakdown", MOMENTUM_SWING:"Momentum shift", PLAYER_IMPACT:"Player involvement", SUBSTITUTE_IMPACT:"Substitute impact", GOAL:"Goal", COMEBACK:"Comeback", RED_CARD:"Red card", SHOT_CHANCE:"Chance created"})[frame] || frame || "No selection";
+}
+function renderEditorialCard(card, proof, viewer, update, key, fresh) {
+  if (!card) return;
+  const now = state.frame?.timestamp_ms || 0;
+  if (update?.explanation.status === "update" && update.result.overlay && update.result.moment?.expires_at_ms > now) state.viewerDisplays[key] = update;
+  const display = state.viewerDisplays[key];
+  const result = display?.result || update?.result;
+  const explanation = display?.explanation || update?.explanation;
+  const latest = update?.explanation;
+  const showing = Boolean(display?.result.overlay && display.result.moment?.expires_at_ms > now);
+  const heldNext = showing && update !== display;
+  card.classList.toggle("empty", !showing);
+  card.classList.toggle("quiet-card", !showing);
+  const displayId = showing ? result.moment.id : "";
+  if (fresh && showing && card.dataset.displayId !== displayId) {
+    const panel = card.closest(".persona-panel");
+    panel.classList.remove("selection-flash");
+    requestAnimationFrame(() => panel.classList.add("selection-flash"));
+  }
+  card.dataset.displayId = displayId;
+  const at = explanation?.timestamp_ms;
+  const header = `<div class="editorial-status"><span class="${showing ? "status-update" : "status-quiet"}">${showing ? (heldNext ? "On screen · next update held" : "Update") : update ? "No interruption" : "Watching"}</span>${at != null ? `<time>${clockOf(at)}</time>` : ""}</div>`;
+  const title = showing ? result.overlay.headline : update ? "Let the match breathe" : "Watching for your next story";
+  const body = showing ? result.overlay.body : (latest?.status === "update" ? "That story has finished. Watching for the next relevant update." : explanation?.reason || "The match keeps flowing. A story appears when it matters to this viewer.");
+  const disclosureKey = `${key}:explanation`;
+  const previous = card.querySelector(".editorial-explanation");
+  if (previous) {
+    if (previous.open) state.expandedProof.add(disclosureKey);
+    else state.expandedProof.delete(disclosureKey);
+  }
+  const evidence = explanation?.evidence?.map(text => `<li>${escapeHtml(text)}</li>`).join("") || "<li>No selected story needs to be put on screen.</li>";
+  const held = latest?.held?.map(item => `<li><b>${escapeHtml(storyName(item.frame))}${item.player ? " · " + escapeHtml(shirt(item.player)) : ""}</b> · ${escapeHtml(item.reason)}</li>`).join("") || "<li>No other verified candidates in this update.</li>";
+  const why = explanation ? `<details class="editorial-explanation" ${state.expandedProof.has(disclosureKey) ? "open" : ""}><summary>Why this decision? <span>${explanation.candidateCount} stories</span></summary><div class="editorial-details"><p><b>${showing ? "Chosen" : "Held"}:</b> ${escapeHtml(storyName(explanation.chosen))}</p><p>${escapeHtml(explanation.reason)}</p>${showing ? `<p class="proof-label">Full update</p><p>${escapeHtml(result.overlay.body)}</p>` : ""}${heldNext ? `<p class="proof-label">Latest decision: no interruption</p><p>${escapeHtml(latest.reason)}</p>` : ""}<p class="proof-label">Evidence</p><ul>${evidence}</ul><p class="proof-label">Held back</p><ul>${held}</ul><p class="note">${explanation.sourceEventCount} source events · explanation from ${escapeHtml(explanation.reasonSource)}</p></div></details>` : "";
+  card.innerHTML = `${header}<h2>${escapeHtml(title)}</h2><p class="body">${escapeHtml(body)}</p>${why}`;
+  renderProof(proof, showing ? result.moment : null, showing ? result.overlay : null, key);
+}
 function renderInsight(fresh) {
-  const card = document.getElementById("insight");
-  const overlay = state.overlay;
-  const moment = state.moment;
-  if (!overlay || !moment) return;
-  card.classList.remove("empty");
-  if (fresh) card.classList.add("swap");
-  const graphic = overlay.graphic
-    ? `<div class="graphic">
-        <div>CONF ${overlay.graphic.confidence}</div>
-        <div>TTL ${overlay.graphic.ttl_sec}s · ${overlay.graphic.priority}</div>
-        <button class="air" type="button">Put on air</button>
-      </div>`
-    : "";
-  card.innerHTML = `
-    <p class="kicker">${escapeHtml(overlay.kicker)} · ${escapeHtml(overlay.source)}</p>
-    <h2>${escapeHtml(overlay.headline)}</h2>
-    <p class="body">${escapeHtml(overlay.body)}</p>
-    ${graphic}`;
-  const air = card.querySelector(".air");
-  if (air) air.addEventListener("click", () => { air.textContent = "On air"; });
-  renderWhy();
+  renderEditorialCard(document.getElementById("insight"), document.getElementById("why"), state.viewer, state.primaryEditorial, "primary", fresh);
 }
 
 function renderWhy() {
@@ -371,7 +408,7 @@ function statCapsules(viewer) {
 
 function renderPulse() {
   const render = (host, viewer) => {
-    if (host) host.innerHTML = statCapsules(viewer).map(text => `<span>${escapeHtml(text)}</span>`).join("");
+    if (host) host.innerHTML = statCapsules(viewer).slice(0, 2).map(text => `<span>${escapeHtml(text)}</span>`).join("");
   };
   render(document.getElementById("pulse"), state.viewer);
   state.comparisonViewers.forEach((viewer, index) => render(document.getElementById(`view-pulse-${index}`), viewer));
@@ -788,6 +825,8 @@ document.querySelectorAll(".tab").forEach((tab) => {
     const map = { persona: "persona", team: "team_id", language: "language", player: "player_id" };
     state.revision += 1;
     state.viewer[map[id]] = event.target.value;
+    state.primaryEditorial = null; delete state.viewerDisplays.primary; state.moment = null; state.overlay = null;
+    renderInsight(false);
     send({ type: "viewer", viewer: state.viewer });
     updatePrimaryLabel();
     renderPulse();
@@ -843,17 +882,10 @@ function updatePrimaryLabel() {
   document.getElementById("primary-label").textContent = `${personaNames[state.viewer.persona]} · ${state.viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${state.viewer.language === "hi" ? "Hindi" : "English"}`;
 }
 
-function renderComparison() {
+function renderComparison(onlyIndex = null, fresh = false) {
   state.comparisonViewers.forEach((viewer, index) => {
-    const card = document.getElementById(`compare-card-${index}`);
-    if (!card) return;
-    const overlay = state.comparisonOverlays[index];
-    const valid = matchesView(overlay, viewer);
-    card.classList.toggle("empty", !valid);
-    card.innerHTML = valid
-      ? `<p class="kicker">${escapeHtml(overlay.kicker)} · ${escapeHtml(overlay.source)}</p><h2>${escapeHtml(overlay.headline)}</h2><p class="body">${escapeHtml(overlay.body)}</p>`
-      : '<p class="kicker">Same verified facts</p><h2>Waiting for a moment</h2><p class="body">This perspective updates with the live insight.</p>';
-    renderProof(document.getElementById(`view-proof-${index}`), valid ? state.comparisonMoment : null, overlay, `view-${index}`);
+    if (onlyIndex !== null && index !== onlyIndex) return;
+    renderEditorialCard(document.getElementById(`compare-card-${index}`), document.getElementById(`view-proof-${index}`), viewer, state.comparisonEditorial[index], `view-${index}`, fresh);
   });
   renderPulse();
 }
@@ -905,7 +937,7 @@ function buildComparisonCards() {
           <label>Team<select data-field="team_id" aria-label="View ${index + 2} team"><option value="BLUE" ${viewer.team_id === "BLUE" ? "selected" : ""}>Blue</option><option value="RED" ${viewer.team_id === "RED" ? "selected" : ""}>Red</option></select></label>
           <label>Language<select data-field="language" aria-label="View ${index + 2} language"><option value="en" ${viewer.language === "en" ? "selected" : ""}>English</option><option value="hi" ${viewer.language === "hi" ? "selected" : ""}>Hindi</option></select></label>
           <label>Focus player<select id="view-player-${index}" data-field="player_id" aria-label="View ${index + 2} focus player" ${viewer.persona === "player" ? "" : "disabled"}>${playerOptions(viewer)}</select></label>
-          <p class="viewer-help">Same verified moment. Choose an independent persona, team and language.</p>
+          <p class="viewer-help">Independent story selection. Choose a persona, team and language.</p>
           <button class="remove-view" type="button" data-remove="${index}">Remove this view</button>
         </div>
       </div>
@@ -917,12 +949,15 @@ function buildComparisonCards() {
       viewer[select.dataset.field] = select.value;
       panel.querySelector(".view-label").textContent = `${personaNames[viewer.persona]} · ${viewer.team_id === "BLUE" ? "Blue" : "Red"} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
       panel.querySelector('[data-field="player_id"]').disabled = viewer.persona !== "player";
+      state.comparisonEditorial[index] = null; delete state.viewerDisplays[`view-${index}`];
       state.comparisonOverlays = [];
       renderComparison();
       send({ type: "views", views: comparisonViews() });
     }));
     panel.querySelector(".remove-view").addEventListener("click", () => {
       state.comparisonViewers.splice(index, 1);
+      state.comparisonEditorial = [];
+      state.viewerDisplays = state.viewerDisplays.primary ? {primary: state.viewerDisplays.primary} : {};
       state.comparisonOverlays = [];
       buildComparisonCards();
       send({ type: "views", views: comparisonViews() });
@@ -936,13 +971,16 @@ function buildComparisonCards() {
 
 document.getElementById("add-view").addEventListener("click", () => {
   if (state.comparisonViewers.length >= 2) return;
+  state.comparisonEditorial = [];
   state.comparisonViewers.push({ ...state.viewer, persona: state.comparisonViewers.length ? "fan" : "analyst" });
   state.comparisonOverlays = [];
   buildComparisonCards();
   send({ type: "views", views: comparisonViews() });
 });
 positionPopover(document.getElementById("primary-settings"));
+document.getElementById("persona").value = state.viewer.persona;
 updatePrimaryLabel();
+buildComparisonCards();
 
 const timeline = document.getElementById("timeline");
 timeline.addEventListener("input", () => {

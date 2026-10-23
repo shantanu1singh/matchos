@@ -34,6 +34,7 @@ class MatchSession:
     running: bool = True
     candidates: list[Candidate] = field(default_factory=list)
     active: PipelineResult | None = None
+    latest_candidates: PipelineResult | None = None
     on_air_at: float = 0.0
     started_wall: float = field(default_factory=time.perf_counter)
     live_state_engine: StateEngine = field(default_factory=StateEngine)
@@ -44,7 +45,7 @@ class MatchSession:
 
     def __post_init__(self) -> None:
         self.simulator = MatchSimulator(seed=self.seed, scenario_id=self.scenario_id)
-        self.workflow, self.services = build_workflow()
+        self.workflow, self.services = build_workflow(shared_candidates_only=True)
 
     async def warmup(self) -> None:
         ticks = await asyncio.to_thread(self.simulator.collect_warmup)
@@ -99,7 +100,7 @@ class MatchSession:
         outputs: list[PipelineResult] = []
         while not self._outputs.empty():
             data, viewer = self._outputs.get_nowait()
-            if viewer != self.viewer:
+            if data.kind != "candidates" and viewer != self.viewer:
                 continue
             if data.kind in {"moment", "enrichment"} and data.moment is not None:
                 if data.moment.expires_at_ms <= tick.frame.timestamp_ms:
@@ -142,6 +143,8 @@ class MatchSession:
             self._outputs.get_nowait()
 
     def _remember(self, result: PipelineResult) -> None:
+        if result.kind == "candidates":
+            self.latest_candidates = result
         if result.kind == "moment" and result.moment is not None:
             self.candidates.append(Candidate(at=time.time(), result=result))
             self.candidates = self.candidates[-40:]
@@ -158,7 +161,8 @@ class MatchSession:
             return False
         now = time.monotonic()
         major = result.moment.frame in {"GOAL", "COMEBACK", "RED_CARD"}
-        if self.active is None or self.on_air_at == 0 or major or now - self.on_air_at >= 40:
+        if (self.active is None or self.on_air_at == 0 or major or now - self.on_air_at >= 40
+                or (self.active.moment and self.active.moment.expires_at_ms <= self.simulator.clock_ms)):
             self.active = result
             self.on_air_at = now
             self.services.recent_updates.append({"aired_at": now, "momentId": result.moment.id,

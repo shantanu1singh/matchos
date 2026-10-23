@@ -81,6 +81,8 @@ class MatchServices:
     pending_moment: VerifiedMoment | None = None
     pending_viewer: ViewerProfile | None = None
     recent_updates: list[dict] = field(default_factory=list)
+    additional_focus_ids: list[str] = field(default_factory=list)
+    shared_candidates_only: bool = False
 
 
 def _fired(packet: object) -> bool:
@@ -119,14 +121,18 @@ class TriggerExecutor(Executor):
     async def evaluate(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
         started = time.perf_counter()
         state = packet.state or self.services.state_engine.state
-        focus_id = packet.viewer.player_id
-        focus = state.players.get(focus_id)
-        focus_delta = 0.0
-        if focus is not None:
-            previous_rate = focus.between_lines_prev30 / 30.0 if focus.between_lines_prev30 else 0.0
-            recent_rate = focus.between_lines_last8 / 8.0
-            focus_delta = ((recent_rate - previous_rate) / previous_rate) if previous_rate > 0 else float(focus.between_lines_last8)
-            state.deltas["focus_player_involvement_delta"] = round(focus_delta, 3)
+        focuses = [state.players.get(player_id) for player_id in dict.fromkeys(
+            [packet.viewer.player_id, *self.services.additional_focus_ids])]
+        involvement = []
+        for player in focuses:
+            if player is not None:
+                previous_rate = player.between_lines_prev30 / 30.0 if player.between_lines_prev30 else 0.0
+                recent_rate = player.between_lines_last8 / 8.0
+                delta = (recent_rate - previous_rate) / previous_rate if previous_rate > 0 else float(player.between_lines_last8)
+                involvement.append((delta, player.between_lines_last8, player))
+        eligible = [item for item in involvement if item[1] >= 4]
+        focus_delta, _, focus = max(eligible or involvement, key=lambda item: item[0], default=(0, 0, None))
+        state.deltas["focus_player_involvement_delta"] = round(focus_delta, 3)
         samples = {
             "red": state.red.press_bypass_sample,
             "blue": state.blue.press_bypass_sample,
@@ -149,6 +155,16 @@ class QuietExecutor(Executor):
     @handler
     async def stop(self, packet: PipelinePacket, ctx: WorkflowContext[Never, PipelineResult]) -> None:
         quiet()
+        return None
+
+
+class CandidateEndExecutor(Executor):
+    def __init__(self):
+        super().__init__(id="candidate_broadcast")
+
+    @handler
+    async def stop(self, packet: PipelinePacket, ctx: WorkflowContext[Never, PipelineResult]) -> None:
+        # Candidate publication already happened in the verifier. Each viewer runs independently.
         return None
 
 
@@ -193,12 +209,15 @@ class VerificationExecutor(Executor):
         self.services = services
 
     @handler
-    async def verify(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket]) -> None:
+    async def verify(self, packet: PipelinePacket, ctx: WorkflowContext[PipelinePacket, PipelineResult]) -> None:
         started = time.perf_counter()
         state = packet.state or self.services.state_engine.state
-        packet.candidates = self.services.verifier.candidates(state, packet.tick.events, packet.viewer.player_id)
+        packet.candidates = self.services.verifier.candidates(state, packet.tick.events, packet.viewer.player_id, self.services.additional_focus_ids)
         packet.timings_ms["verifier"] = (time.perf_counter() - started) * 1000
         record("verified candidates", {"state": state.model_dump(mode="json"), "events": [event.model_dump(mode="json") for event in packet.tick.events], "focusPlayer": packet.viewer.player_id}, packet.candidates, packet.timings_ms["verifier"])
+        # Publish an immutable shared pool before any viewer's model call starts.
+        await ctx.yield_output(PipelineResult(kind="candidates", candidates=packet.candidates.model_copy(deep=True),
+                                             state=state.model_copy(deep=True), trigger=packet.trigger))
         await ctx.send_message(packet)
 
 
@@ -319,9 +338,10 @@ class EnrichmentExecutor(Executor):
         )
 
 
-def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, MatchServices]:
+def build_workflow(services: MatchServices | None = None, *, shared_candidates_only: bool = False) -> tuple[Workflow, MatchServices]:
     if services is None:
         services = new_services()
+    services.shared_candidates_only = shared_candidates_only or services.shared_candidates_only
     language_executor, agent, provider = build_language_executor()
     services.language_provider = provider
     services.agent = agent
@@ -334,6 +354,13 @@ def build_workflow(services: MatchServices | None = None) -> tuple[Workflow, Mat
     publish = PublishExecutor(services, language_executor)
     trace = TraceExecutor()
     enrich = EnrichmentExecutor(services)
+    if services.shared_candidates_only:
+        workflow = (WorkflowBuilder(start_executor=state)
+                    .add_edge(state, trigger)
+                    .add_edge(trigger, quiet, condition=_quiet)
+                    .add_edge(trigger, verifier, condition=_fired)
+                    .add_edge(verifier, CandidateEndExecutor()).build())
+        return workflow, services
     workflow = (
         WorkflowBuilder(start_executor=state)
         .add_edge(state, trigger)

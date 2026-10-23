@@ -47,7 +47,10 @@ class Producer:
         if viewer.persona not in air_for:
             return ProducerDecision(
                 action="SUPPRESS",
-                reason=f"{viewer.persona} cadence or relevance held this back.",
+                reason=("A recent update is still fresh for this viewer."
+                        if now - self.last_air.get(viewer.persona, -1_000.0) < GAPS[viewer.persona]
+                        and moment.frame not in {"GOAL", "COMEBACK", "RED_CARD"}
+                        else "This story does not match this viewer's preferences."),
                 priority=round(moment.importance * moment.confidence, 3),
                 air_for=air_for,
             )

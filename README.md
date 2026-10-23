@@ -21,9 +21,9 @@ state update (code)
       → language agent (Gemini 3.8 Flash on Vertex AI when configured)
 ```
 
-When evidence produces candidates, one decision call chooses a verified candidate or `NONE`. Triggers without a supported candidate skip the model call. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
+When evidence produces candidates, each configured viewer makes an independent decision call that chooses a verified candidate or `NONE`. Triggers without a supported candidate skip the model call. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
 
-The live feed sends frames every 100 ms independently of the model workflow. One background workflow runs at a time; feed events and tracking samples arriving during a model call are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Template overlays are delivered as soon as verification completes, with language enrichment arriving later. Expired moments and results for an old viewer profile are discarded. Viewer changes show a template immediately and enrich in the background; pause controls do not wait for model calls.
+The live feed sends frames every 100 ms independently of the model workflow. One shared evidence workflow runs at a time; separate background workers select and render for each viewer. Feed events and tracking samples arriving during evidence processing are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Each viewer receives a template after their selection and producer rules clear, with language enrichment arriving later. Expired moments and results for an old viewer profile are discarded. Viewer changes cancel only the changed perspective and select again from the latest verified pool; pause controls do not wait for model calls.
 
 ## Run
 
@@ -41,7 +41,7 @@ The default lab match is `press_collapse` with seed `47129` at 1×. Blue’s pre
 
 ## Viewer modes
 
-Casual, analyst, home fan, player focus, and broadcaster all read the same verified facts. Only the framing changes. The Why control lists the stats and the underlying events.
+Casual, analyst, home fan, player focus, and broadcaster all read the same verified facts. Each viewer can choose a different story or no interruption. The same immutable candidate pool supplies all viewers; the model is not forced to disagree. Why this decision explains selection and suppression, while Facts & evidence exposes the exact underlying checks and events.
 
 ## LLM configuration
 
@@ -109,7 +109,7 @@ Events follow a Kloppy-style ontology in StatsBomb-like JSON. Tracking is contin
 
 ```bash
 .venv/bin/python -m pytest
-node --test tests/telemetry-ui.test.cjs
+node --test tests/telemetry-ui.test.cjs tests/viewer-cards.test.cjs
 ```
 
 ### Playback and persona comparisons
@@ -124,13 +124,11 @@ skipped.
 Playback controls float over the pitch. While dragging the timeline, a preview
 above the thumb shows the time playback will resume from.
 
-The right sidebar starts with one viewer card. Use its ellipsis button to open
-Viewer, Team, Language and Focus player settings. Use the sidebar's plus button
-to add up to two comparison cards, each with independent settings in its own
-popover. Remove a comparison card from that popover. All cards use the same
-verified moment. Templates appear immediately; each persona's language model
-response arrives independently in the background. Each added card adds one
-language request per aired moment and does not duplicate decision model calls.
+The shared pitch fills roughly two-thirds of the desktop view; three compact viewer cards stack on the right. Analyst, Blue supporter and Casual open by default. Each card has its own persona/team/language/player settings in the ellipsis popover. Remove an extra card there or use the plus button to add it back.
+
+Every viewer independently selects a candidate or `NONE` from the same verified pool, with separate recent-update history and producer rules. Each card may therefore show a different story, the same story, or no interruption. A slow selection or language response never blocks another viewer or the pitch. Each worker has one pending snapshot; a busy worker coalesces newer snapshots instead of cancelling its current request or queuing every frame. Removing/changing a perspective cancels its outdated work; unchanged perspectives keep their history.
+
+**Why this decision?** shows the chosen story, evidence summaries, and candidates held back. Model preferences are labelled separately from factual checks, producer policy and local fallback selection. A suppressed follow-up keeps an existing valid story visible until it expires, with the latest held decision in the explanation. No candidate is invented to force visual differences. Each extra viewer adds its own decision call per processed candidate pool, plus a language call only when its producer airs a story.
 
 Each viewer card shows live stat capsules for its persona and selected team or
 player. **Facts & evidence** opens the exact facts, source events and verification
@@ -176,6 +174,6 @@ This uses Microsoft Agent Framework's native OpenTelemetry instrumentation with 
 
 After a trigger, the verifier checks every supported story category and builds evidence-backed candidates. The decision model receives those candidate IDs, verified facts/checks, viewer persona and team/player preferences, match time/score, trigger reasons, and the last ten aired updates with elapsed time. It chooses which candidate is most worth showing now, or `NONE`, and supplies editorial importance and interruption probability. It does not decide whether possession or bypass thresholds were crossed.
 
-The producer retains its novelty, relevance, cadence, and on-air rules after model selection. It may suppress the selected candidate but does not substitute a different story. Model importance and selection confidence affect presentation priority; selection confidence is an editorial model score, not a probability that verified facts are true. Comparison cards render the same selected moment and do not repeat selection. Telemetry includes the entire candidate set and the editorial selection input/output.
+The producer retains its novelty, relevance, cadence, and on-air rules after model selection. It may suppress the selected candidate but does not substitute a different story. Model importance and selection confidence affect presentation priority; selection confidence is an editorial model score, not a probability that verified facts are true. Viewer cards share candidate verification and perform separate editorial selections. Telemetry includes the entire candidate set and the editorial selection input/output.
 
 Cloudflare remains the default, Vercel remains available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.

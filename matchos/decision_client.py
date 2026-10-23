@@ -224,7 +224,10 @@ class CloudflareDecisionClient(GatewayDecisionClient):
 
 
 def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
+    from matchos.editorial import REASONS
     return [
+        {"name": "reason", "type": "choice", "instructions": "Choose the main editorial reason for your selection or abstention. Use only reasons supported by the supplied viewer, candidates and recent updates.",
+         "choices": [{"value": code} for code in REASONS]},
         {"name": "candidate", "type": "choice",
          "instructions": "Choose the single verified candidate most worth showing NOW to this viewer, or NONE. Judge interest, novelty, team/player relevance, match phase and recent updates. All candidates have already passed evidence checks; do not re-detect events. Goals and red cards usually deserve immediate attention. Prefer NONE to repetitive or unhelpful interruptions.",
          "choices": [{"value": moment.id} for moment in candidates] + [{"value": "NONE"}]},
@@ -236,9 +239,18 @@ def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
 
 def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict:
     from matchos.language_agent import PERCENT_FACTS
+    from matchos.producer import GAPS
+    policies = {
+        "analyst": "Prioritize meaningful tactical or territorial changes with strong before-and-after evidence.",
+        "fan": "Prioritize the selected team's fortunes, including verified pressure from the opponent. Avoid repetitive emotional commentary.",
+        "player": "Prioritize direct evidence about the focused player. Prefer NONE for unrelated tactical stories unless there is a major match event.",
+        "casual": "Interrupt for goals, red cards, comebacks or clearly significant chances. Prefer NONE for ordinary tactical fluctuations, gradual possession changes and repeated updates.",
+        "broadcaster": "Prioritize the strongest new story useful to a broad live audience. Prefer NONE if no timely broadcast cue is warranted.",
+    }
     return {"task": "Select from verified candidates; do not invent facts or choose unavailable candidates.",
             "minute": state.minute, "score": {"RED": state.score_red, "BLUE": state.score_blue},
-            "viewer": viewer.model_dump(mode="json"), **context,
+            "viewer": viewer.model_dump(mode="json"),
+            "editorialPolicy": {"guidance": policies[viewer.persona], "minimumGapSeconds": GAPS[viewer.persona], "timeUnit": "wall-clock seconds"}, **context,
             "verifiedCandidates": [
                 {"id": moment.id, "frame": moment.frame, "team": moment.team_id, "player": moment.player_id,
                  "facts": {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
@@ -257,7 +269,7 @@ def _selection_answers(body: dict, cloudflare: bool) -> dict:
     if raw["candidate"]["type"] != "choice" or raw["importance"]["type"] != "score" or raw["shouldSurface"]["type"] != "noul":
         raise ValueError("Invalid selection answer types")
     choice = raw["candidate"]
-    return {"candidate": {**choice, "probabilities": [{"value": key, "probability": value} for key, value in choice["probabilities"].items()]},
+    return {**({"reason": raw["reason"]} if "reason" in raw else {}), "candidate": {**choice, "probabilities": [{"value": key, "probability": value} for key, value in choice["probabilities"].items()]},
             "importance": raw["importance"],
             "shouldSurface": {"type": "predicate", "probability": raw["shouldSurface"]["noul"]}}
 
@@ -278,11 +290,18 @@ def _parse_selection(answers: dict, candidates: list[VerifiedMoment], provider: 
     scores.setdefault(selected, confidence)
     importance = _bounded(answers["importance"]["score"], 5)
     surface = _bounded(answers["shouldSurface"]["probability"])
+    reason = answers.get("reason")
+    reason_code = None
+    if reason is not None:
+        from matchos.editorial import REASONS
+        if reason.get("type") != "choice" or reason.get("choice") not in REASONS:
+            raise ValueError("Invalid editorial reason")
+        reason_code = reason["choice"]
     moment = available.get(selected)
     frame_scores = {}
     for candidate in candidates:
         frame_scores[candidate.frame] = max(frame_scores.get(candidate.frame, 0), scores.get(candidate.id, 0))
-    return MomentDecision(selected_candidate_id=moment.id if moment else None, candidate_scores=scores,
+    return MomentDecision(editorial_reason=reason_code, selected_candidate_id=moment.id if moment else None, candidate_scores=scores,
                           tactical_shift=sum(score for frame, score in frame_scores.items() if frame == "PRESS_BREAKDOWN"),
                           momentum_shift=frame_scores.get("MOMENTUM_SWING", 0),
                           player_story=max(frame_scores.get("PLAYER_IMPACT", 0), frame_scores.get("SUBSTITUTE_IMPACT", 0)),

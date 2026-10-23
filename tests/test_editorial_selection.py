@@ -70,6 +70,8 @@ def test_native_editorial_request_and_restricted_output(monkeypatch, provider, s
     payload = json.loads(requests[0].content)
     context = payload['state'] if provider == 'cloudflare' else json.loads(payload['input'])
     assert context['viewer']['persona'] == 'fan'
+    assert "selected team's fortunes" in context['editorialPolicy']['guidance']
+    assert context['editorialPolicy']['minimumGapSeconds'] == 30
     assert context['recentUpdates'][0]['secondsAgo'] == 10
     momentum = next(candidate for candidate in context['verifiedCandidates'] if candidate['id'] == target.id)
     assert momentum['facts']['possessionLast5'] == '70%'
@@ -121,7 +123,7 @@ def test_workflow_verifies_before_selection_and_respects_exact_choice(monkeypatc
         with store.capture('Match workflow',{}):
             return [event.data async for event in workflow.run(LiveTick(tick=tick,viewer=viewer),stream=True) if isinstance(event.data,PipelineResult)]
     outputs = asyncio.run(run())
-    initial = next(output for output in outputs if output.kind != 'enrichment')
+    initial = next(output for output in outputs if output.kind not in {'candidates', 'enrichment'})
     if mode == 'empty':
         assert calls == [] and initial.decision is None
         assert initial.producer.action == 'REJECT'

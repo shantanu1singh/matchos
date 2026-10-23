@@ -33,7 +33,7 @@ class Verifier:
         self.state_engine = state_engine
         self._seq = 0
 
-    def candidates(self, state: MatchState, events: list[MatchEvent], focus_player_id: str) -> VerifiedCandidates:
+    def candidates(self, state: MatchState, events: list[MatchEvent], focus_player_id: str, additional_focus_ids: list[str] | None = None) -> VerifiedCandidates:
         """Check every supported story before asking a model for editorial preference."""
         result = VerifiedCandidates()
         for frame in FRAME_ORDER:
@@ -47,6 +47,15 @@ class Verifier:
             result.checks.extend(checks)
             if moment is not None:
                 # Failed checks for alternative teams stay in the set diagnostics.
+                moment.checks = [check for check in checks if check.passed]
+                result.candidates.append(moment)
+        for player_id in dict.fromkeys(additional_focus_ids or []):
+            if player_id == focus_player_id:
+                continue
+            seed.player_id = player_id
+            moment, checks = self._player(state, seed)
+            result.checks.extend(checks)
+            if moment is not None:
                 moment.checks = [check for check in checks if check.passed]
                 result.candidates.append(moment)
         return result
@@ -108,7 +117,7 @@ class Verifier:
                 Check(
                     name=f"{team.lower()}_press_bypass",
                     passed=enough,
-                    detail=f"delta {delta:+.0%} on n={roll.press_bypass_sample}",
+                    detail=f"Bypass increased {delta * 100:.0f} percentage points on {roll.press_bypass_sample} attempts",
                 )
             )
             if enough:

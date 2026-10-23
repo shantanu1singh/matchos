@@ -52,87 +52,89 @@ def test_seek_clamps_to_scenario_start(monkeypatch):
     asyncio.run(run())
 
 
-def test_comparison_templates_and_fast_persona_flow_while_other_waits(monkeypatch):
+def test_independent_viewer_choices_flow_while_other_model_waits(monkeypatch):
     configure(monkeypatch)
-    moment = VerifiedMoment(
-        id="shared", type="PRESS_BREAKDOWN", frame="PRESS_BREAKDOWN", team_id="RED",
-        importance=1, confidence=.9, facts={"defendingTeam": "RED", "attackingTeam": "BLUE",
-        "pressBypassBefore": .2, "pressBypassNow": .7, "defensiveLineDeltaM": -5,
-        "opponentFinalThirdEntries": 8, "finalThirdEntriesBefore": 2},
-        evidence=[], evidence_detail=[], valid_from_ms=0, expires_at_ms=10**9)
+    from test_editorial_selection import setup_candidates, answers
+    from matchos.decision_client import _parse_selection
+    from matchos.copy import render_overlay
+    from matchos.schemas import VerifiedCandidates, ProducerDecision
+    import matchos.perspective as perspective_module
+    engine, candidates = setup_candidates()
+    batch = PipelineResult(kind="candidates", candidates=VerifiedCandidates(candidates=candidates), state=engine.state.model_copy(deep=True))
+    analyst_story = next(candidate for candidate in candidates if candidate.frame == "MOMENTUM_SWING").model_copy(update={"importance": 1, "confidence": .9})
 
     async def run():
         queue, sent = asyncio.Queue(), asyncio.Queue()
-        waiting, cancelled = asyncio.Event(), asyncio.Event()
-
+        model_waiting, release, language_waiting, cancelled = (asyncio.Event() for _ in range(4))
+        selections = []
+        class Selector:
+            provider = "test"
+            async def select(self, state, offered, viewer, context):
+                selections.append((viewer.persona, [candidate.id for candidate in offered]))
+                if viewer.persona == "fan":
+                    model_waiting.set()
+                    await release.wait()
+                    chosen = next(candidate.id for candidate in offered if candidate.frame == "PLAYER_IMPACT")
+                else:
+                    chosen = "NONE"
+                return _parse_selection(answers(chosen, offered), offered, "test", 1)
         class DemoSession(MatchSession):
             async def warmup(self):
                 self.first = True
-
+                self.services.decisions = Selector()
             async def tick(self):
                 tick = self.simulator.step(100)
-                outputs = [PipelineResult(kind="moment", moment=moment)] if self.first else []
+                outputs = []
+                if self.first:
+                    self.latest_candidates = batch
+                    outputs = [batch, PipelineResult(kind="moment", state=batch.state, candidates=batch.candidates,
+                        moment=analyst_story, overlay=render_overlay(analyst_story, self.viewer, rich=False, provider="template"),
+                        producer=ProducerDecision(action="AIR", reason="Primary selection"))]
                 self.first = False
                 return tick.frame, tick.events, outputs
-
         class Socket:
-            async def accept(self):
-                pass
-
-            async def send_json(self, message):
-                await sent.put(message)
-
+            async def accept(self): pass
+            async def send_json(self, message): await sent.put(message)
             async def receive_json(self):
                 message = await queue.get()
-                if message is None:
-                    raise WebSocketDisconnect()
+                if message is None: raise WebSocketDisconnect()
                 return message
-
         async def personalize(agent, incoming, viewer):
-            assert incoming is moment
-            if viewer.persona == "fan":
-                waiting.set()
-                try:
-                    await asyncio.Event().wait()
-                finally:
-                    cancelled.set()
-            return "Analyst response"
-
+            language_waiting.set()
+            try: await asyncio.Event().wait()
+            finally: cancelled.set()
         monkeypatch.setattr(server, "MatchSession", DemoSession)
-        monkeypatch.setattr(server, "personalize", personalize)
+        monkeypatch.setattr(perspective_module, "personalize", personalize)
         task = asyncio.create_task(server.match_socket(Socket()))
-        await queue.put({"type": "start", "scenario": "balanced", "views": [
-            {"persona": "fan"}, {"persona": "analyst"}]})
+        await queue.put({"type": "start", "scenario": "balanced", "viewer": {"persona":"analyst"},
+                         "views": [{"persona":"fan", "player_id":"blue_9"}, {"persona":"casual"}]})
         messages = []
-        try:
-            while True:
+        async def until(predicate):
+            for _ in range(40):
                 message = await asyncio.wait_for(sent.get(), 2)
                 messages.append(message)
-                if message["type"] == "comparison_enrichment":
-                    assert message["index"] == 1
-                    assert message["momentId"] == moment.id
-                    break
-            template = next(m for m in messages if m["type"] == "comparison")
-            assert [o["persona"] for o in template["overlays"]] == ["fan", "analyst"]
-            assert template["overlays"][0]["body"] != template["overlays"][1]["body"]
-            assert all(o["moment_id"] == moment.id for o in template["overlays"])
-            assert waiting.is_set() and not cancelled.is_set()
-            while (await asyncio.wait_for(sent.get(), 1))["type"] != "frame":
-                pass
+                if predicate(message): return message
+            raise AssertionError("Expected viewer update did not arrive")
+        try:
+            quiet = await until(lambda item: item["type"] == "viewer_update" and item["index"] == 2)
+            assert quiet["explanation"]["status"] == "no_interruption"
+            assert quiet["result"]["moment"] is None
+            assert model_waiting.is_set()
+            await until(lambda item: item["type"] == "frame")
+            release.set()
+            fan = await until(lambda item: item["type"] == "viewer_update" and item["index"] == 1)
+            assert fan["result"]["moment"]["frame"] == "PLAYER_IMPACT"
+            primary = next(item for item in messages if item["type"] == "viewer_update" and item["index"] == 0)
+            assert primary["result"]["moment"]["frame"] == "MOMENTUM_SWING"
+            assert all(ids == [candidate.id for candidate in candidates] for _, ids in selections)
+            await asyncio.wait_for(language_waiting.wait(), 1)
             await queue.put({"type": "control", "action": "pause"})
-            while (await asyncio.wait_for(sent.get(), 1))["type"] != "status":
-                pass
+            await until(lambda item: item["type"] == "status" and not item["running"])
             await queue.put({"type": "seek", "timestamp_ms": 1000})
-            while True:
-                message = await asyncio.wait_for(sent.get(), 2)
-                if message["type"] == "seeked":
-                    assert message["frame"]["timestamp_ms"] == 1000
-                    assert message["state"]["timestamp_ms"] == 1000
-                    assert message["running"] is False
-                    break
+            seeked = await until(lambda item: item["type"] == "seeked")
+            assert seeked["running"] is False and seeked["frame"]["timestamp_ms"] == 1000
             assert cancelled.is_set()
         finally:
             await queue.put(None)
             await asyncio.wait_for(task, 2)
-
     asyncio.run(run())

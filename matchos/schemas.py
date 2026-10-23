@@ -185,6 +185,7 @@ class QuestionAnswer(BaseModel):
 class MomentDecision(BaseModel):
     """Typed probabilities and editorial selection. No generated match facts."""
 
+    editorial_reason: str | None = None
     selected_candidate_id: str | None = None
     candidate_scores: dict[str, float] = Field(default_factory=dict)
     tactical_shift: float
@@ -287,7 +288,7 @@ class ViewerProfile(BaseModel):
 
 
 class PipelineResult(BaseModel):
-    kind: Literal["moment", "trace", "enrichment"]
+    kind: Literal["candidates", "moment", "trace", "enrichment"]
     trigger: TriggerResult | None = None
     candidates: VerifiedCandidates | None = None
     decision: MomentDecision | None = None

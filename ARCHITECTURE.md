@@ -21,12 +21,14 @@ flowchart LR
         Session["MatchSession: playback and background tasks"]
         Simulator["Seeded match simulator"]
         LiveState["Live rolling state"]
-        Workflow["Agent Framework workflow"]
+        Workflow["Agent Framework shared evidence workflow"]
+        Viewers["Independent viewer selection and language workers"]
         Traces["Session telemetry and model logs"]
         Server --> Session
         Simulator -->|"Events and tracking ticks"| Session
         Session --> LiveState
         Session --> Workflow
+        Workflow -->|"Immutable candidate pool"| Viewers
         Workflow --> Traces
     end
 
@@ -37,9 +39,9 @@ flowchart LR
 
     UI <-->|"Commands, frames, updates, traces"| Server
     LiveState -->|"Live statistics"| Server
-    Workflow -->|"Verified templates and enrichment"| Server
-    Workflow <-->|"Typed decision"| Decision
-    Workflow <-->|"Persona prose"| Language
+    Viewers -->|"Viewer templates, explanations and enrichment"| Server
+    Viewers <-->|"Typed editorial decision per viewer"| Decision
+    Viewers <-->|"Persona prose"| Language
 ```
 
 The backend is one process. Each WebSocket connection owns an independent match session, simulator, state, workflow, and trace history. There is no database or shared session store; disconnecting closes the session and cancels its tasks.
@@ -59,7 +61,9 @@ The backend is one process. Each WebSocket connection owns an independent match 
 | Producer | Applies importance, novelty, persona relevance, and cadence rules to air, suppress, or reject a moment. | [`producer.py`](matchos/producer.py) |
 | Copy renderer | Builds immediate, fact-based overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
 | Language agent | Uses an Agent Framework agent with a LiteLLM chat client to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
-| Workflow | Connects code executors, decision calls, publishing, and language enrichment into a conditional graph. | [`workflow.py`](matchos/workflow.py) |
+| Workflow | Runs shared state, triggering and candidate verification; supports the complete single-viewer graph for direct workflow integrations. | [`workflow.py`](matchos/workflow.py) |
+| Perspective worker | Selects and renders independently for one viewer, with private producer/history, one pending pool and cancellation. | [`perspective.py`](matchos/perspective.py) |
+| Editorial explanation | Builds evidence summaries and held-candidate explanations; distinguishes model preference, producer policy and local fallback. | [`editorial.py`](matchos/editorial.py) |
 | Configuration | Selects providers, models, credentials, and timeouts; loads `.env` and `.env.local`. | [`llm_config.py`](matchos/llm_config.py) |
 | Observability | Captures session traces and correlated, redacted terminal model logs; optionally exports OpenTelemetry. | [`telemetry.py`](matchos/telemetry.py), [`model_logging.py`](matchos/model_logging.py) |
 
@@ -83,8 +87,9 @@ flowchart TD
     Tick --> State --> Trigger
     Trigger -->|"No"| Quiet
     Trigger -->|"Yes"| Verify
-    Verify -->|"Candidates available"| Decision --> Produce
-    Verify -->|"No candidates"| Skip["Skip model selection"] --> Produce
+    Verify --> Pool["Broadcast shared immutable candidate pool"]
+    Pool -->|"For each viewer independently"| Decision --> Produce
+    Pool -->|"No candidates: skip models"| Produce
     Produce -->|"SUPPRESS / REJECT"| Trace
     Produce -->|"AIR"| Publish --> Agent --> Guard --> Enriched
 ```
@@ -119,7 +124,8 @@ sequenceDiagram
     participant UI as Browser
     participant Feed as Live feed task
     participant Session as MatchSession
-    participant Worker as Workflow worker
+    participant Worker as Shared evidence workflow
+    participant Viewer as Each viewer worker
     participant Model as Model provider
 
     UI->>Feed: Start or resume
@@ -136,17 +142,19 @@ sequenceDiagram
         opt Trigger fires
             Worker->>Worker: Verify all supported story candidates
             Note over Worker,Model: No supported candidates means no model call
-            opt Verified candidates available
-                Worker->>Model: Select candidate or NONE using viewer and recent updates
-                Note over Feed,Model: Frames continue while the model is awaited
-                Model-->>Worker: Editorial choice or local fallback
-                Worker->>Worker: Resolve selected ID and apply producer rules
-                opt Candidate selected and AIR
-                    Worker->>Worker: Render fast template
-                    Worker-->>Session: Queue fast overlay for feed delivery
-                    Worker->>Model: Render verified facts for primary persona
-                    Model-->>Worker: Prose or fallback
-                    Worker-->>Session: Queue guarded enrichment for feed delivery
+            Worker-->>Viewer: Broadcast immutable pool and finish shared run
+            par Independent selection for each configured viewer
+                opt Verified candidates available
+                    Viewer->>Model: Select candidate or NONE using own profile/history
+                    Note over Feed,Model: Frames and shared evidence processing continue
+                    Model-->>Viewer: Editorial choice or local fallback
+                    Viewer->>Viewer: Apply own producer and on-air rules
+                    opt Candidate selected and AIR
+                        Viewer-->>UI: Template and decision explanation
+                        Viewer->>Model: Render selected facts for this viewer
+                        Model-->>Viewer: Prose or fallback
+                        Viewer-->>UI: Guarded enrichment
+                    end
                 end
             end
         end
@@ -157,7 +165,11 @@ The live feed and workflow use **separate state engines**. The live engine advan
 
 There is one pending batch, rather than one queued model job per frame. It accumulates events and samples while retaining the newest frame, with evidence bounded to the rolling history window. A bounded output queue hands workflow results back to the feed. Expired moments and outputs for an old primary viewer profile are discarded.
 
-The sidebar supports one primary card and up to two comparison cards. Comparisons reuse the **same aired verified moment** and do not repeat decision or verification calls. Each comparison gets an immediate template and an independent background language request. Changing the primary viewer similarly reframes the current moment. Session, moment, and profile checks prevent outdated comparison responses from replacing newer content.
+The sidebar defaults to three compact cards beside one shared pitch: analyst, supporter and casual. The shared Agent Framework workflow finishes after broadcasting a frozen `VerifiedCandidates` / state snapshot. Every viewer (including the primary viewer) then runs its own `Perspective` worker, typed editorial selection, producer policy, and language rendering. Selection histories and cadence are private to each viewer. A `NONE` result or slow model in one perspective does not delay the other perspectives or candidate generation. Player-focused candidates for configured viewers are included in the common pool.
+
+Each perspective processes one pool at a time, retaining only the latest pending pool. A template is emitted as soon as that viewer's selection clears its producer. Changes/removals close only affected workers; unchanged workers retain history. Settings changes use the latest pool and can refresh focused-player evidence. Snapshot timestamps and profile checks keep the UI tied to the correct viewer. Independent selections may agree; the system never fabricates distinct stories for a demo.
+
+The UI combines an active story with the most recent editorial outcome. A suppressed follow-up does not clear an unexpired active story. The decision disclosure identifies the original selection, supporting checks, and the latest held candidates. Explanations label model preferences, deterministic policy and fallback paths separately.
 
 ### Pause, reset, and timeline seeking
 
