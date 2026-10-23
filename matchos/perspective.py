@@ -57,7 +57,8 @@ class Perspective:
             batch, self.pending = self.pending, None
             try:
                 with self.session.telemetry.capture("Viewer editorial selection", {
-                    "timestamp_ms": batch.state.timestamp_ms, "viewer": self.viewer.model_dump(), "viewIndex": self.index}):
+                    "timestamp_ms": batch.state.timestamp_ms, "viewer": self.viewer.model_dump(), "viewIndex": self.index,
+                    "demoCheckpoint": getattr(self.session, "demo_step", None)}):
                     await self.process(batch)
             except asyncio.CancelledError:
                 raise
@@ -78,6 +79,8 @@ class Perspective:
                 result.producer = ProducerDecision(action="SUPPRESS", reason="Available stories have already aired or their live window has passed.")
             else:
                 result.producer = ProducerDecision(action="REJECT", reason="No story passed the evidence checks.")
+            record("viewer production", {"viewer": self.viewer.model_dump(), "candidateIds": []},
+                   {"selection": None, "producer": result.producer.model_dump(), "explanation": explain(result, self.viewer)})
             await self.emit(result)
             return
         now = time.monotonic()
@@ -85,6 +88,8 @@ class Perspective:
                    "recentUpdates": [{**{key: value for key, value in item.items() if key != "aired_at"},
                                       "secondsAgo": round(now - item["aired_at"], 1)} for item in self.recent]}
         result.decision = await self.session.services.decisions.select(batch.state, candidates, self.viewer, context)
+        record("editorial selection", {"viewer": self.viewer.model_dump(), "candidateIds": [candidate.id for candidate in candidates]},
+               result.decision, result.decision.latency_ms)
         selected = next((candidate for candidate in candidates if candidate.id == result.decision.selected_candidate_id), None)
         if result.decision.selected_candidate_id and selected is None:
             raise ValueError("Unverified candidate selected")

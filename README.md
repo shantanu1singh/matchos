@@ -167,6 +167,20 @@ checks for its displayed moment; **Raw verified data** exposes the moment and
 rendered overlay as JSON. These facts stay tied to the update while live capsules
 continue tracking the match.
 
+### Guided judge demo
+
+Restart the Python backend after updating the app, then refresh the browser. The UI can load new assets while an old server process is still running; Judge demo shows a restart instruction if that process does not support checkpoints.
+
+Click **Judge demo** to review the default press-collapse match at three real checkpoints: City's pressing change at **64:00**, Liverpool's goal at **65:04**, and City's red card at **68:01**. The demo uses seed 47129 and the default neutral Broadcaster, Liverpool fan and neutral Analyst. It replays deterministic history without historical model calls, freezes the match clock, then requests a review through the normal Agent Framework evidence workflow and independent viewer workers. The selected providers make fresh decisions; local fallbacks still apply when configured providers fail or are unavailable.
+
+The guide shows each viewer's actual aired or held outcome. **Next checkpoint** waits until all three workers finish their decisions and any required language rendering. A held story is a valid outcome; the demo does not manufacture disagreement. Checkpoints can be retried or revisited, and their execution traces stay together in Telemetry. Each checkpoint starts fresh editorial history. **Exit demo**, **Finish demo**, and **Reset** return to a regular replay from the start. Demo preparation and model waits run in background tasks; starting another match cancels outdated work.
+
+### Visual evidence
+
+Click **View evidence on pitch** on any aired card, or choose a source event inside **Facts & evidence**. The pitch switches to a labelled historical event map: numbered paths come only from the source events' recorded locations. Current players and the live ball are hidden while the map is open. Select an event to focus its path, or **All paths** to compare them. The close button returns to the current match; live playback can continue behind the map.
+
+Press and momentum maps include a before/after comparison from that story's verified facts. Goals show the score change, and dismissals show the player counts. Aggregate stories with no event paths say so instead of inferring player movement. Raw facts and evidence retain their precision.
+
 Model diagnostics print to the terminal by default for both cloud and local
 providers. Correlated request IDs connect input payloads to responses, elapsed
 time, errors, cancellations and fallbacks. Credentials and authorization fields
@@ -180,6 +194,8 @@ when live match triggers fire; warmup and timeline replay skip historical calls.
 ### Execution telemetry
 
 Open **Telemetry** in the app to inspect live workflow runs, deterministic state and triggers, decision calls, verifier checks, producer decisions, and language calls. Expand a stage for input/output JSON; provider requests and responses share a call ID. Selected runs stay pinned while the match advances, and open panels retain their scroll positions through live updates. Fallbacks, rejected language, cancellation, and timing appear in the same run. Comparison personas and viewer changes have separate runs. **Export JSON** downloads the captured session history.
+
+Each selected run also shows a compact summary of the decision model, language model, call durations, selected story, publication outcome and total duration. Calls that were skipped, local fallback use, incomplete evaluations and quiet ticks are labelled explicitly. The detailed stages and payloads remain below this summary.
 
 Capture stays in memory for each WebSocket session: the last 40 meaningful runs and the latest quiet trigger evaluation. Resetting or seeking starts a fresh trace session. The inspector polls once per second only while visible; capturing does not wait for model or telemetry network calls. State inputs include the frame, events, total sample count, and latest 30 tracking samples; the full aggregated deterministic state is the output. Credentials are redacted using the same sanitizer as terminal model logs.
 

@@ -32,6 +32,8 @@ class MatchSession:
     services: MatchServices = field(init=False)
     telemetry: Telemetry = field(default_factory=Telemetry)
     running: bool = True
+    demo_step: int | None = None
+    demo_request_id: int | None = None
     candidates: list[Candidate] = field(default_factory=list)
     active: PipelineResult | None = None
     latest_candidates: PipelineResult | None = None

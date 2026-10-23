@@ -1,5 +1,6 @@
 const state = {
   ws: null,
+  serverReady: false,
   revision: 0,
   seeking: false,
   scrubbing: false,
@@ -31,16 +32,28 @@ const state = {
   eventQueue: [],
   eventShowing: false,
   eventTimer: null,
+  evidence: null,
+  demo: { active: false, step: 0, phase: "idle", settled: 0, outcomes: {}, stops: [] },
 };
 
 const pitch = document.getElementById("pitch");
 const ctx = pitch.getContext("2d");
 
 function connect() {
+  state.serverReady = false;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws.onopen = () => setLive("Live");
-  state.ws.onclose = () => setLive("Reconnecting");
+  state.ws.onclose = () => {
+    state.serverReady = false;
+    if (state.demo.active && ["preparing", "evaluating"].includes(state.demo.phase)) {
+      state.demo.phase = "error";
+      state.demo.message = "Connection lost. Refresh the page after restarting the backend to retry the demo.";
+      renderDemoGuide();
+    }
+    showDemoNotice("Connection lost. Start the backend, then refresh this page to reconnect.");
+    setLive("Disconnected");
+  };
   state.ws.onmessage = (event) => onMessage(JSON.parse(event.data));
 }
 
@@ -49,8 +62,9 @@ function send(payload) {
 }
 
 function onMessage(message) {
+  if (message.type.startsWith("demo_")) { receiveDemo(message); return; }
   if (message.type === "viewer_update") {
-    if (state.seeking) return;
+    if (state.seeking || (state.demo.active && state.demo.phase === "preparing")) return;
     const viewer = message.index === 0 ? state.viewer : state.comparisonViewers[message.index - 1];
     if (!viewer || JSON.stringify(message.profile) !== JSON.stringify(viewer)) {
       // Compare fields rather than relying on JSON object key order.
@@ -64,6 +78,10 @@ function onMessage(message) {
     } else {
       state.comparisonEditorial[message.index - 1] = message;
       renderComparison(message.index - 1, message.phase !== "enrichment");
+    }
+    if (state.demo.active) {
+      state.demo.outcomes[message.index] = message;
+      renderDemoGuide();
     }
     return;
   }
@@ -103,6 +121,8 @@ function onMessage(message) {
     return;
   }
   if (message.type === "hello") {
+    state.serverReady = true;
+    state.demo.stops = message.demoStops || [];
     state.roster = message.roster || state.roster;
     updatePrimaryLabel();
     buildComparisonCards();
@@ -207,6 +227,7 @@ function renderRaw() {
 }
 
 function resetUiState() {
+  clearEvidence();
   state.revision += 1;
   state.primaryEditorial = null;
   state.viewerDisplays = {};
@@ -263,6 +284,8 @@ function resetUiState() {
 }
 
 function startMatch() {
+  state.demo.active = false;
+  renderDemoGuide();
   resetUiState();
   state.seeking = false;
   state.scrubbing = false;
@@ -342,7 +365,8 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
   const evidence = explanation?.evidence?.map(text => `<li>${escapeHtml(text)}</li>`).join("") || "<li>No selected story needs to be put on screen.</li>";
   const held = latest?.held?.map(item => `<li><b>${escapeHtml(storyName(item.frame))}${item.player ? " · " + escapeHtml(shirt(item.player)) : ""}</b> · ${escapeHtml(item.reason)}</li>`).join("") || "<li>No other verified candidates in this update.</li>";
   const why = explanation ? `<details class="editorial-explanation" ${state.expandedProof.has(disclosureKey) ? "open" : ""}><summary>Why this decision? <span>${explanation.candidateCount} ${explanation.candidateCount === 1 ? "story" : "stories"}</span></summary><div class="editorial-details"><p><b>${showing ? "Chosen" : "Held"}:</b> ${escapeHtml(storyName(explanation.chosen))}</p><p>${escapeHtml(explanation.reason)}</p>${showing ? `<p class="proof-label">Full update</p><p>${escapeHtml(result.overlay.body)}</p>` : ""}${heldNext ? `<p class="proof-label">Latest decision: no interruption</p><p>${escapeHtml(latest.reason)}</p>` : ""}<p class="proof-label">Evidence</p><ul>${evidence}</ul><p class="proof-label">Held back</p><ul>${held}</ul><p class="note">${explanation.sourceEventCount} source events · explanation from ${escapeHtml(explanation.reasonSource)}</p></div></details>` : "";
-  card.innerHTML = `${header}<h2>${escapeHtml(title)}</h2><p class="body">${escapeHtml(body)}</p>${heldStatus}${why}`;
+  card.innerHTML = `${header}<h2>${escapeHtml(title)}</h2><p class="body">${escapeHtml(body)}</p>${showing ? '<button class="evidence-link" data-show-evidence type="button">View evidence on pitch ↗</button>' : ""}${heldStatus}${why}`;
+  card.querySelector("[data-show-evidence]")?.addEventListener("click", () => showEvidence(result.moment));
   renderProof(proof, showing ? result.moment : null, showing ? result.overlay : null, key);
 }
 function renderInsight(fresh) {
@@ -364,11 +388,11 @@ function renderProof(host, moment, overlay, viewKey) {
   const key = `${viewKey}:${moment.id}`;
   const stats = (overlay.stats || []).map(stat => `<div class="stat"><span>${escapeHtml(stat.label)}</span><span>${escapeHtml(stat.value)}</span></div>`).join("");
   const facts = Object.entries(moment.facts || {}).map(([name, value]) => `<div class="stat"><span>${escapeHtml(name)}</span><span>${escapeHtml(value)}</span></div>`).join("");
-  const evidence = (moment.evidence_detail || []).map(item => `<li><b>${clockOf(item.timestamp_ms)}</b> ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)}<small>${escapeHtml(item.id)}</small></li>`).join("");
+  const evidence = (moment.evidence_detail || []).map((item, index) => `<li><button class="source-event" data-source-index="${index}" type="button"><b>${clockOf(item.timestamp_ms)}</b> ${escapeHtml(item.label)} · ${escapeHtml(item.outcome || item.type)} ↗</button><small>${escapeHtml(item.id)}</small></li>`).join("");
   const checks = (moment.checks || []).map(check => `<li><b>${check.passed ? "PASS" : "FAIL"}</b> ${escapeHtml(check.name)}: ${escapeHtml(check.detail)}</li>`).join("");
   host.innerHTML = `<details class="proof" data-proof="${escapeHtml(key)}" ${state.expandedProof.has(key) ? "open" : ""}>
     <summary>Facts &amp; evidence <span>${Math.round(moment.confidence * 100)}% selection confidence</span></summary>
-    <div class="proof-content"><p class="kicker">Verified at ${clockOf(moment.valid_from_ms)}</p>${stats}
+    <div class="proof-content"><p class="kicker">Verified at ${clockOf(moment.valid_from_ms)}</p><button class="evidence-link" data-show-evidence type="button">View evidence on pitch ↗</button>${stats}
     <p class="proof-label">Facts behind this update</p>${facts || '<p class="evidence">No additional facts.</p>'}
     <p class="proof-label">Source events</p><ul class="evidence">${evidence || '<li>No event details attached.</li>'}</ul>
     ${checks ? `<p class="proof-label">Verification checks</p><ul class="evidence">${checks}</ul>` : ""}
@@ -379,6 +403,80 @@ function renderProof(host, moment, overlay, viewKey) {
     if (details.open) state.expandedProof.add(details.dataset.proof);
     else state.expandedProof.delete(details.dataset.proof);
   }));
+  host.querySelector("[data-show-evidence]")?.addEventListener("click", () => showEvidence(moment));
+  host.querySelectorAll("[data-source-index]").forEach(button => button.addEventListener("click", () => showEvidence(moment, Number(button.dataset.sourceIndex))));
+}
+
+function evidenceMetric(moment) {
+  const f = moment.facts;
+  if (moment.frame === "PRESS_BREAKDOWN") return {
+    label: `${f.attackingTeam} through ${f.defendingTeam}'s first press`,
+    before: Math.round(f.pressBypassBefore * 100), after: Math.round(f.pressBypassNow * 100), unit: "%", max: 100,
+  };
+  if (moment.frame === "MOMENTUM_SWING") return {
+    label: `${f.leadingTeam} final-third entries · five-minute windows`,
+    before: f.finalThirdEntriesBefore, after: f.finalThirdEntries, unit: "",
+    max: Math.max(f.finalThirdEntriesBefore, f.finalThirdEntries, 1),
+  };
+  return null;
+}
+
+function showEvidence(moment, selected = null) {
+  state.evidence = { moment, selected };
+  const panel = document.getElementById("pitch-evidence");
+  panel.hidden = false;
+  const events = moment.evidence_detail || [];
+  const metric = evidenceMetric(moment);
+  document.getElementById("evidence-title").textContent = `${storyName(moment.frame)} · verified ${clockOf(moment.valid_from_ms)}`;
+  document.getElementById("evidence-metric").innerHTML = metric ?
+    `<p>${escapeHtml(metric.label)}</p><div class="evidence-values"><span>Before <b>${metric.before}${metric.unit}</b></span><span>Now <b>${metric.after}${metric.unit}</b></span></div><div class="evidence-bars"><i style="width:${Math.max(0, Math.min(100, metric.before / metric.max * 100))}%"></i><i style="width:${Math.max(0, Math.min(100, metric.after / metric.max * 100))}%"></i></div>` :
+    `<p>${escapeHtml(moment.frame === "GOAL" || moment.frame === "COMEBACK" ? `Score ${moment.facts.scoreBeforeRed}–${moment.facts.scoreBeforeBlue} → ${moment.facts.scoreRed}–${moment.facts.scoreBlue}` : moment.frame === "RED_CARD" ? `Players LIV ${moment.facts.playersRed} · MCI ${moment.facts.playersBlue}` : "Source events attached to this update")}</p>`;
+  document.getElementById("evidence-caption").textContent = events.length ?
+    `${events.length} historical source event${events.length === 1 ? "" : "s"} · current player positions hidden · ${state.running ? "match continues behind this map" : "match held"}` :
+    "Verified rolling aggregates. No event paths attached to this story; no player movement is inferred.";
+  document.getElementById("evidence-events").innerHTML = (events.length ? `<button type="button" data-event="all" aria-pressed="${selected === null}">All paths</button>` : "") + events.map((event, index) =>
+    `<button type="button" data-event="${index}" aria-pressed="${index === selected}" title="${escapeHtml(event.label)}">${index + 1} · ${clockOf(event.timestamp_ms)} · ${escapeHtml(event.type)}</button>`).join("");
+  document.getElementById("evidence-events").querySelectorAll("button").forEach(button => {
+    button.addEventListener("click", () => showEvidence(moment, button.dataset.event === "all" ? null : Number(button.dataset.event)));
+  });
+  document.querySelector('[data-tab="watch"]').click();
+}
+
+function clearEvidence() {
+  state.evidence = null;
+  const panel = document.getElementById("pitch-evidence");
+  if (panel) panel.hidden = true;
+}
+
+function drawEvidenceMap(xOf, yOf) {
+  const { moment, selected } = state.evidence;
+  const events = moment.evidence_detail || [];
+  const validPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.x <= 105 && point.y >= 0 && point.y <= 68;
+  ctx.save();
+  events.forEach((event, index) => {
+    if (!validPoint(event.location)) return;
+    const start = event.location;
+    const end = validPoint(event.end_location) ? event.end_location : start;
+    const sx = xOf(start.x), sy = yOf(start.y), ex = xOf(end.x), ey = yOf(end.y);
+    const focused = selected === null || selected === index;
+    ctx.globalAlpha = focused ? 1 : .2;
+    ctx.strokeStyle = "#ffe39b"; ctx.fillStyle = "#ffe39b"; ctx.lineWidth = focused ? 3.5 : 2;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+    if (Math.hypot(ex - sx, ey - sy) > 8) {
+      const angle = Math.atan2(ey - sy, ex - sx);
+      ctx.beginPath(); ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 11 * Math.cos(angle - .4), ey - 11 * Math.sin(angle - .4));
+      ctx.lineTo(ex - 11 * Math.cos(angle + .4), ey - 11 * Math.sin(angle + .4)); ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(sx, sy, 12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#102019"; ctx.font = "600 11px Outfit, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(index + 1), sx, sy);
+  });
+  if (!events.some(event => validPoint(event.location))) {
+    ctx.fillStyle = "#f3f6f2"; ctx.font = "500 15px Outfit, sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("Verified aggregate metrics · no event map available", xOf(52.5), yOf(48));
+  }
+  ctx.restore();
 }
 
 function statCapsules(viewer) {
@@ -673,7 +771,9 @@ function paint() {
   ctx.stroke();
   box(x, y);
   const view = viewModel();
-  if (view) {
+  if (state.evidence) {
+    drawEvidenceMap(x, y);
+  } else if (view) {
     drawTrail(x, y, view);
     drawAction(x, y, view);
     drawPlayers(x, y, view);
@@ -1050,6 +1150,119 @@ timeline.addEventListener("change", () => {
 });
 renderComparison();
 
+function requestDemo(step = 0) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    showDemoNotice("Judge demo needs a live connection. Start the backend, then refresh this page to reconnect.");
+    return;
+  }
+  if (!state.serverReady) {
+    showDemoNotice("Still connecting to the match server. Try Judge demo again once the connection is ready.");
+    return;
+  }
+  if (!state.demo.stops[step]) {
+    showDemoNotice("This backend is running an older version without Judge demo. Stop it with Ctrl+C, restart with .venv/bin/python -m matchos, then refresh this page.");
+    return;
+  }
+  showDemoNotice("");
+  if (!state.demo.active) state.candidates = [];
+  state.demo = { ...state.demo, active: true, step, requestId: (state.demo.requestId || 0) + 1,
+                 phase: "preparing", settled: 0, outcomes: {}, candidates: [] };
+  state.scenario = "press_collapse"; state.seed = 47129; state.speed = 1;
+  document.getElementById("seed").value = state.seed;
+  document.getElementById("lab-speed").value = state.speed;
+  markSpeed(1); renderScenarios();
+  state.seeking = false;
+  clearEvidence();
+  document.querySelectorAll(".settings-popover").forEach(popover => {
+    if (popover.matches(":popover-open")) popover.hidePopover();
+  });
+  document.querySelector('[data-tab="watch"]').click();
+  renderDemoGuide();
+  send({ type: "demo", step, requestId: state.demo.requestId });
+}
+
+function showDemoNotice(message) {
+  const notice = document.getElementById("demo-notice");
+  notice.textContent = message;
+  notice.hidden = !message;
+}
+
+function receiveDemo(message) {
+  if (!state.demo.active || message.step !== state.demo.step || message.requestId !== state.demo.requestId) return;
+  if (message.type === "demo_snapshot") {
+    const history = state.candidates;
+    state.viewer = message.viewers[0]; state.comparisonViewers = message.viewers.slice(1);
+    resetUiState();
+    state.candidates = history; renderCandidates();
+    state.running = false; state.demo.phase = "evaluating";
+    document.getElementById("persona").value = state.viewer.persona;
+    document.getElementById("language").value = state.viewer.language;
+    document.getElementById("team").value = state.viewer.team_id || "RED";
+    updatePrimaryLabel(); buildComparisonCards(); updateViewerHelp();
+    onMessage({ type: "frame", frame: message.frame, state: message.state, events: message.events });
+  } else if (message.type === "demo_progress") {
+    state.demo.settled = message.settled;
+  } else {
+    state.demo.phase = message.phase;
+    if (message.candidates) state.demo.candidates = message.candidates.candidates;
+    state.demo.message = message.message || "";
+    if (message.results) {
+      message.results.forEach(result => { state.demo.outcomes[result.index] = result; });
+      state.demo.settled = message.results.length;
+    }
+  }
+  renderDemoGuide();
+}
+
+function renderDemoGuide() {
+  const demo = state.demo;
+  document.getElementById("demo-guide").hidden = !demo.active;
+  document.getElementById("judge-demo").textContent = demo.active ? "Exit demo" : "Judge demo";
+  document.querySelectorAll(".settings-button, #speeds button").forEach(button => { button.disabled = demo.active; });
+  document.getElementById("add-view").disabled = demo.active || state.comparisonViewers.length >= 2;
+  document.getElementById("timeline").disabled = demo.active;
+  document.getElementById("pause").disabled = demo.active;
+  document.getElementById("pause").textContent = demo.active ? "Held for demo" : state.running ? "Pause" : "Resume";
+  if (!demo.active) return;
+  const checkpoint = demo.stops[demo.step];
+  const busy = demo.phase === "preparing" || demo.phase === "evaluating";
+  document.getElementById("demo-title").textContent = checkpoint.title;
+  document.getElementById("demo-description").textContent = checkpoint.description;
+  document.getElementById("demo-stops").innerHTML = demo.stops.map((stop, index) =>
+    `<button class="demo-stop ${index === demo.step ? "active" : ""}" type="button" data-demo-step="${index}" ${busy ? "disabled" : ""} ${index === demo.step ? 'aria-current="step"' : ""}>${index + 1}. ${escapeHtml(stop.title)} <span>${clockOf(stop.timestamp_ms)}</span></button>`).join("");
+  document.getElementById("demo-stops").querySelectorAll("button").forEach(button => {
+    button.addEventListener("click", () => requestDemo(Number(button.dataset.demoStep)));
+  });
+  document.getElementById("demo-status").textContent = demo.phase === "preparing" ? "Replaying the match to this checkpoint…" :
+    demo.phase === "evaluating" ? `Match held · ${demo.settled}/3 viewers finished · waiting for model decisions and copy…` :
+    demo.phase === "error" ? demo.message : "Match held · 3/3 viewers finished · compare their stories or inspect evidence.";
+  document.getElementById("demo-retry").hidden = demo.phase !== "error";
+  document.getElementById("demo-evidence").disabled = !demo.candidates?.length;
+  const next = document.getElementById("demo-next");
+  next.disabled = busy;
+  next.textContent = demo.step === demo.stops.length - 1 ? "Finish demo" : "Next checkpoint →";
+  const roles = ["broadcaster", "fan", "analyst"];
+  const purposes = ["Turning point", "Liverpool's perspective", "Tactics & evidence"];
+  document.getElementById("demo-outcomes").innerHTML = roles.map((role, index) => {
+    const result = demo.outcomes[index];
+    const aired = result?.explanation.status === "update";
+    const status = result ? (aired ? `Aired · ${storyName(result.result.moment?.frame)}` : "Held · no interruption") : demo.phase === "error" ? "Did not finish" : "Evaluating…";
+    return `<span title="${escapeHtml(result?.result.overlay?.headline || result?.explanation.reason || purposes[index])}"><b>${personaNames[role]}</b><small>${purposes[index]}</small>${escapeHtml(status)}</span>`;
+  }).join("");
+  setLive("Judge demo · held");
+}
+
+document.getElementById("judge-demo").addEventListener("click", () => state.demo.active ? startMatch() : requestDemo());
+document.getElementById("close-evidence").addEventListener("click", clearEvidence);
+document.getElementById("demo-next").addEventListener("click", () => {
+  if (state.demo.step === state.demo.stops.length - 1) startMatch();
+  else requestDemo(state.demo.step + 1);
+});
+document.getElementById("demo-retry").addEventListener("click", () => requestDemo(state.demo.step));
+document.getElementById("demo-evidence").addEventListener("click", () => {
+  if (state.demo.candidates?.length) showEvidence(state.demo.candidates[0]);
+});
+
 window.addEventListener("resize", resize);
 updateViewerHelp();
 resize();
@@ -1122,6 +1335,27 @@ function readableTrace(value) {
   }));
   return value;
 }
+function executionSummary(run) {
+  const steps = run.steps || [];
+  const decisions = steps.filter(step => step.name.startsWith("editorial selection:") || step.name.startsWith("decision:"));
+  const language = steps.find(step => step.name.startsWith("reasoning:"));
+  const production = [...steps].reverse().find(step => step.name === "viewer production" || step.name === "producer");
+  const output = production?.output || {};
+  const parsedDecision = [...steps].reverse().find(step => step.name === "editorial selection")?.output;
+  const candidateSelection = output.selection || parsedDecision || decisions[decisions.length - 1]?.output;
+  const selection = candidateSelection && Object.hasOwn(candidateSelection, "selected_candidate_id") ? candidateSelection : null;
+  const producer = output.producer || (output.action ? output : null);
+  const decision = decisions[0];
+  const describe = step => step ? `${step.name.substring(step.name.indexOf(":") + 1).trim()} · ${Math.round(step.duration_ms || 0)} ms${step.status === "fallback" ? " · fallback" : ""}` : "Not called";
+  const selected = selection?.selected_candidate_id ? selection.primary_frame?.replaceAll("_", " ") || selection.selected_candidate_id : selection ? "No update selected" :
+    run.quiet ? "No evaluation" : run.status === "running" ? "Awaiting selection" : decisions.length ? "No selection available" : "Candidate pool only";
+  const outcomes = { AIR: "Aired", SUPPRESS: "Held", REJECT: "Rejected" };
+  const outcome = producer ? outcomes[producer.action] || producer.action : run.quiet ? "No evaluation needed" :
+    run.status === "running" ? "In progress" : run.status === "cancelled" ? "Cancelled" :
+    run.status === "error" ? "Failed" : decisions.length ? "Evaluation complete" : "Evidence prepared";
+  return [["Decision", describe(decision)], ["Language", describe(language)],
+          ["Story", selected], ["Publication", outcome], ["Total", `${Math.round(run.duration_ms || 0)} ms${run.status === "running" ? " · running" : ""}`]];
+}
 function renderTelemetryRun(run) {
   const host = document.getElementById("telemetry-detail");
   if (!run) {
@@ -1132,12 +1366,18 @@ function renderTelemetryRun(run) {
   const sameRun = host.dataset.run === run.id;
   if (sameRun && host.dataset.revision === String(run.revision)) return;
   if (!sameRun) {
-    host.replaceChildren(document.createElement("h2"), document.createElement("p"));
+    host.replaceChildren(document.createElement("h2"), document.createElement("p"), document.createElement("dl"));
     host.children[1].className = "note";
+    host.children[2].className = "execution-summary";
   }
   host.dataset.run = run.id; host.dataset.revision = String(run.revision);
   host.children[0].textContent = run.label;
   host.children[1].textContent = `${run.id} · ${run.status}${run.error ? " · " + run.error : ""}${run.quiet ? " · Trigger did not fire; no model call" : ""}`;
+  const summary = host.children[2];
+  summary.replaceChildren(...executionSummary(run).map(([label, value]) => {
+    const item = document.createElement("div"), title = document.createElement("dt"), detail = document.createElement("dd");
+    title.textContent = label; detail.textContent = value; item.append(title, detail); return item;
+  }));
   const max = Math.max(run.duration_ms || 0, ...run.steps.map(step => step.offset_ms + step.duration_ms), 1);
   const existing = new Map([...host.querySelectorAll("details")].map(item => [item.dataset.step, item]));
   run.steps.forEach((step, index) => {

@@ -29,7 +29,7 @@ function inspector() {
   const context = vm.createContext({ document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, setInterval() {}, clockOf: ms => String(ms), send() {} });
   const source = fs.readFileSync('matchos/web/app.js','utf8');
   vm.runInContext(source.slice(source.indexOf('const telemetryState =')), context);
-  return { elements, receive: context.receiveTelemetry };
+  return { elements, receive: context.receiveTelemetry, summarize: context.executionSummary };
 }
 function run(id, revision, quiet = false) {
   return { id, revision, quiet, label:'Workflow', status:'running', metadata:{timestamp_ms:100}, steps:[{name:'provider', call_id:'call-1', status:'request', offset_ms:0, duration_ms:0, input:{evidence:Array(100).fill('fact')}, output:{tokens:Array(100).fill('text')}}] };
@@ -59,4 +59,30 @@ test('explicit selection survives quiet-tick replacement and history eviction', 
   assert.ok(elements['telemetry-runs'].children.some(button => button.dataset.run === 'quiet-old' && button.className.includes('selected')));
   receive({session:'new-match',revision:1,runs:[run('fresh',1)]});
   assert.equal(elements['telemetry-detail'].dataset.run,'fresh');
+});
+
+test('execution summary distinguishes model, fallback, selected story and publication outcome',()=>{
+  const {summarize}=inspector();
+  const trace=run('viewer',1);
+  trace.status='complete'; trace.duration_ms=550;
+  trace.steps=[
+    {name:'editorial selection: azure-foundry:Decision-1',status:'response',duration_ms:100,output:{selected_candidate_id:'goal',primary_frame:'GOAL'}},
+    {name:'reasoning: azure-foundry:gpt-6-luna',status:'fallback',duration_ms:400},
+    {name:'viewer production',output:{selection:{selected_candidate_id:'goal',primary_frame:'GOAL'},producer:{action:'AIR'}}},
+  ];
+  const summary=Object.fromEntries(summarize(trace));
+  assert.equal(summary.Decision,'azure-foundry:Decision-1 · 100 ms');
+  assert.match(summary.Language,/gpt-6-luna.*fallback/);
+  assert.equal(summary.Story,'GOAL'); assert.equal(summary.Publication,'Aired'); assert.equal(summary.Total,'550 ms');
+  trace.steps[2].output={selection:{selected_candidate_id:null},producer:{action:'SUPPRESS'}};
+  const held=Object.fromEntries(summarize(trace));
+  assert.equal(held.Story,'No update selected'); assert.equal(held.Publication,'Held');
+  const quiet=Object.fromEntries(summarize({...run('quiet',1,true),status:'complete'}));
+  assert.equal(quiet.Decision,'Not called'); assert.equal(quiet.Publication,'No evaluation needed');
+  trace.status='running';
+  trace.steps=[{name:'editorial selection: azure-foundry:Decision-1',status:'response',duration_ms:100,output:{answers:{candidate:{choice:'goal'}}}}];
+  assert.equal(Object.fromEntries(summarize(trace)).Story,'Awaiting selection');
+  trace.steps.push({name:'editorial selection',output:{selected_candidate_id:'goal',primary_frame:'GOAL'}});
+  const pending=Object.fromEntries(summarize(trace));
+  assert.equal(pending.Story,'GOAL'); assert.equal(pending.Publication,'In progress');
 });

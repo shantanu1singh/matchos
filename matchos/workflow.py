@@ -50,12 +50,14 @@ from matchos.verifier import Verifier, MAJOR_EVENT_WINDOW_MS
 class LiveTick:
     tick: Tick
     viewer: ViewerProfile
+    review_requested: bool = False
 
 
 @dataclass
 class PipelinePacket:
     tick: Tick
     viewer: ViewerProfile
+    review_requested: bool = False
     state: MatchState | None = None
     trigger: TriggerResult | None = None
     candidates: VerifiedCandidates | None = None
@@ -104,7 +106,8 @@ class StateUpdateExecutor(Executor):
     async def update(self, incoming: LiveTick, ctx: WorkflowContext[PipelinePacket]) -> None:
         started = time.perf_counter()
         state = self.services.state_engine.ingest(incoming.tick)
-        packet = PipelinePacket(tick=incoming.tick, viewer=incoming.viewer, state=state)
+        packet = PipelinePacket(tick=incoming.tick, viewer=incoming.viewer, state=state,
+                                review_requested=incoming.review_requested)
         packet.timings_ms["state"] = (time.perf_counter() - started) * 1000
         record("state", {"frame": incoming.tick.frame.model_dump(), "events": [e.model_dump() for e in incoming.tick.events], "sampleCount": len(incoming.tick.samples), "latestSamples": [sample.model_dump() for sample in incoming.tick.samples[-30:]]}, state, packet.timings_ms["state"])
         await ctx.send_message(packet)
@@ -153,6 +156,10 @@ class TriggerExecutor(Executor):
             packet.trigger = TriggerResult(fired=True, reasons=list(dict.fromkeys([*packet.trigger.reasons, *reasons])))
             self.services.trigger_engine.last_fire_ms = state.timestamp_ms
         self.services.observed_major_event_ids.update(event.id for event in recent_major)
+        if packet.review_requested:
+            # A guided checkpoint requests evaluation; evidence and editorial selection stay unchanged.
+            packet.trigger = TriggerResult(fired=True, reasons=list(dict.fromkeys(
+                [*packet.trigger.reasons, "guided_demo_review"])))
         packet.timings_ms["trigger"] = (time.perf_counter() - started) * 1000
         record("trigger", {"deltas": state.deltas, "samples": samples}, packet.trigger, packet.timings_ms["trigger"])
         await ctx.send_message(packet)

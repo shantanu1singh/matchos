@@ -25,11 +25,20 @@
           <button class="tab" data-tab="telemetry" role="tab">Telemetry</button>
           <button class="tab" data-tab="lab" role="tab">Lab</button>
         </nav>
+        <button id="judge-demo" class="demo-launch" type="button">Judge demo</button>
         <div class="live-pill" id="live-pill">Connecting</div>
       </header>
+      <p id="demo-notice" class="demo-notice" role="alert" hidden></p>
 
       <section class="panel" id="panel-watch">
         <div class="pitch-col">
+          <section id="demo-guide" class="demo-guide" hidden aria-label="Guided judge demo">
+            <div class="demo-heading"><div><p class="kicker">One match · three editorial decisions</p><h2 id="demo-title"></h2></div><button id="demo-next" type="button">Next checkpoint →</button></div>
+            <div id="demo-stops" class="demo-stops"></div>
+            <p id="demo-description"></p>
+            <div class="demo-footer"><span id="demo-status" role="status"></span><button id="demo-evidence" class="text-button" type="button" disabled>Inspect checkpoint evidence ↗</button><button id="demo-retry" class="text-button" type="button" hidden>Retry checkpoint</button></div>
+            <div id="demo-outcomes" class="demo-outcomes"></div>
+          </section>
           <div class="stage">
             <div class="scorebug">
               <div class="side red"><span title="Liverpool">Liverpool</span><span class="red-card-count" id="cards-red" hidden>0</span><b id="score-red">0</b></div>
@@ -37,6 +46,10 @@
               <div class="side blue"><b id="score-blue">0</b><span title="Manchester City">Man City</span><span class="red-card-count" id="cards-blue" hidden>0</span></div>
             </div>
             <canvas id="pitch"></canvas>
+            <section id="pitch-evidence" class="pitch-evidence" hidden aria-label="Historical match evidence">
+              <div class="evidence-heading"><div><p class="kicker">Historical evidence map</p><strong id="evidence-title"></strong></div><button id="close-evidence" class="icon-button" type="button" aria-label="Close evidence map">×</button></div>
+              <div id="evidence-metric"></div><p id="evidence-caption"></p><div id="evidence-events" class="evidence-events"></div>
+            </section>
             <div class="transport pitch-transport" aria-label="Match playback">
               <button id="pause" type="button">Pause</button>
               <button id="reset" type="button" class="secondary">Reset</button>

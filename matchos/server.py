@@ -22,6 +22,7 @@ from matchos.model_logging import configure_model_logging, logger as model_logge
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
+from matchos.demo import DEMO_STOPS, demo_viewers, review_checkpoint
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -116,10 +117,13 @@ async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) 
 @app.websocket("/ws")
 async def match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
-    await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context()})
+    await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context(),
+                               "demoStops": DEMO_STOPS})
     session: MatchSession | None = None
     task: asyncio.Task | None = None
     paused_task: asyncio.Task | None = None
+    demo_task: asyncio.Task | None = None
+    demo_results: dict[int, dict] = {}
     perspectives: list[Perspective] = []
     comparison_viewers: list[ViewerProfile] = []
     lock = asyncio.Lock()
@@ -129,9 +133,16 @@ async def match_socket(websocket: WebSocket) -> None:
             await websocket.send_json(payload)
 
     async def stop() -> None:
-        nonlocal task, paused_task
+        nonlocal task, paused_task, demo_task
         if session is not None:
             session.running = False
+        if demo_task is not None:
+            demo_task.cancel()
+            try:
+                await demo_task
+            except asyncio.CancelledError:
+                pass
+            demo_task = None
         if task is not None:
             task.cancel()
             try:
@@ -168,6 +179,11 @@ async def match_socket(websocket: WebSocket) -> None:
                 elif current.active and current.active.moment.id == result.moment.id:
                     current.active.overlay = result.overlay
             await send(payload)
+            if current.demo_step is not None:
+                demo_results[payload["index"]] = payload
+                await send({"type": "demo_progress", "step": current.demo_step,
+                            "requestId": current.demo_request_id,
+                            "settled": len(demo_results), "total": len(perspectives)})
 
         desired = [current.viewer, *comparison_viewers]
         previous = {perspective.index: perspective for perspective in perspectives}
@@ -224,11 +240,54 @@ async def match_socket(websocket: WebSocket) -> None:
             elif result.kind == "enrichment":
                 await send({"type": "enrichment", "result": result.model_dump()})
 
+    async def run_demo(current: MatchSession, step: int) -> None:
+        try:
+            checkpoint = DEMO_STOPS[step]
+            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "preparing"})
+            frame = await current.seek_to(checkpoint["timestamp_ms"])
+            await send({"type": "demo_snapshot", "step": step, "requestId": current.demo_request_id, "frame": frame.model_dump(),
+                        "state": current.live_state_engine.state.model_dump(),
+                        "events": [event.model_dump() for event in list(current.live_state_engine.events)[-5:]],
+                        "viewers": [viewer.model_dump() for viewer in demo_viewers()]})
+            batch = await review_checkpoint(current)
+            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "evaluating",
+                        "candidates": batch.candidates.model_dump(mode="json")})
+            await compare(current, batch)
+            decision_timeout = getattr(getattr(current.services.decisions, "config", None), "decision_timeout_s", 10)
+            await asyncio.wait_for(asyncio.gather(*[perspective.task for perspective in perspectives
+                                                   if perspective.task is not None]),
+                                   timeout=decision_timeout + current.services.reasoning_timeout_s + 5)
+            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "ready",
+                        "results": [demo_results[index] for index in sorted(demo_results)]})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Guided demo checkpoint failed (%s)", type(exc).__name__)
+            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "error",
+                        "message": "This checkpoint could not finish. Retry it or continue to the next one."})
+
     try:
         while True:
             message = await websocket.receive_json()
             kind = message.get("type")
-            if kind == "start":
+            if kind == "demo":
+                step = message.get("step", 0)
+                if type(step) is not int or not 0 <= step < len(DEMO_STOPS):
+                    await send({"type": "demo_status", "phase": "error", "message": "Unknown demo checkpoint."})
+                    continue
+                # Keep the demo's trace history across its three frozen checkpoints.
+                previous_telemetry = session.telemetry if session is not None and session.demo_step is not None else None
+                await stop()
+                viewers = demo_viewers()
+                session = MatchSession("press_collapse", 47129, 1, viewers[0], running=False, demo_step=step)
+                session.demo_request_id = message.get("requestId")
+                if previous_telemetry is not None:
+                    session.telemetry = previous_telemetry
+                comparison_viewers = viewers[1:]
+                demo_results = {}
+                await configure_views(session)
+                demo_task = asyncio.create_task(run_demo(session, step))
+            elif kind == "start":
                 await stop()
                 viewer = ViewerProfile.model_validate(message.get("viewer") or {})
                 session = MatchSession(
@@ -264,13 +323,19 @@ async def match_socket(websocket: WebSocket) -> None:
                 if was_running:
                     task = asyncio.create_task(_run(websocket, session, send, compare))
             elif kind == "views" and session is not None:
+                if session.demo_step is not None:
+                    continue
                 comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
                 await configure_views(session)
             elif kind == "viewer" and session is not None:
+                if session.demo_step is not None:
+                    continue
                 session.viewer = ViewerProfile.model_validate(message.get("viewer") or {})
                 session.active = None
                 await configure_views(session)
             elif kind == "control" and session is not None:
+                if session.demo_step is not None:
+                    continue
                 action = message.get("action")
                 if action == "pause":
                     # Finish the short feed tick; model work runs independently.

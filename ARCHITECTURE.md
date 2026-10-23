@@ -12,8 +12,12 @@ flowchart LR
         UI["Watch, Producer, Lab, Telemetry"]
         Pitch["Canvas pitch and playback controls"]
         Views["Persona cards and facts / evidence"]
+        Demo["Guided checkpoint controls"]
+        EvidenceMap["Historical source-event map"]
         UI --- Pitch
         UI --- Views
+        UI --- Demo
+        Views -->|"Inspect verified source events"| EvidenceMap
     end
 
     subgraph Backend["Python backend: FastAPI / Uvicorn"]
@@ -38,6 +42,7 @@ flowchart LR
     end
 
     UI <-->|"Commands, frames, updates, traces"| Server
+    Demo -->|"Frozen checkpoint review"| Server
     LiveState -->|"Live statistics"| Server
     Viewers -->|"Finished viewer cards and explanations"| Server
     Viewers <-->|"Typed editorial decision per viewer"| Decision
@@ -45,6 +50,10 @@ flowchart LR
 ```
 
 The backend is one process. Each WebSocket connection owns an independent match session, simulator, state, workflow, and trace history. There is no database or shared session store; disconnecting closes the session and cancels its tasks.
+
+The guided demo (`demo.py`) replays the same seeded simulator to three checkpoints and holds the clock. A `LiveTick.review_requested` flag opens the normal trigger gate with a labelled `guided_demo_review` reason; evidence verification, model selection and production rules remain active. All three `Perspective` workers evaluate the frozen pool concurrently. The server reports readiness only when each worker finishes, including held-story outcomes. Each stop gets fresh editorial history; telemetry is retained across the demo's stops. Reset, exit or a new match cancels the demo task and pending viewer calls. No historical model answers or fixed persona responses are replayed.
+
+The browser's evidence mode draws only the attached source-event locations, hiding current player and ball positions. Its before/after comparisons use the selected moment's facts, and stories without source paths expose aggregate metrics without inventing movement. Telemetry summaries are derived from captured call and publication records, while detailed payload elements remain stable during polling.
 
 ## Components
 
