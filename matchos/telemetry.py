@@ -52,7 +52,7 @@ class Telemetry:
             if label == "Viewer editorial selection":
                 role = viewer.get("persona", "unknown")
                 attributes.update({"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": f"matchos-{role}",
-                                   "gen_ai.agent.id": f"matchos-{role}:1", "gen_ai.conversation.id": self.id})
+                                   "gen_ai.agent.id": f"matchos-{role}-v1", "gen_ai.conversation.id": self.id})
             span.set_attributes(attributes)
             content_attribute(span, "matchos.metadata", metadata)
             run = None

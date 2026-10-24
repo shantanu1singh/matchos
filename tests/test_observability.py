@@ -45,7 +45,7 @@ def test_evidence_and_concurrent_viewers_share_trace_without_mixing_calls(spans,
     finished = spans.get_finished_spans()
     assert len({span.context.trace_id for span in finished}) == 1
     roots = [span for span in finished if span.name == "Viewer editorial selection"]
-    assert {span.attributes["gen_ai.agent.id"] for span in roots} == {"matchos-fan:1", "matchos-analyst:1"}
+    assert {span.attributes["gen_ai.agent.id"] for span in roots} == {"matchos-fan-v1", "matchos-analyst-v1"}
     for span in roots:
         role = span.attributes["matchos.persona"]
         message = json.loads(span.attributes["gen_ai.output.messages"])[0]
@@ -70,6 +70,7 @@ def test_model_span_includes_fallback_phases_usage_and_precise_end_time(spans):
     finished = spans.get_finished_spans()
     model = next(span for span in finished if span.name.startswith("reasoning:"))
     root = next(span for span in finished if span.name == "Viewer editorial selection")
+    assert root.attributes["gen_ai.agent.id"] == "matchos-broadcaster-v1"
     assert model.attributes["matchos.fallback"] is True
     assert model.attributes["gen_ai.usage.input_tokens"] == 23
     assert model.attributes["gen_ai.usage.output_tokens"] == 7

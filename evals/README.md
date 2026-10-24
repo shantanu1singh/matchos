@@ -23,7 +23,9 @@ The Foundry Projects SDK is pinned to 2.2.x to preserve OpenAI 2.x compatibility
 
 3. Restart the backend and refresh the browser. Run a Judge demo checkpoint, open Telemetry, and copy its **Trace ID**. Find the matching trace in Foundry or Application Insights; ingestion can take a few minutes.
 
-You should see shared state/trigger/candidate evidence, three independent viewer agent runs, Decision-1 selection spans, any language calls, fact guards and publication outcomes. Viewer spans carry `gen_ai.agent.id=matchos-broadcaster:1`, `matchos-fan:1`, or `matchos-analyst:1`. Custom model spans include call IDs and response/error/fallback phases. Reported token counts are included when the provider returns them; the app does not invent missing token or cost data.
+You should see shared state/trigger/candidate evidence, three independent viewer agent runs, Decision-1 selection spans, any language calls, fact guards and publication outcomes. Viewer spans carry `gen_ai.agent.id=matchos-broadcaster-v1`, `matchos-fan-v1`, or `matchos-analyst-v1`. Custom model spans include call IDs and response/error/fallback phases. Reported token counts are included when the provider returns them; the app does not invent missing token or cost data.
+
+For agent-scoped traces, use **Build > Agents > New agent > Link external agent** in Foundry and register each persona with the exact OpenTelemetry ID above. The portal accepts alphanumeric characters and hyphens, so IDs use `-v1` rather than `:1`. Registration names may differ from these IDs. Use the same connected Application Insights resource. Restart MatchOS after updating the code and generate new traffic; historical spans retain their original IDs.
 
 Trace context crosses the asynchronous candidate handoff, so the evidence and its viewers share a trace even when evidence processing has already finished. Local session/run IDs, persona and match timestamps provide additional correlation. Trace IDs are also present in Export JSON and evaluation outputs.
 
