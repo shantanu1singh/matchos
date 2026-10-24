@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 
 from matchos.schemas import MomentFrame, Persona, ProducerDecision, VerifiedMoment, ViewerProfile
 
@@ -15,6 +16,17 @@ GAPS: dict[Persona, float] = {
 }
 
 PERSONAS: tuple[Persona, ...] = ("casual", "analyst", "fan", "player", "broadcaster")
+SURFACE_THRESHOLD = 0.5
+BROADCAST_IMPORTANCE_THRESHOLD = 0.55
+
+
+def _percent(value: float) -> str:
+    # Preserve the actual score, including values just below the threshold.
+    return f"{(Decimal(str(value)) * 100).normalize():f}%"
+
+
+def _importance(value: float) -> str:
+    return f"{(Decimal(str(value)) * 5).normalize():f}/5"
 
 
 class Producer:
@@ -40,8 +52,9 @@ class Producer:
             return ProducerDecision(action="REJECT", reason=reason or "Verifier rejected the claim.")
         if self.has_aired(moment):
             return ProducerDecision(action="SUPPRESS", reason="This goal or dismissal has already aired for this viewer.")
-        if should_surface < 0.5 and moment.frame not in {"GOAL", "RED_CARD", "COMEBACK"}:
-            return ProducerDecision(action="SUPPRESS", reason="Decision call kept this below the surface line.")
+        if should_surface < SURFACE_THRESHOLD and moment.frame not in {"GOAL", "RED_CARD", "COMEBACK"}:
+            return ProducerDecision(action="SUPPRESS", reason=
+                f"The model rated this story {_percent(should_surface)} for publication; at least {_percent(SURFACE_THRESHOLD)} is required. Waiting for a stronger update.")
         now = self.clock()
         if moment.frame == "GOAL" or moment.frame == "COMEBACK":
             self.last_goal_at = now
@@ -51,12 +64,17 @@ class Producer:
             return ProducerDecision(action="SUPPRESS", reason="Same story aired inside the last 90 seconds.")
         air_for = [persona for persona in PERSONAS if self._persona_allows(persona, moment, viewer, now)]
         if viewer.persona not in air_for:
+            if (now - self.last_air.get(viewer.persona, -1_000.0) < GAPS[viewer.persona]
+                    and moment.frame not in {"GOAL", "COMEBACK", "RED_CARD"}):
+                held_reason = "A recent update is still fresh for this viewer."
+            elif viewer.persona == "broadcaster" and moment.importance < BROADCAST_IMPORTANCE_THRESHOLD:
+                held_reason = (f"The model rated this story's importance {_importance(moment.importance)}; "
+                               f"broadcaster updates require at least {_importance(BROADCAST_IMPORTANCE_THRESHOLD)}.")
+            else:
+                held_reason = "This story does not match this viewer's preferences."
             return ProducerDecision(
                 action="SUPPRESS",
-                reason=("A recent update is still fresh for this viewer."
-                        if now - self.last_air.get(viewer.persona, -1_000.0) < GAPS[viewer.persona]
-                        and moment.frame not in {"GOAL", "COMEBACK", "RED_CARD"}
-                        else "This story does not match this viewer's preferences."),
+                reason=held_reason,
                 priority=round(moment.importance * moment.confidence, 3),
                 air_for=air_for,
             )
@@ -86,4 +104,4 @@ class Producer:
             if moment.player_id and moment.player_id == focus:
                 return True
             return moment.importance >= 0.75
-        return moment.importance >= 0.55 or moment.frame in {"GOAL", "PRESS_BREAKDOWN", "RED_CARD", "COMEBACK"}
+        return moment.importance >= BROADCAST_IMPORTANCE_THRESHOLD or moment.frame in {"GOAL", "PRESS_BREAKDOWN", "RED_CARD", "COMEBACK"}

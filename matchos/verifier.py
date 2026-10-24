@@ -51,7 +51,7 @@ class Verifier:
             result.checks.extend(checks)
             if moment is not None:
                 # Failed checks for alternative teams stay in the set diagnostics.
-                moment.checks = [check for check in checks if check.passed]
+                moment.checks = moment.checks or [check for check in checks if check.passed]
                 result.candidates.append(moment)
         for player_id in dict.fromkeys(additional_focus_ids or []):
             if player_id == focus_player_id:
@@ -117,14 +117,25 @@ class Verifier:
                 continue
             delta = roll.press_bypass_rate - roll.press_bypass_prev
             enough = roll.press_bypass_sample >= 5 and delta >= 0.25
+            attacking = "RED" if team == "BLUE" else "BLUE"
+            attack_roll = state.red if attacking == "RED" else state.blue
+            line_drop = (roll.defensive_line_prev_m - roll.defensive_line_m
+                         if roll.defensive_line_prev_m is not None and roll.defensive_line_m is not None else None)
+            entries_gain = attack_roll.final_third_entries_last5 - attack_roll.final_third_entries_prev5
+            # A higher bypass ratio alone can be a handful of counterattacks.
+            # Corroborate deterioration with a deeper block or greater penetration.
+            corroborated = (line_drop is not None and line_drop >= 5.0) or entries_gain >= 5
             checks.append(
                 Check(
                     name=f"{team.lower()}_press_bypass",
                     passed=enough,
-                    detail=f"Bypass increased {delta * 100:.0f} percentage points on {roll.press_bypass_sample} attempts",
+                    detail=f"Passes through {team_name(team)}'s press increased {delta * 100:.0f} percentage points on {roll.press_bypass_sample} attempts",
                 )
             )
-            if enough:
+            line_detail = f"line retreated {line_drop:.1f}m" if line_drop is not None else "line history unavailable"
+            checks.append(Check(name=f"{team.lower()}_press_corroboration", passed=corroborated,
+                                detail=f"{team_name(team)}: {line_detail}; {team_name(attacking)}'s final-third entries changed by {entries_gain:+d}. Need at least 5m retreat or 5 extra entries."))
+            if enough and corroborated:
                 candidates.append((delta, team, roll))
         if not candidates:
             return None, checks
@@ -168,6 +179,9 @@ class Verifier:
             evidence,
             highlight=[event.player_id for event in evidence if event.player_id][:4],
         )
+        # Alternative-team diagnostics belong to the pool, not this story's proof.
+        moment.checks = [check for check in checks if check.passed and
+                         (check.name.startswith(f"{team.lower()}_") or check.name in {"evidence_events", "facts_bound"})]
         return moment, checks
 
     def _goal(

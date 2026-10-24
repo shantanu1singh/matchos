@@ -128,6 +128,7 @@ def test_foundry_submission_uses_saved_actual_outputs_and_project_evals_wire_con
 
 
 def test_missing_project_settings_are_actionable_and_do_not_attempt_auth(monkeypatch,capsys,tmp_path):
+    monkeypatch.setattr('matchos.evaluation.load_env_files', lambda: None)
     monkeypatch.delenv('AZURE_AI_PROJECT_ENDPOINT',raising=False)
     assert main(['submit',str(tmp_path/'missing.json'),'--judge-model','judge'])==2
     assert '/api/projects/PROJECT' in capsys.readouterr().out

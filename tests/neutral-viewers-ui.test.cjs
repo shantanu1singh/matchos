@@ -35,7 +35,7 @@ test('switching neutral roles removes allegiance and fan mode defaults to Liverp
 test('neutral stat capsules compare both sides while fan stats follow Liverpool',()=>{
   const ui = controls();
   assert.deepEqual(Array.from(ui.statCapsules({persona:'analyst',team_id:null})),[
-    'Press bypass LIV 25% · MCI 75%', 'Entries (5′) LIV 12 · MCI 4']);
+    'Press beaten LIV 25% · MCI 75%', 'Entries (5′) LIV 12 · MCI 4']);
   assert.deepEqual(Array.from(ui.statCapsules({persona:'broadcaster',team_id:null})),[
     'Score 1–2', 'Possession LIV 60% · MCI 40%']);
   assert.equal(ui.statCapsules({persona:'fan',team_id:'RED'})[0],'Liverpool possession 60%');

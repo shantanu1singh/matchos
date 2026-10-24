@@ -62,7 +62,7 @@ test('only a new current aired story replaces the retained card and clears the h
 test('before the first aired story the card keeps its waiting state',()=>{
   const {render,card,state}=renderer();
   render(update('no_interruption'));
-  assert.match(card.innerHTML,/Watching for your next story/);
+  assert.match(card.innerHTML,/Watching for your first story/);
   assert.doesNotMatch(card.innerHTML,/Let the match breathe|Last aired|held-update/);
   assert.equal(state.viewerDisplays.primary,undefined);
 });
@@ -79,7 +79,7 @@ test('reset or changed viewer clears the old story, and no candidates is not lab
   state.viewerDisplays={};
   render(null);
   assert.doesNotMatch(card.innerHTML,/Supported update|held-update/);
-  assert.match(card.innerHTML,/Watching for your next story/);
+  assert.match(card.innerHTML,/Watching for your first story/);
 });
 test('one viewer abstaining does not replace another viewer story',()=>{
   const {render,state,card}=renderer();

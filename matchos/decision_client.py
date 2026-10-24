@@ -243,17 +243,21 @@ def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
         {"name": "reason", "type": "choice", "instructions": "Choose the main editorial reason for your selection or abstention. Use only reasons supported by the supplied viewer, candidates and recent updates.",
          "choices": [{"value": code} for code in REASONS]},
         {"name": "candidate", "type": "choice",
-         "instructions": "Choose the single verified candidate most worth showing NOW to this viewer, or NONE. Judge interest, novelty, team/player relevance, match phase and recent updates. All candidates have already passed evidence checks; do not re-detect events. Goals and red cards usually deserve immediate attention. Prefer NONE to repetitive or unhelpful interruptions.",
+         "instructions": "Choose the single verified candidate most worth showing NOW to this viewer, or NONE. Judge interest, novelty, team/player relevance, match phase, viewingContext and recent updates. All candidates have already passed evidence checks; do not re-detect events. Goals and red cards usually deserve immediate attention. A viewer with no aired story may benefit from useful initial match context; later updates need a new development. Prefer NONE to weak, repetitive or unhelpful updates.",
          "choices": [{"value": moment.id} for moment in candidates] + [{"value": "NONE"}]},
         {"name": "importance", "type": "score", "instructions": "Editorial importance of the chosen candidate for this viewer, from 0 to 5; 0 for NONE.",
          "levels": [{"label": str(level)} for level in range(6)]},
-        {"name": "shouldSurface", "type": "predicate", "instructions": "Is the chosen verified candidate worth interrupting this viewer now, considering recent updates? Answer no for NONE."},
+        {"name": "shouldSurface", "type": "predicate", "instructions": "Should the chosen verified candidate be published now? When viewingContext.hasAiredStory is false, assess whether it provides useful initial match context, rather than interrupting existing commentary. Consider the supplied waiting time, but do not publish a weak story just to fill silence. After a story has aired, require a useful new development and consider recent updates. Answer no for NONE."},
     ]
 
 
 def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict:
     from matchos.language_agent import PERCENT_FACTS
-    from matchos.producer import GAPS
+    from matchos.producer import GAPS, SURFACE_THRESHOLD, BROADCAST_IMPORTANCE_THRESHOLD
+    recent = context.get("recentUpdates", [])
+    viewing = context.get("viewingContext") or {"hasAiredStory": bool(recent),
+        "secondsWatching": None, "secondsWaitingForFirstStory": None,
+        "secondsSinceLastAir": recent[-1].get("secondsAgo") if recent else None}
     policies = {
         "analyst": "Cover both teams neutrally, with no club allegiance or preferred player. Prioritize meaningful tactical or territorial changes with strong before-and-after evidence; cover major goals and dismissals using their verified score and player-count context.",
         "fan": "Prioritize the selected team's fortunes, including verified pressure from the opponent. A goal or dismissal for either side can change the supported team's score or player advantage; use that verified context. Avoid repetitive emotional commentary.",
@@ -261,13 +265,24 @@ def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer
         "casual": "Interrupt for goals, red cards, comebacks or clearly significant chances. Prefer NONE for ordinary tactical fluctuations, gradual possession changes and repeated updates.",
         "broadcaster": "Cover the whole match neutrally, with no club allegiance or preferred player. Ask: what should the audience notice right now? Prioritize goals, dismissals, score changes and clear new turning points that make a useful live commentary cue. Tactical changes deserve airtime when they establish a clear match story, not merely because another metric changed. Prefer NONE over routine possession fluctuations or repeats. Use only the supplied evidence; do not invent drama, chances or causal links.",
     }
+    if viewer.persona == "broadcaster":
+        policies["broadcaster"] += (
+            " No story has aired for this viewer yet. Provide an initial, concise match-context update when the verified candidates establish a meaningful development. Sustained possession supported by a substantial increase in final-third entries can be a worthwhile opening cue; it is more than an isolated possession fluctuation. Consider how long this viewer has been waiting. You do not need to wait for a goal or dismissal. Still choose NONE when the evidence offers no useful story."
+            if not viewing["hasAiredStory"] else
+            " This viewer has already received match context. Prefer a genuinely new development over restating that context; respect secondsSinceLastAir and recentUpdates."
+        )
     return {"task": "Select from verified candidates; do not invent facts or choose unavailable candidates.",
             "roster": identity_context(),
             "minute": state.minute, "score": {"RED": state.score_red, "BLUE": state.score_blue},
             "playersOnPitch": {"RED": state.red.players_on_pitch, "BLUE": state.blue.players_on_pitch},
             "redCards": {"RED": state.red.red_cards, "BLUE": state.blue.red_cards},
             "viewer": viewer.model_profile(),
-            "editorialPolicy": {"guidance": policies[viewer.persona], "minimumGapSeconds": GAPS[viewer.persona], "timeUnit": "wall-clock seconds"}, **context,
+            "viewingContext": viewing,
+            "editorialPolicy": {"guidance": policies[viewer.persona], "minimumGapSeconds": GAPS[viewer.persona],
+                "minimumPublicationScore": SURFACE_THRESHOLD,
+                **({"minimumImportance": BROADCAST_IMPORTANCE_THRESHOLD * 5, "importanceScale": "0–5",
+                    "importanceExemptFrames": ["GOAL", "PRESS_BREAKDOWN", "RED_CARD", "COMEBACK"]} if viewer.persona == "broadcaster" else {}),
+                "timeUnit": "wall-clock seconds"}, **context,
             "verifiedCandidates": [
                 {"id": moment.id, "frame": moment.frame, "team": moment.team_id, "player": moment.player_id,
                  "facts": {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value

@@ -363,7 +363,7 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
   card.dataset.displayAge = historical ? "historical" : "current";
   const at = explanation?.timestamp_ms;
   const header = `<div class="editorial-status"><span class="${showing && !historical ? "status-update" : "status-quiet"}">${showing ? (historical ? "Last aired" : "Update") : "Watching"}</span>${at != null ? `<time title="Match time of this story">${clockOf(at)}</time>` : ""}</div>`;
-  const title = showing ? result.overlay.headline : "Watching for your next story";
+  const title = showing ? result.overlay.headline : "Watching for your first story";
   const body = showing ? result.overlay.body : explanation?.reason || "The match keeps flowing. A story appears when it matters to this viewer.";
   const heldStatus = heldNext ? `<div class="held-update" title="${escapeHtml(latest.reason)}"><span>${latest.candidateCount ? "Stories held" : "No new story"}</span><p>${escapeHtml(latest.reason)}</p>${latest.timestamp_ms != null ? `<time>${clockOf(latest.timestamp_ms)}</time>` : ""}</div>` : "";
   const disclosureKey = `${key}:explanation`;
@@ -498,7 +498,7 @@ function statCapsules(viewer) {
   if (isNeutralViewer(viewer)) {
     if (viewer.persona === "broadcaster") return [`Score ${pulse.score_red}–${pulse.score_blue}`, dismissals ? manpower : `Possession LIV ${Math.round(pulse.red.possession_last5 * 100)}% · MCI ${Math.round(pulse.blue.possession_last5 * 100)}%`];
     const bypass = team => team.press_bypass_rate == null ? "—" : `${Math.round(team.press_bypass_rate * 100)}%`;
-    return [dismissals ? manpower : `Press bypass LIV ${bypass(pulse.red)} · MCI ${bypass(pulse.blue)}`, `Entries (5′) LIV ${pulse.red.final_third_entries_last5} · MCI ${pulse.blue.final_third_entries_last5}`];
+    return [dismissals ? manpower : `Press beaten LIV ${bypass(pulse.red)} · MCI ${bypass(pulse.blue)}`, `Entries (5′) LIV ${pulse.red.final_third_entries_last5} · MCI ${pulse.blue.final_third_entries_last5}`];
   }
   const teamName = teamLabel(viewer.team_id, true);
   const team = pulse[viewer.team_id.toLowerCase()] || {};
@@ -513,7 +513,7 @@ function statCapsules(viewer) {
   if (viewer.persona === "broadcaster") return [`Score ${pulse.score_red}–${pulse.score_blue}`, `${teamName} possession ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`];
   const bypass = team.press_bypass_rate == null ? "—" : `${Math.round(team.press_bypass_rate * 100)}%`;
   const line = team.defensive_line_m == null ? "—" : `${team.defensive_line_m.toFixed(1)}m`;
-  return [`${teamName} bypass ${bypass}`, `${teamName} line ${line}`, `Possession (5′) ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`];
+  return [`${teamName} press beaten ${bypass}`, `${teamName} line ${line}`, `Possession (5′) ${share}`, `Entries (5′) ${team.final_third_entries_last5 ?? 0}`];
 }
 
 function renderPulse() {

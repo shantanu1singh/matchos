@@ -22,6 +22,7 @@ class Perspective:
         self.task = None
         self.closed = False
         self.last_batch = None
+        self.started_at = time.monotonic()
 
     def offer(self, batch):
         if self.closed or batch.candidates is None or batch.state is None:
@@ -86,7 +87,11 @@ class Perspective:
             await self.emit(result)
             return
         now = time.monotonic()
+        watching = round(max(0.0, now - self.started_at), 1)
         context = {"triggerReasons": batch.trigger.reasons if batch.trigger else [],
+                   "viewingContext": {"hasAiredStory": bool(self.recent), "secondsWatching": watching,
+                       "secondsWaitingForFirstStory": watching if not self.recent else None,
+                       "secondsSinceLastAir": round(max(0.0, now - self.recent[-1]["aired_at"]), 1) if self.recent else None},
                    "recentUpdates": [{**{key: value for key, value in item.items() if key != "aired_at"},
                                       "secondsAgo": round(now - item["aired_at"], 1)} for item in self.recent]}
         result.decision = await self.session.services.decisions.select(batch.state, candidates, self.viewer, context)
