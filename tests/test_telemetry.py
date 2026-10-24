@@ -109,6 +109,7 @@ def test_native_otel_export_is_opt_in_and_loads_env_first(monkeypatch):
     import matchos.server as server
     import matchos.observability as observability
     monkeypatch.setattr(observability, "_configured", False)
+    monkeypatch.setenv("MATCHOS_TRACE_MODE", "full")
     calls = []
     monkeypatch.delenv("MATCHOS_OTEL_ENABLED", raising=False)
     monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)

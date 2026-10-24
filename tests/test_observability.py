@@ -9,6 +9,11 @@ from matchos.model_logging import ModelCall
 from matchos.telemetry import Telemetry, record
 
 
+@pytest.fixture(autouse=True)
+def full_mode_for_legacy_contracts(monkeypatch):
+    monkeypatch.setenv("MATCHOS_TRACE_MODE", "full")
+
+
 @pytest.fixture
 def spans(monkeypatch):
     sdk = pytest.importorskip("opentelemetry.sdk.trace")

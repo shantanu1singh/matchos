@@ -229,7 +229,7 @@ flowchart LR
     Context --> Store
     Store -->|"WebSocket polling while visible"| Inspector --> Download
     Runs --> OTel
-    Stages -->|"Child spans and timings"| OTel
+    Stages -->|"Grouped Evidence and events in compact mode"| OTel
     Calls -->|"Custom provider spans"| OTel
     OTel --> Collector
     OTel -->|"Background batch export"| Insights --> Foundry
@@ -239,7 +239,9 @@ Local traces retain the last **40 meaningful completed runs**, active meaningful
 
 Terminal logs include model inputs, outputs, elapsed time, cancellation, and fallback outcomes, with credentials redacted. The local inspector uses the same sanitizer. Trace history is session-local and in memory; JSON export preserves the captured history before a reset or disconnect.
 
-Optional external collection uses Agent Framework's native OpenTelemetry instrumentation, MatchOS parent spans, deterministic child spans and custom provider spans. `observability.py` configures Azure Monitor export when an Application Insights connection string is present, retaining OTLP collector support. `PipelineResult.trace_context` carries internal W3C context from shared evidence into asynchronous viewer workers; it is excluded from client payloads. Viewer agents emit GenAI `invoke_agent` spans, while native Decision-1 calls have explicit selection spans rather than pretending to be chat completions. Local trace IDs match cloud operation IDs.
+Optional external collection defaults to compact tracing: a MatchOS workflow span, one grouped Evidence span, persona outcome spans and custom model spans. A filtering processor excludes quiet runs and framework plumbing before the background batch queue. Explicit parent context keeps the remaining tree connected, including across asynchronous executor tasks. Quiet ticks and skipped viewer reviews remain in local counters, summarized on subsequent exported captures. `MATCHOS_TRACE_MODE=full` restores native framework internals, individual deterministic spans and detailed stage payloads. Both modes retain the complete local inspector data.
+
+`observability.py` configures Azure Monitor export when an Application Insights connection string is present, retaining OTLP collector support. Compact mode uses the standard OpenTelemetry SDK with Agent Framework's resource and instrumentation helpers; full mode uses its native provider setup. `PipelineResult.trace_context` carries internal W3C context from shared evidence into asynchronous viewer workers; it is excluded from client payloads. Viewer agents emit GenAI `invoke_agent` spans with stable Foundry registration IDs, while native Decision-1 calls have explicit selection spans rather than pretending to be chat completions. Local trace IDs match cloud operation IDs for exported runs.
 
 Export requires `MATCHOS_OTEL_ENABLED=1` and the optional tracing SDKs. SDK sensitive logging remains off. MatchOS can explicitly export sanitized, bounded content with `MATCHOS_TRACE_CONTENT=1`; otherwise cloud spans contain timing/status metadata. The background exporter does not block frames. Shutdown flushes are performed in a thread. See [execution telemetry setup](README.md#execution-telemetry).
 

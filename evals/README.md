@@ -17,6 +17,7 @@ The Foundry Projects SDK is pinned to 2.2.x to preserve OpenAI 2.x compatibility
 
    ```dotenv
    MATCHOS_OTEL_ENABLED=1
+   MATCHOS_TRACE_MODE=compact
    APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=...;IngestionEndpoint=https://...
    MATCHOS_TRACE_CONTENT=1
    ```
@@ -31,7 +32,13 @@ Trace context crosses the asynchronous candidate handoff, so the evidence and it
 
 Content capture is optional. With `MATCHOS_TRACE_CONTENT` unset, cloud spans export metadata rather than prompts, facts or copy. Enabling it exports MatchOS-sanitized content, with credentials/connection strings redacted and each content field limited to 12,000 characters. GenAI message envelopes remain valid JSON even when their text is truncated. Native SDK sensitive-content capture stays off. The local inspector retains full sanitized payloads in memory. Full-dataset evaluation uses the saved untruncated outputs, rather than assuming every trace has complete content.
 
-Exports use a background batch processor; no exporter HTTP call runs on the playback loop. SDK offline storage is disabled, so failed deliveries are not a durable archive. On shutdown the app attempts a bounded flush in a thread. Missing optional packages or invalid connection-string configuration produce a warning and leave the local inspector available. Agent Framework's existing instrumentation may add extra spans around the explicit MatchOS stages. Quiet ticks are still instrumented; configure normal OpenTelemetry sampling for longer-running deployments to control volume.
+Cloud export defaults to `MATCHOS_TRACE_MODE=compact`. One triggered match evaluation groups deterministic state/trigger/check events into an **Evidence** span, with independent persona outcomes and model calls beneath the same workflow trace. Persona names show AIR, SUPPRESS or REJECT and the selected frame. Root attributes summarize score, match time, candidate IDs and publication. Verified facts are recorded once on Evidence; persona input/output summaries omit repeated full state and evidence. Actual sanitized model requests/responses remain available on each model call when content capture is enabled.
+
+Routine quiet ticks and viewer reviews skipped without an editorial decision are not exported. Their cumulative `quiet_ticks` and `skipped_viewer_reviews` counters remain in local telemetry and are attached to subsequent exported capture spans. Errors, cancellations, actual model abstentions, and producer suppressions after selection remain visible. Framework plumbing spans are filtered before the cloud batch queue; retained spans explicitly reference retained MatchOS parents. This filtering applies to Application Insights and OTLP trace destinations. Compact export is trace-only.
+
+Use `MATCHOS_TRACE_MODE=full` and restart to export the original framework internals, per-step spans and, when content capture is enabled, detailed stage payloads. The local Telemetry inspector and Export JSON retain detailed steps in either mode. Historical cloud traces are unchanged; the new mode affects new executions.
+
+Exports use background batch processors; no exporter HTTP call runs on the playback loop. SDK offline storage is disabled, so failed deliveries are not a durable archive. On shutdown the app attempts a bounded flush in a thread. Missing optional packages or invalid configuration produce a warning and leave the local inspector available. Standard OpenTelemetry sampling can further control trace volume for longer-running deployments.
 
 For collector-based export, keep `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. This can replace or supplement Application Insights. Cloud export does not persist match sessions or enable reconnect recovery.
 

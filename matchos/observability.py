@@ -4,12 +4,77 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextvars import ContextVar
 
 from opentelemetry import trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 logger = logging.getLogger(__name__)
 _configured = False
+# Inherited by executor tasks, independent of framework-internal current spans.
+capture_span = ContextVar("matchos_cloud_capture", default=None)
+
+
+def compact_tracing() -> bool:
+    return os.getenv("MATCHOS_TRACE_MODE", "compact").strip().lower() != "full"
+
+
+def compact_processor(exporter):
+    """Filter before the batch queue, without buffering whole traces in memory.
+
+    MatchOS spans use explicit parents so removing SDK plumbing cannot orphan
+    their children. Quiet markers are decided before each span ends.
+    """
+    from opentelemetry.sdk.trace import SpanProcessor
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    class CompactProcessor(SpanProcessor):
+        def __init__(self):
+            self.batch = BatchSpanProcessor(exporter)
+
+        def on_start(self, span, parent_context=None):
+            pass
+
+        def on_end(self, span):
+            if (span.instrumentation_scope.name == "matchos"
+                    and not span.attributes.get("matchos.quiet", False)):
+                self.batch.on_end(span)
+
+        def shutdown(self):
+            self.batch.shutdown()
+
+        def force_flush(self, timeout_millis=30000):
+            return self.batch.force_flush(timeout_millis)
+
+    return CompactProcessor()
+
+
+def _configure_compact(exporters):
+    from agent_framework.observability import create_resource, enable_instrumentation
+    from opentelemetry.sdk.trace import TracerProvider
+
+    endpoint = (os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")).strip()
+    if endpoint:
+        protocol = (os.getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
+                    or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")).strip()
+        if protocol == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        elif protocol == "grpc":
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+        else:
+            raise ValueError("Unsupported OTLP trace protocol")
+        # The exporter reads standard base/signal endpoint, header and TLS envs.
+        exporters.append(OTLPSpanExporter())
+    if not exporters:
+        logger.warning("Cloud tracing has no destination. Set APPLICATIONINSIGHTS_CONNECTION_STRING or an OTLP endpoint.")
+        return False
+    provider = TracerProvider(resource=create_resource(service_name="matchos"))
+    for exporter in exporters:
+        provider.add_span_processor(compact_processor(exporter))
+    trace.set_tracer_provider(provider)
+    enable_instrumentation(enable_sensitive_data=False)
+    return True
 
 
 def enabled(name: str) -> bool:
@@ -20,30 +85,40 @@ def configure_observability() -> bool:
     """Called once, after dotenv loading. Native SDK content logging stays off.
 
     MatchOS exports its own redacted payloads only with MATCHOS_TRACE_CONTENT=1.
-    The Azure exporter uses the framework's background BatchSpanProcessor.
+    Both trace modes use background BatchSpanProcessors.
     """
     global _configured
     if _configured or not enabled("MATCHOS_OTEL_ENABLED"):
         return _configured
+    exporters = []
     try:
+        if os.getenv("MATCHOS_TRACE_MODE", "compact").strip().lower() not in {"compact", "full"}:
+            raise ValueError("MATCHOS_TRACE_MODE must be compact or full")
         from agent_framework.observability import configure_otel_providers
-        exporters = []
         connection = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
         if connection:
             from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
             exporters.append(AzureMonitorTraceExporter.from_connection_string(
                 connection, disable_offline_storage=True))
-        kwargs = {"service_name": "matchos", "enable_sensitive_data": False}
-        if exporters:
-            kwargs.update(exporters=exporters, enable_console_exporters=False)
-        configure_otel_providers(**kwargs)
+        compact = compact_tracing()
+        if compact:
+            if not _configure_compact(exporters):
+                return False
+        else:
+            kwargs = {"service_name": "matchos", "enable_sensitive_data": False}
+            if exporters:
+                kwargs.update(exporters=exporters, enable_console_exporters=False)
+            configure_otel_providers(**kwargs)
     except (ImportError, ValueError) as exc:
+        for exporter in exporters:
+            exporter.shutdown()
         # Do not log exception text: connection strings can be included in it.
         logger.warning("Cloud tracing unavailable (%s). Install requirements-observability.txt and check tracing settings; local telemetry remains available.", type(exc).__name__)
         return False
     _configured = True
-    logger.info("MatchOS tracing enabled: %s; redacted content=%s",
+    logger.info("MatchOS tracing enabled: %s; mode=%s; redacted content=%s",
                 "Application Insights / Foundry" if connection else "configured OpenTelemetry exporters",
+                "compact" if compact else "full",
                 enabled("MATCHOS_TRACE_CONTENT"))
     return True
 
@@ -57,7 +132,9 @@ def flush_observability() -> None:
 
 def trace_carrier() -> dict[str, str]:
     carrier = {}
-    TraceContextTextMapPropagator().inject(carrier)
+    span = capture_span.get()
+    context = trace.set_span_in_context(span) if span is not None and compact_tracing() else None
+    TraceContextTextMapPropagator().inject(carrier, context=context)
     return carrier
 
 
