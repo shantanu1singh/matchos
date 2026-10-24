@@ -199,6 +199,14 @@ These are repository configuration defaults, rather than a guarantee of provider
 
 ## Telemetry and diagnostics
 
+### Optional spoken commentary
+
+The server's viewer-publication callback registers a speech specification only for a finished, verified `AIR` result. `speech.py` maps the viewer and event to a prebuilt MAI voice, supported SSML expression and speaking rate. Text is the published headline/body, with duplicate headlines omitted; it is escaped as text and is never rewritten by a speech-planning model. The browser receives a registered clip ID, not a provider credential. The audio endpoint accepts only these registered IDs, not arbitrary synthesis text.
+
+`audio.js` owns one browser player and an abort/generation guard. Listen is explicit; auto commentary watches one selected perspective. Superseded fetches cannot play late, automatic clips require a current live window, and seek/reset/profile/demo changes stop playback. Manual listening can replay a retained historical card. `GET /api/speech/{id}` asynchronously generates MP3 through the Azure Speech SSML endpoint or serves cached bytes. Shared synthesis jobs, a two-job semaphore, bounded queues/caches and an overall deadline keep this path independent of match processing. An abandoned browser request may finish into the cache, without triggering playback. No synthesis happens when all audio controls are off.
+
+Speech uses its own resource key/region, with MAI-Voice-2.1-Flash by default. Cache identity includes complete SSML (voice/model, text, language and style/rate). Cached audio and approved specifications are process-local and expire; deployments do not share this cache. Weak references avoid keeping old match telemetry stores alive solely for audio. Speech trace runs reuse the original viewer trace context and record requests, returned byte counts, cache hits and safe errors. Setup and delivery defaults are in [Spoken commentary](README.md#spoken-commentary).
+
 ```mermaid
 flowchart LR
     Runs["Workflow, viewer reframe, and comparison runs"]

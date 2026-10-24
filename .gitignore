@@ -1,8 +1,16 @@
 __pycache__/
 .pytest_cache/
 .venv/
+# Legacy virtual environment created inside the application package.
+/matchos/bin/
+/matchos/include/
+/matchos/lib/
+/matchos/lib64/
+/matchos/pyvenv.cfg
 *.pyc
 .mypy_cache/
 .env
-.env.local
+.env.*
+!.env.example
+!.env.*.example
 evals/results/

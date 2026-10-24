@@ -86,3 +86,13 @@ test('execution summary distinguishes model, fallback, selected story and public
   const pending=Object.fromEntries(summarize(trace));
   assert.equal(pending.Story,'GOAL'); assert.equal(pending.Publication,'In progress');
 });
+
+test('speech summaries expose synthesis or a cache hit without implying another editorial decision',()=>{
+  const {summarize}=inspector();
+  const speech={...run('audio',1),label:'Spoken commentary',status:'complete',duration_ms:140,
+    steps:[{name:'speech: azure-speech:voice',input:{delivery:'Measured analysis'},duration_ms:140,status:'response'}]};
+  const result=Object.fromEntries(summarize(speech));
+  assert.equal(result.Speech,'azure-speech:voice');assert.equal(result.Delivery,'Measured analysis');assert.equal(result.Audio,'Ready');
+  speech.steps=[{name:'speech cache',output:{cache_hit:true}}];
+  assert.equal(Object.fromEntries(summarize(speech)).Speech,'Cached audio');
+});

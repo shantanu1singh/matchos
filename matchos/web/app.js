@@ -1,5 +1,7 @@
 const state = {
   ws: null,
+  speech: {available: false, message: "Connecting audio…"},
+  audioPlayer: null,
   serverReady: false,
   revision: 0,
   seeking: false,
@@ -38,6 +40,7 @@ const state = {
 
 const pitch = document.getElementById("pitch");
 const ctx = pitch.getContext("2d");
+state.audioPlayer = new CommentaryPlayer({getStory: audioStory, onState: renderAudioControls});
 
 function connect() {
   state.serverReady = false;
@@ -45,6 +48,9 @@ function connect() {
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
   state.ws.onopen = () => setLive("Live");
   state.ws.onclose = () => {
+    state.audioPlayer?.reset();
+    state.speech = {available: false, message: "Reconnect to the match server to use audio."};
+    renderAudioControls();
     state.serverReady = false;
     if (state.demo.active && ["preparing", "evaluating"].includes(state.demo.phase)) {
       state.demo.phase = "error";
@@ -79,6 +85,7 @@ function onMessage(message) {
       state.comparisonEditorial[message.index - 1] = message;
       renderComparison(message.index - 1, message.phase !== "enrichment");
     }
+    state.audioPlayer.offer(message.index === 0 ? "primary" : `view-${message.index - 1}`, message.explanation.status === "update");
     if (state.demo.active) {
       state.demo.outcomes[message.index] = message;
       renderDemoGuide();
@@ -121,6 +128,7 @@ function onMessage(message) {
     return;
   }
   if (message.type === "hello") {
+    state.speech = message.speech || {available: false, message: "Restart the backend and refresh to enable commentary."};
     state.serverReady = true;
     state.demo.stops = message.demoStops || [];
     state.roster = message.roster || state.roster;
@@ -146,6 +154,7 @@ function onMessage(message) {
     const nextAction = stamp(message.frame);
     const prevAction = stamp(state.frame);
     state.frame = message.frame;
+    state.audioPlayer.check();
     state.frameAt = now;
     if (!state.prev || state.frame.timestamp_ms < state.prev.timestamp_ms || nextAction !== prevAction) state.trail = [];
     state.pulse = message.state;
@@ -227,6 +236,7 @@ function renderRaw() {
 }
 
 function resetUiState() {
+  state.audioPlayer?.reset();
   clearEvidence();
   state.revision += 1;
   state.primaryEditorial = null;
@@ -371,6 +381,7 @@ function renderEditorialCard(card, proof, viewer, update, key, fresh) {
 }
 function renderInsight(fresh) {
   renderEditorialCard(document.getElementById("insight"), document.getElementById("why"), state.viewer, state.primaryEditorial, "primary", fresh);
+  renderAudioControls();
 }
 
 function renderWhy() {
@@ -938,6 +949,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     const map = { persona: "persona", team: "team_id", language: "language", player: "player_id" };
     state.revision += 1;
     state.viewer[map[id]] = event.target.value;
+    if (state.audioPlayer.view === "primary") state.audioPlayer.reset();
     normalizeViewer(state.viewer);
     state.primaryEditorial = null; delete state.viewerDisplays.primary; state.moment = null; state.overlay = null;
     renderInsight(false);
@@ -1027,6 +1039,53 @@ function renderComparison(onlyIndex = null, fresh = false) {
     renderEditorialCard(document.getElementById(`compare-card-${index}`), document.getElementById(`view-proof-${index}`), viewer, state.comparisonEditorial[index], `view-${index}`, fresh);
   });
   renderPulse();
+  renderAudioControls();
+}
+
+function audioStory(key) {
+  if (!state.speech.available || state.seeking || state.scrubbing || (state.demo.active && state.demo.phase === "preparing")) return null;
+  const update = state.viewerDisplays[key];
+  if (!update?.speech?.id || !update.result?.overlay) return null;
+  const viewer = key === "primary" ? state.viewer : state.comparisonViewers[Number(key.split("-")[1])];
+  if (!viewer || !matchesView(update.result.overlay, viewer)) return null;
+  return {id: update.speech.id, delivery: update.speech.delivery, label: personaNames[viewer.persona],
+          fresh: update.result.moment.expires_at_ms > (state.frame?.timestamp_ms || 0)};
+}
+
+function renderAudioControls() {
+  const player = state.audioPlayer;
+  if (!player) return;
+  const views = [{key: "primary", viewer: state.viewer}, ...state.comparisonViewers.map((viewer, index) => ({key: `view-${index}`, viewer}))];
+  const select = document.getElementById("audio-view");
+  const signature = views.map(({key, viewer}) => `${key}:${viewerLabel(viewer)}`).join("|");
+  if (select.dataset.views !== signature) {
+    select.innerHTML = views.map(({key, viewer}) => `<option value="${key}">${escapeHtml(viewerLabel(viewer))}</option>`).join("");
+    select.dataset.views = signature;
+  }
+  if (!views.some(view => view.key === player.view)) { player.view = "primary"; player.reset(); return; }
+  select.value = player.view; select.disabled = !state.speech.available;
+  const auto = document.getElementById("auto-commentary");
+  auto.disabled = !state.speech.available; auto.checked = player.auto;
+  auto.title = state.speech.message || "Speak new aired stories from one selected perspective";
+  const status = document.getElementById("audio-status");
+  status.textContent = state.speech.available ? player.message : state.speech.message;
+  status.hidden = !status.textContent;
+  document.querySelectorAll("[data-listen-view]").forEach(button => {
+    const key = button.dataset.listenView;
+    const active = key === player.view && player.stage !== "idle";
+    const story = audioStory(key);
+    const view = views.find(view => view.key === key);
+    const label = view ? personaNames[view.viewer.persona] : "viewer";
+    button.disabled = !active && !story;
+    button.setAttribute("aria-pressed", String(active));
+    button.setAttribute("aria-label", `${active ? "Stop" : "Listen to"} ${label} ${active ? "commentary" : "update"}`);
+    button.title = state.speech.available ? story?.delivery || "Waiting for an aired story" : state.speech.message;
+    const text = active ? player.stage === "loading" ? "Cancel" : "Stop" : "Listen";
+    if (button.dataset.state !== text) {
+      button.dataset.state = text;
+      button.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">${active ? '<rect x="6" y="6" width="12" height="12" rx="2"/>' : '<path d="m11 4-6 5H2v6h3l6 5V4Zm4 4a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>'}</svg><span>${text}</span>`;
+    }
+  });
 }
 
 function positionPopover(popover) {
@@ -1065,7 +1124,7 @@ function buildComparisonCards() {
   const host = document.getElementById("extra-views");
   host.innerHTML = state.comparisonViewers.map((viewer, index) => `
     <section class="persona-panel">
-      <div class="card-top"><span class="view-label" id="view-label-${index}">${viewerLabelMarkup(viewer)}</span><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div>
+      <div class="card-top"><span class="view-label" id="view-label-${index}">${viewerLabelMarkup(viewer)}</span><div class="card-actions"><button class="listen-button" type="button" data-listen-view="view-${index}" disabled aria-label="Listen to ${personaNames[viewer.persona]} update">Listen</button><button class="icon-button settings-button" type="button" popovertarget="view-settings-${index}" aria-label="View ${index + 2} settings" title="Viewer settings">⋯</button></div></div>
       <article class="card empty" id="compare-card-${index}" aria-live="polite"></article>
       <div class="why hidden" id="view-proof-${index}"></div>
       <div class="pulse" id="view-pulse-${index}" aria-label="Live match statistics"></div>
@@ -1085,6 +1144,7 @@ function buildComparisonCards() {
   host.querySelectorAll("section").forEach((panel, index) => {
     panel.querySelectorAll("select").forEach(select => select.addEventListener("change", () => {
       const viewer = state.comparisonViewers[index];
+      if (state.audioPlayer.view === `view-${index}`) state.audioPlayer.reset();
       viewer[select.dataset.field] = select.value;
       normalizeViewer(viewer);
       panel.querySelector(".view-label").innerHTML = viewerLabelMarkup(viewer);
@@ -1099,6 +1159,7 @@ function buildComparisonCards() {
       send({ type: "views", views: comparisonViews() });
     }));
     panel.querySelector(".remove-view").addEventListener("click", () => {
+      if (state.audioPlayer.view !== "primary") { state.audioPlayer.view = "primary"; state.audioPlayer.reset(); }
       state.comparisonViewers.splice(index, 1);
       state.comparisonEditorial = [];
       state.viewerDisplays = state.viewerDisplays.primary ? {primary: state.viewerDisplays.primary} : {};
@@ -1129,6 +1190,7 @@ buildComparisonCards();
 
 const timeline = document.getElementById("timeline");
 timeline.addEventListener("input", () => {
+  if (!state.scrubbing) state.audioPlayer.reset();
   state.scrubbing = true;
   const time = clockOf(Number(timeline.value));
   document.getElementById("timeline-time").textContent = time;
@@ -1164,6 +1226,7 @@ function requestDemo(step = 0) {
     return;
   }
   showDemoNotice("");
+  state.audioPlayer?.reset();
   if (!state.demo.active) state.candidates = [];
   state.demo = { ...state.demo, active: true, step, requestId: (state.demo.requestId || 0) + 1,
                  phase: "preparing", settled: 0, outcomes: {}, candidates: [] };
@@ -1223,6 +1286,7 @@ function renderDemoGuide() {
   document.getElementById("timeline").disabled = demo.active;
   document.getElementById("pause").disabled = demo.active;
   document.getElementById("pause").textContent = demo.active ? "Held for demo" : state.running ? "Pause" : "Resume";
+  renderAudioControls();
   if (!demo.active) return;
   const checkpoint = demo.stops[demo.step];
   const busy = demo.phase === "preparing" || demo.phase === "evaluating";
@@ -1262,6 +1326,17 @@ document.getElementById("demo-retry").addEventListener("click", () => requestDem
 document.getElementById("demo-evidence").addEventListener("click", () => {
   if (state.demo.candidates?.length) showEvidence(state.demo.candidates[0]);
 });
+
+document.addEventListener("click", event => {
+  const button = event.target.closest("[data-listen-view]");
+  if (!button || button.disabled) return;
+  const key = button.dataset.listenView;
+  if (state.audioPlayer.view === key && state.audioPlayer.stage !== "idle") state.audioPlayer.stop();
+  else void state.audioPlayer.play(key);
+});
+document.getElementById("auto-commentary").addEventListener("change", event => state.audioPlayer.setAuto(event.target.checked));
+document.getElementById("audio-view").addEventListener("change", event => state.audioPlayer.selectView(event.target.value));
+window.addEventListener("pagehide", () => state.audioPlayer.reset());
 
 window.addEventListener("resize", resize);
 updateViewerHelp();
@@ -1337,6 +1412,15 @@ function readableTrace(value) {
 }
 function executionSummary(run) {
   const steps = run.steps || [];
+  if (run.label === "Spoken commentary") {
+    const speech = steps.find(step => step.name.startsWith("speech:"));
+    const cached = steps.some(step => step.name === "speech cache");
+    const shared = steps.some(step => step.name === "speech shared synthesis");
+    return [["Speech", speech ? speech.name.substring(speech.name.indexOf(":") + 1).trim() : cached ? "Cached audio" : shared ? "Shared synthesis" : "Waiting"],
+            ["Delivery", speech?.input?.delivery || (cached ? "Previously synthesized" : "—")],
+            ["Audio", run.status === "running" ? "Preparing" : run.status === "complete" ? "Ready" : run.status],
+            ["Total", `${Math.round(run.duration_ms || 0)} ms`]];
+  }
   const decisions = steps.filter(step => step.name.startsWith("editorial selection:") || step.name.startsWith("decision:"));
   const language = steps.find(step => step.name.startsWith("reasoning:"));
   const production = [...steps].reverse().find(step => step.name === "viewer production" || step.name === "producer");

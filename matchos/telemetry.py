@@ -151,7 +151,7 @@ def _export_step(store, run, name, inputs, outputs, duration_ms, status, call_id
             provider = "azure.ai.inference" if model.startswith("azure-foundry:") else model.split(":", 1)[0]
             span = tracer.start_span(name, kind=SpanKind.CLIENT, attributes={
                 "matchos.call.id": call_id, "matchos.call.kind": kind,
-                "gen_ai.operation.name": "chat" if kind == "reasoning" else "matchos.select_story",
+                "gen_ai.operation.name": "chat" if kind == "reasoning" else "speech" if kind == "speech" else "matchos.select_story",
                 "gen_ai.provider.name": provider, "gen_ai.request.model": model,
             })
             call = store._cloud_calls[key] = {"span": span, "end": None, "status": status}

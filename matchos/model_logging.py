@@ -46,7 +46,7 @@ def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
     text = json.dumps(clean(payload), ensure_ascii=False, default=str)
     native_secrets = tuple(value for key, value in os.environ.items()
                            if key.endswith(("API_KEY", "API_TOKEN", "AUTH_TOKEN", "SECRET_ACCESS_KEY",
-                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING")) and value)
+                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING", "SPEECH_KEY")) and value)
     for secret in sorted(set(secrets + native_secrets), key=len, reverse=True):
         if secret:
             text = text.replace(secret, "[REDACTED]")

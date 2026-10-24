@@ -74,8 +74,10 @@
         </div>
         <aside class="rail" aria-label="Viewer perspectives">
           <div class="rail-head"><span>Viewer perspectives</span><button id="add-view" class="icon-button" type="button" aria-label="Add persona view" title="Add persona view">+</button></div>
+          <div class="audio-toolbar"><label><input id="auto-commentary" type="checkbox" disabled>Auto commentary</label><select id="audio-view" aria-label="Commentary perspective" disabled><option value="primary">Broadcaster</option></select></div>
+          <p id="audio-status" class="audio-status" role="status" hidden></p>
           <section class="persona-panel" id="primary-panel">
-            <div class="card-top"><div><span class="view-label" id="primary-label">Broadcaster · Neutral · English</span><b id="latency">—</b></div><button class="icon-button settings-button" type="button" popovertarget="primary-settings" aria-label="Primary view settings" title="Viewer settings">⋯</button></div>
+            <div class="card-top"><div><span class="view-label" id="primary-label">Broadcaster · Neutral · English</span><b id="latency">—</b></div><div class="card-actions"><button class="listen-button" type="button" data-listen-view="primary" disabled aria-label="Listen to Broadcaster update">Listen</button><button class="icon-button settings-button" type="button" popovertarget="primary-settings" aria-label="Primary view settings" title="Viewer settings">⋯</button></div></div>
           <article class="card empty" id="insight">
             <p class="kicker">Waiting for the match</p>
             <h2>Waiting for an insight</h2>
@@ -158,6 +160,7 @@
         </div>
       </section>
     </div>
+    <script src="/assets/audio.js"></script>
     <script src="/assets/app.js"></script>
   </body>
 </html>

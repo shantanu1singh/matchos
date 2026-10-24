@@ -2,6 +2,12 @@
 
 Real-time personalized match intelligence on a synthetic football match.
 
+**License:** Copyright © 2026 Shantanu Singh. All rights reserved. MatchOS is
+proprietary, source-available software. The [MatchOS Evaluation License](LICENSE)
+permits authorized hackathon judging and evaluation; other reuse requires prior
+written permission, subject to applicable law, GitHub's terms, and separately
+licensed third-party materials.
+
 Liverpool and Manchester City play a simulated match. Twenty-two players and a ball move on a 2D tactical board. The same feed — provider-neutral events plus 105×68m tracking — is what MatchOS reads. When the match changes in a way that can be proved, a verified moment is overlaid and then rephrased for whoever is watching.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the system design, Mermaid diagrams, and component responsibilities.
@@ -56,6 +62,35 @@ Casual, analyst, home fan, player focus, and broadcaster all read the same verif
 Analyst and Broadcaster model inputs omit team allegiance and inactive player focus. Fan inputs retain the supported team; Player inputs retain the focused player. The local fallback also uses persona preferences, recent-story history and interruption cadence, and can choose `NONE`. Its scores are editorial heuristics, not calibrated model probabilities. Different personas may still choose the same supported story.
 
 Broadcaster asks what the audience should notice right now: goals, dismissals and clear new match developments take priority over routine metric changes. Its card has a short, score-aware headline built from verified facts and separate model-written supporting copy (one or two sentences, at most 45 words, focusing on one statistic or comparison). Broadcaster model inputs round distances to whole metres; Analyst inputs, canonical facts and detailed evidence keep their precision. Repeated headlines, excessive length, decimal-distance copy and unsupported numbers fall back to the broadcast template. The generated text never replaces the headline or the production graphic's title.
+
+## Spoken commentary
+
+Each persona card has a **Listen** button. Enable **Auto commentary** and choose one perspective to speak its new aired stories. Audio is off by default. The speech path reads only the completed, verified, producer-approved card text; it makes no new editorial or language call and does not speak held stories.
+
+Add these values to `.env.local` (or the deployed app's environment) and restart:
+
+```dotenv
+MATCHOS_SPEECH_ENABLED=1
+AZURE_SPEECH_KEY=YOUR_SPEECH_RESOURCE_KEY
+AZURE_SPEECH_REGION=YOUR_SPEECH_RESOURCE_REGION
+AZURE_SPEECH_MODEL=MAI-Voice-2.1-Flash
+```
+
+In Azure, use the key and region from a Speech-capable resource's **Keys and Endpoint** page. These are separate settings from the inference endpoint/key; a Foundry model deployment alone does not configure Speech. No extra Python package is needed: the adapter calls the [Azure Speech REST endpoint](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/rest-text-to-speech) with async HTTP and SSML. See [MAI voice availability and styles](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-voices) for your region. MAI-Voice-2.1-Flash is in preview.
+
+| Perspective | English / Hindi voice | Delivery |
+|---|---|---|
+| Broadcaster | `en-GB-Emily` / `hi-IN-Dhruv` | Composed narration; excited for a goal or dismissal |
+| Analyst | `en-US-Grant` / `hi-IN-Harper` | Educational style, slightly slower |
+| Fan | `en-GB-Emily` / `hi-IN-Priya` | Warm and joyful for their team's advantage; concerned for setbacks |
+
+Delivery uses supported SSML styles and speaking rates, rather than adding guidance to the spoken words. Full voice IDs append `:MAI-Voice-2.1-Flash`; optional persona/language overrides are listed in `.env.example`. Overridden voices must support the mapped styles. Original prebuilt voices are used; this feature does not clone a commentator.
+
+Only one perspective speaks at a time. Selecting another view stops the previous audio. New selected-view updates supersede older requests; automatic audio is checked for freshness before playback. Seeking, resetting, changing the active profile, disconnecting or moving to another Judge demo checkpoint aborts the browser fetch and stops playback. Manual **Listen** can replay a retained **Last aired** card. If browser autoplay is blocked, press Listen explicitly.
+
+Synthesis starts only on Listen/auto playback, never for every card or frame. Identical text, voice, language and delivery share audio within the server process. Requests for the same clip share one synthesis job; already-running jobs can finish into the cache after a browser aborts, but their stale results never play. The cache retains at most 128 clips / 16 MiB for up to one hour, and the approved-story registry retains at most 256 entries. Concurrent synthesis is limited to two jobs, with at most four pending/in-progress unique clips and a 12-second total deadline (`SPEECH_TIMEOUT_S`). Cache eviction or a server restart can require synthesis again.
+
+Speech requests, delivery, errors and cache hits appear in terminal diagnostics and the Telemetry tab, correlated with the source viewer trace when cloud tracing is enabled. Raw audio and credentials are not logged. Missing Speech settings disable the controls with an explanation; failures leave pitch playback and cards usable.
 
 ## Demo squads
 

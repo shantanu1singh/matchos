@@ -9,8 +9,8 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from matchos.teams import identity_context
@@ -23,6 +23,7 @@ from matchos.scenarios import SCENARIOS
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
 from matchos.demo import DEMO_STOPS, demo_viewers, review_checkpoint
+from matchos.speech import SpeechConfig, SpeechService, SpeechUnavailable
 
 WEB = Path(__file__).resolve().parent / "web"
 
@@ -31,10 +32,17 @@ async def lifespan(app: FastAPI):
     load_env_files()
     configure_observability()
     configure_model_logging()
+    try:
+        speech_config = SpeechConfig.from_env()
+    except ValueError:
+        logging.getLogger(__name__).warning("Invalid Speech configuration; check .env.example. Audio is disabled.")
+        speech_config = SpeechConfig()
+    app.state.speech = SpeechService(speech_config)
     model_logger.info("Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable)
     try:
         yield
     finally:
+        await app.state.speech.close()
         await asyncio.to_thread(flush_observability)
 
 
@@ -59,13 +67,28 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "product": "matchos"}
 
 
+@app.get("/api/speech/{speech_id}")
+async def speech_audio(speech_id: str):
+    service = getattr(app.state, "speech", None)
+    if service is None:
+        raise HTTPException(503, "Speech is not available")
+    try:
+        audio, cached = await service.audio(speech_id)
+    except SpeechUnavailable as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return Response(audio, media_type="audio/mpeg", headers={
+        "Cache-Control": "private, max-age=3600", "X-MatchOS-Audio-Cache": "hit" if cached else "miss"})
+
+
 @app.get("/")
 async def index() -> HTMLResponse:
     # Keep markup and assets in sync across edits, including previously cached CSS.
     html = (WEB / "index.html").read_text()
-    for filename in ("styles.css", "app.js"):
-        version = hashlib.sha256((WEB / filename).read_bytes()).hexdigest()[:12]
+    for filename in ("styles.css", "audio.js", "app.js"):
         path = f"/assets/{filename}"
+        if path not in html:
+            continue
+        version = hashlib.sha256((WEB / filename).read_bytes()).hexdigest()[:12]
         html = html.replace(path, f"{path}?v={version}")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
@@ -119,7 +142,7 @@ async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) 
 async def match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context(),
-                               "demoStops": DEMO_STOPS})
+                               "demoStops": DEMO_STOPS, "speech": app.state.speech.capabilities()})
     session: MatchSession | None = None
     task: asyncio.Task | None = None
     paused_task: asyncio.Task | None = None
@@ -130,6 +153,8 @@ async def match_socket(websocket: WebSocket) -> None:
     lock = asyncio.Lock()
 
     async def send(payload: dict) -> None:
+        if payload.get("type") == "viewer_update" and session is not None:
+            payload["speech"] = app.state.speech.register(payload, session.telemetry, session.live_state_engine.state.timestamp_ms)
         async with lock:
             await websocket.send_json(payload)
 

@@ -1,0 +1,71 @@
+MatchOS Evaluation License 1.0
+
+Copyright (c) 2026 Shantanu Singh. All rights reserved.
+
+1. Scope and ownership
+
+This license applies to the original MatchOS source code, documentation, and
+other original materials in this repository (the "Software") to the extent
+owned by the copyright holder named above. The Software is proprietary and is
+not licensed under an open-source license. All rights not expressly granted
+below are reserved.
+
+2. Limited hackathon evaluation permission
+
+Hackathon organizers, judges, and their authorized evaluators may download,
+make private copies of, install, execute, and inspect the Software solely to
+evaluate a hackathon submission made by the copyright holder. They may make
+private modifications strictly necessary to configure or run that evaluation.
+This permission is non-exclusive, non-transferable, and non-sublicensable;
+each authorized evaluator receives permission directly under this license.
+Copyright and license notices must be retained in all copies.
+
+Evaluation copies and modifications may not be distributed outside the
+authorized evaluation team or used to operate a public or commercial service.
+They must be deleted when no longer needed for judging or associated audit
+and recordkeeping obligations. Copies retained solely for those obligations
+may not be used for another purpose.
+
+3. Other uses require written permission
+
+Except for Section 2 and the rights preserved in Section 4, this license does
+not permit copying, modification, creation of derivative works, redistribution,
+sublicensing, sale, incorporation into another product, or operation of the
+Software as a service. Other commercial and non-commercial uses require prior
+written permission from the copyright holder. Public availability does not
+grant additional rights. Requests may be made through the repository owner's
+GitHub profile: https://github.com/shantanu1singh.
+
+4. Existing rights and third-party materials
+
+Nothing in this license limits rights that cannot lawfully be restricted,
+including applicable copyright exceptions, or rights separately granted by
+the copyright holder. It does not override permissions granted through the
+applicable GitHub Terms of Service, including viewing and forking through
+GitHub's functionality. A fork does not receive additional reuse rights under
+this license.
+
+Third-party software, dependencies, and other third-party materials remain
+subject to their own licenses and rights. This license does not replace those
+licenses, restrict their permissions, or claim ownership of those materials.
+No rights to third-party names, trademarks, likenesses, or data are granted.
+Previously granted licenses, if any, are not revoked by this license.
+
+5. Termination
+
+The permissions in Section 2 terminate automatically upon breach of this
+license. Upon termination, use must cease and evaluation copies and
+modifications must be deleted, except for copies required by law to be retained.
+Sections 1, 3, 4, 6, and 7 survive termination.
+
+6. No warranty
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED
+"AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+7. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT HOLDER SHALL
+NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM OR IN
+CONNECTION WITH THE SOFTWARE OR ITS USE, WHETHER IN CONTRACT, TORT, OR OTHERWISE.

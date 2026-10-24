@@ -25,7 +25,7 @@ function demoController({ready=true, stops=[], open=true}={}) {
   let renders=0;
   const context=vm.createContext({state,document,WebSocket,location:{protocol:'http:',host:'localhost'},
     setLive(text){state.live=text;},markSpeed(){},renderScenarios(){},clearEvidence(){},
-    renderDemoGuide(){renders++;},onMessage(){}});
+    renderDemoGuide(){renders++;},renderAudioControls(){},onMessage(){}});
   vm.runInContext(source.slice(source.indexOf('function connect('),source.indexOf('function onMessage(')),context);
   vm.runInContext(source.slice(source.indexOf('function requestDemo('),source.indexOf('function receiveDemo(')),context);
   return {context,state,sent,notice:document.getElementById('demo-notice'),renders:()=>renders};
