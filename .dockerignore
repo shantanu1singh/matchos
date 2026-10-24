@@ -1,0 +1,20 @@
+# Allowlist applies to local builds AND ACR uploads: credentials never leave here.
+**
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!requirements-observability.txt
+!requirements-production.lock
+!matchos/
+!matchos/**
+matchos/bin/**
+matchos/include/**
+matchos/lib/**
+matchos/lib64/**
+matchos/pyvenv.cfg
+**/__pycache__/**
+**/*.pyc
+**/.env
+**/.env.*
+**/*.pem
+**/*.key

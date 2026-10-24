@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,6 +15,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from matchos.teams import identity_context
+from matchos.access import AccessConfig, AccessMiddleware
 from matchos.editorial import explain
 from matchos.perspective import Perspective
 from matchos.llm_config import load_env_files
@@ -30,6 +32,11 @@ WEB = Path(__file__).resolve().parent / "web"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_env_files()
+    app.state.access = AccessConfig.from_env()
+    app.state.max_sessions = int(os.getenv("MATCHOS_MAX_SESSIONS", "0"))
+    if app.state.max_sessions < 0:
+        raise ValueError("MATCHOS_MAX_SESSIONS must be zero (unlimited) or positive")
+    app.state.active_sessions = 0
     configure_observability()
     configure_model_logging()
     try:
@@ -47,6 +54,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MatchOS", lifespan=lifespan)
+app.add_middleware(AccessMiddleware, state=app.state)
 
 
 def _scenario_payload() -> list[dict[str, object]]:
@@ -140,6 +148,18 @@ async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) 
 
 @app.websocket("/ws")
 async def match_socket(websocket: WebSocket) -> None:
+    # One event loop owns this counter; admission has no await before increment.
+    if app.state.max_sessions and app.state.active_sessions >= app.state.max_sessions:
+        await websocket.close(code=1013, reason="MatchOS is at capacity; please retry shortly.")
+        return
+    app.state.active_sessions += 1
+    try:
+        await _serve_match_socket(websocket)
+    finally:
+        app.state.active_sessions -= 1
+
+
+async def _serve_match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
     await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context(),
                                "demoStops": DEMO_STOPS, "speech": app.state.speech.capabilities()})

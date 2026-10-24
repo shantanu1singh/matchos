@@ -46,7 +46,7 @@ def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
     text = json.dumps(clean(payload), ensure_ascii=False, default=str)
     native_secrets = tuple(value for key, value in os.environ.items()
                            if key.endswith(("API_KEY", "API_TOKEN", "AUTH_TOKEN", "SECRET_ACCESS_KEY",
-                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING", "SPEECH_KEY")) and value)
+                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING", "SPEECH_KEY", "PASSWORD")) and value)
     for secret in sorted(set(secrets + native_secrets), key=len, reverse=True):
         if secret:
             text = text.replace(secret, "[REDACTED]")
@@ -64,12 +64,18 @@ class ModelCall:
         self.model = model
         from matchos.telemetry import record
         record(f"{kind}: {model}", payload, None, status="request", call_id=self.id, secrets=secrets)
-        logger.info("[%s] %s REQUEST %s %s", self.id, kind, model, _safe_json(payload, secrets))
+        detail = _safe_json(payload, secrets) if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1" else "[content omitted]"
+        logger.info("[%s] %s REQUEST %s %s", self.id, kind, model, detail)
 
     def result(self, payload: object, *, phase: str = "RESPONSE") -> None:
         configure_model_logging()
         from matchos.telemetry import record
         record(self.model, None, payload, (time.perf_counter() - self.started) * 1000,
                status=phase.lower(), call_id=self.id, secrets=self.secrets)
+        # Retain safe error categories/status for operations without logging prompts.
+        summary = ({key: payload[key] for key in ("error", "status") if key in payload}
+                   if isinstance(payload, dict) and phase == "ERROR" else {})
+        detail = (_safe_json(payload, self.secrets) if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1"
+                  else _safe_json(summary, self.secrets) if summary else "[content omitted]")
         logger.info("[%s] %s %s %.0fms %s", self.id, phase, self.model,
-                    (time.perf_counter() - self.started) * 1000, _safe_json(payload, self.secrets))
+                    (time.perf_counter() - self.started) * 1000, detail)

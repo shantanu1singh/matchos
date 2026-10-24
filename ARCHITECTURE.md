@@ -76,6 +76,25 @@ The browser's evidence mode draws only the attached source-event locations, hidi
 | Configuration | Selects providers, models, credentials, and timeouts; loads `.env` and `.env.local`. | [`llm_config.py`](matchos/llm_config.py) |
 | Observability | Captures session traces and correlated, redacted terminal model logs; optionally exports OpenTelemetry. | [`telemetry.py`](matchos/telemetry.py), [`model_logging.py`](matchos/model_logging.py) |
 
+## Azure hosting
+
+```mermaid
+flowchart LR
+    Browser[Judge / viewer browser] <-->|HTTPS + WebSocket| App[Container Apps: one replica, one Python worker]
+    Registry[Private Azure Container Registry] -->|Managed identity image pull| App
+    Vault[Azure Key Vault] -->|Managed identity secret references| App
+    App -->|Managed identity inference| Models[Existing Foundry Decision-1 and gpt-6-luna]
+    App -->|Speech key from vault| Speech[Azure Speech]
+    App -->|Compact traces| Insights[Existing Application Insights / Foundry traces]
+    App -->|Console + platform logs| Logs[Log Analytics]
+    Bicep[Repository Bicep + deployment script] --> Registry
+    Bicep --> App
+```
+
+The deployment reuses the existing Foundry account and linked Application Insights resource. Container Apps manages HTTPS and startup/readiness/liveness probes. A shared HTTP Basic gate protects the page, assets, APIs and WebSocket handshake; successful browser login creates a signed secure cookie for socket/audio access. Only `/api/health` is public for probes. The app runs as a non-root user, deploys by immutable image digest, and caps open match sessions at eight. Inference uses a managed identity; the access password, speech key and trace connection string are Key Vault references. Full model payloads are disabled in production console/cloud traces.
+
+One replica is intentional: match sessions and speech registration/cache are in memory. Sticky sessions do not preserve state across restarts, and deployments can disconnect active matches. Shared state, durable feed ingestion and horizontal scale are future work. [DEPLOYMENT.md](DEPLOYMENT.md) explains deployment, validation, rollback, operational limits and the proposed larger-scale architecture.
+
 ## Intelligence workflow
 
 ```mermaid

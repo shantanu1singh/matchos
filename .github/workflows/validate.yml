@@ -1,0 +1,62 @@
+name: Validate release
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      DECISION_PROVIDER: local
+      REASONING_PROVIDER: local
+      MATCHOS_OTEL_ENABLED: '0'
+      MATCHOS_SPEECH_ENABLED: '0'
+      MATCHOS_BASIC_AUTH_ENABLED: '0'
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install --require-hashes -r requirements-production.lock
+      - run: python -m pip check
+      - name: Verify critical release paths without cloud model calls
+        run: >-
+          python -m pytest -q tests/test_access.py tests/test_production_runtime.py tests/test_web_assets.py
+          tests/test_editorial_selection.py tests/test_perspectives.py tests/test_broadcaster_opening.py
+          tests/test_press_corroboration.py tests/test_speech.py tests/test_compact_tracing.py
+      - run: node --test tests/*.test.cjs
+      - name: Compile infrastructure
+        run: |
+          az bicep install --version v0.48.1
+          az bicep build --file infra/foundation.bicep --stdout > /tmp/foundation.json
+          az bicep build --file infra/app.bicep --stdout > /tmp/app.json
+      - name: Build and smoke test the production container
+        run: |
+          docker build -t matchos:ci .
+          docker run -d --name matchos-ci -p 8000:8000 -e DECISION_PROVIDER=local -e REASONING_PROVIDER=local -e MATCHOS_OTEL_ENABLED=0 matchos:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/api/health; then break; fi
+            sleep 2
+          done
+          python scripts/smoke_deployment.py http://localhost:8000
+      - name: Verify the container password gate
+        run: |
+          docker rm -f matchos-ci
+          umask 077
+          python -c 'import secrets; from pathlib import Path; Path("/tmp/matchos-ci-auth.env").write_text("MATCHOS_BASIC_AUTH_ENABLED=1\nMATCHOS_BASIC_AUTH_USERNAME=judges\nMATCHOS_BASIC_AUTH_SECURE_COOKIE=0\nMATCHOS_BASIC_AUTH_PASSWORD=" + secrets.token_urlsafe(32) + "\n")'
+          docker run -d --name matchos-ci -p 8000:8000 --env-file /tmp/matchos-ci-auth.env -e DECISION_PROVIDER=local -e REASONING_PROVIDER=local -e MATCHOS_OTEL_ENABLED=0 matchos:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/api/health; then break; fi
+            sleep 2
+          done
+          python scripts/smoke_deployment.py http://localhost:8000 --auth-env-file /tmp/matchos-ci-auth.env
+          rm /tmp/matchos-ci-auth.env
+      - name: Container diagnostics
+        if: always()
+        run: docker logs matchos-ci || true

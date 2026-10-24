@@ -297,3 +297,7 @@ The producer retains its novelty, relevance, cadence, and on-air rules after mod
 Decision inputs include whether this viewer has received a story, wall-clock waiting time, and time since the last air. Before the broadcaster's first story, its guidance allows useful opening context backed by a meaningful development (such as sustained possession plus increased final-third entries). Later stories must add something new. The model can still choose `NONE`; publication and cadence checks remain in place. Held-story messages show the publication score or broadcaster importance threshold when either blocks an update.
 
 Azure Foundry is the default, Cloudflare and Vercel remain available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.
+
+## Deployment
+
+Azure Container Apps deployment and operations: [DEPLOYMENT.md](DEPLOYMENT.md). Infrastructure, container builds, health checks, Key Vault and managed identity are defined in the repository.
