@@ -24,7 +24,7 @@ from matchos.observability import configure_observability, flush_observability
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
-from matchos.demo import DEMO_STOPS, demo_viewers, review_checkpoint
+from matchos.demo import DEMO_STOPS, demo_viewers, play_checkpoint, review_checkpoint
 from matchos.speech import SpeechConfig, SpeechService, SpeechUnavailable
 
 WEB = Path(__file__).resolve().parent / "web"
@@ -300,16 +300,32 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                         "candidates": batch.candidates.model_dump(mode="json")})
             await compare(current, batch)
             decision_timeout = getattr(getattr(current.services.decisions, "config", None), "decision_timeout_s", 10)
-            await asyncio.wait_for(asyncio.gather(*[perspective.task for perspective in perspectives
-                                                   if perspective.task is not None]),
-                                   timeout=decision_timeout + current.services.reasoning_timeout_s + 5)
+            settled = asyncio.Event()
+
+            async def finish_reviews():
+                await asyncio.wait_for(asyncio.gather(*[perspective.task for perspective in perspectives
+                                                       if perspective.task is not None]),
+                                       timeout=decision_timeout + current.services.reasoning_timeout_s + 5)
+                settled.set()
+
+            workers = [asyncio.create_task(finish_reviews()),
+                       asyncio.create_task(play_checkpoint(current, settled, send))]
+            try:
+                await asyncio.gather(*workers)
+            finally:
+                for worker in workers:
+                    worker.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
+                current.running = False
             await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "ready",
+                        "running": False,
                         "results": [demo_results[index] for index in sorted(demo_results)]})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logging.getLogger(__name__).warning("Guided demo checkpoint failed (%s)", type(exc).__name__)
             await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "error",
+                        "running": False,
                         "message": "This checkpoint could not finish. Retry it or continue to the next one."})
 
     try:
@@ -321,7 +337,7 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                 if type(step) is not int or not 0 <= step < len(DEMO_STOPS):
                     await send({"type": "demo_status", "phase": "error", "message": "Unknown demo checkpoint."})
                     continue
-                # Keep the demo's trace history across its three frozen checkpoints.
+                # Keep the demo's trace history across its three checkpoint clips.
                 previous_telemetry = session.telemetry if session is not None and session.demo_step is not None else None
                 await stop()
                 viewers = demo_viewers()
@@ -407,6 +423,8 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                     session.running = True
                     task = asyncio.create_task(_run(websocket, session, send, compare))
             elif kind == "speed" and session is not None:
+                if session.demo_step is not None:
+                    continue
                 session.speed = int(message.get("speed") or session.speed)
     except WebSocketDisconnect:
         pass

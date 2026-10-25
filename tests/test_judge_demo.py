@@ -1,10 +1,10 @@
-"""Guided review freezes real replay evidence without inventing editorial choices."""
+"""Guided reviews keep evidence fixed while live clips and independent models run."""
 import asyncio
 import threading
 
 from fastapi.testclient import TestClient
 
-from matchos import server
+from matchos import demo, server
 from matchos.demo import DEMO_STOPS, demo_viewers, review_checkpoint
 from matchos.session import MatchSession
 
@@ -12,6 +12,10 @@ from matchos.session import MatchSession
 def offline(monkeypatch):
     monkeypatch.setenv("DECISION_PROVIDER", "local")
     monkeypatch.setenv("REASONING_PROVIDER", "local")
+    monkeypatch.setenv("MATCHOS_OTEL_ENABLED", "0")
+    # Keep integration clips short while exercising real frame delivery and pacing.
+    monkeypatch.setattr(demo, "DEMO_PLAYBACK_MS", 300)
+    monkeypatch.setattr(demo, "DEMO_AFTER_REVIEW_MS", 100)
 
 
 def test_checkpoints_have_the_promised_real_evidence_and_do_not_advance_time(monkeypatch):
@@ -80,15 +84,60 @@ def test_websocket_demo_settles_all_viewers_and_retains_trace_history_across_ste
             ids = [tuple(candidate["id"] for candidate in item["result"]["candidates"]["candidates"]) for item in results]
             assert ids[0] == ids[1] == ids[2]
             assert all(item["result"]["state"]["timestamp_ms"] == snapshot["frame"]["timestamp_ms"] for item in results)
-            assert not any(item["type"] == "frame" for item in messages)
+            frames = [item for item in messages if item["type"] == "frame"]
+            assert len(frames) >= 3
+            stamps = [item["frame"]["timestamp_ms"] for item in frames]
+            assert stamps == sorted(set(stamps))
+            assert stamps[-1] >= snapshot["frame"]["timestamp_ms"] + demo.DEMO_PLAYBACK_MS
+            assert all(item["state"]["timestamp_ms"] == item["frame"]["timestamp_ms"] for item in frames)
+            playing = next(item for item in messages if item["type"] == "demo_status" and item["phase"] == "playing")
+            assert playing["running"] is True
+            assert message["running"] is False
             assert any(item["type"] in {"moment", "trace"} for item in messages)  # Producer receives primary decisions.
             ws.send_json({"type": "telemetry", "since": 0})
-            traces, _ = receive_until(ws, "telemetry")
+            traces, paused_messages = receive_until(ws, "telemetry")
+            assert not any(item["type"] == "frame" for item in paused_messages)
             if trace_session is None:
                 trace_session = traces["session"]
             assert traces["session"] == trace_session
             assert len([run for run in traces["runs"] if run["label"] == "Guided checkpoint evidence"]) == step + 1
             assert {run["metadata"].get("viewIndex") for run in traces["runs"] if run["label"] == "Viewer editorial selection"} == {0, 1, 2}
+
+
+def test_clip_continues_until_slow_viewer_finishes_then_pauses_without_extra_reviews(monkeypatch):
+    from matchos.decision_client import LocalDecisionClient
+    offline(monkeypatch)
+    select = LocalDecisionClient.select
+    calls = []
+
+    async def delayed(self, state, candidates, viewer, context):
+        calls.append(viewer.persona)
+        if viewer.persona == "fan":
+            await asyncio.sleep(.65)
+        return await select(self, state, candidates, viewer, context)
+
+    monkeypatch.setattr(LocalDecisionClient, "select", delayed)
+    with TestClient(server.app) as client, client.websocket_connect("/ws") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "demo", "step": 1, "requestId": 1})
+        messages = []
+        while True:
+            message = ws.receive_json()
+            messages.append(message)
+            if message["type"] == "demo_snapshot":
+                ws.send_json({"type": "speed", "speed": 20})  # Lab controls must not speed up the guided clip.
+            if message["type"] == "demo_status" and message["phase"] in {"ready", "error"}:
+                break
+        assert message["phase"] == "ready"
+        fan_index = next(i for i, item in enumerate(messages) if item["type"] == "viewer_update" and item["index"] == 1)
+        assert any(item["type"] == "frame" for item in messages[:fan_index])
+        assert any(item["type"] == "frame" for item in messages[fan_index + 1:])
+        frames = [item for item in messages if item["type"] == "frame"]
+        stamps = [item["frame"]["timestamp_ms"] for item in frames]
+        assert all(after - before == 100 for before, after in zip(stamps, stamps[1:]))
+        assert frames[-1]["frame"]["timestamp_ms"] > DEMO_STOPS[1]["timestamp_ms"] + demo.DEMO_PLAYBACK_MS
+        assert sorted(calls) == ["analyst", "broadcaster", "fan"]
+        assert {item["result"]["moment"]["frame"] for item in message["results"]} == {"GOAL"}
 
 
 def test_invalid_demo_checkpoint_is_recoverable(monkeypatch):

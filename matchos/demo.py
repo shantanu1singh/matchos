@@ -1,6 +1,11 @@
-"""Guided checkpoints replay real evidence, then request the normal shared workflow."""
+"""Guided reviews evaluate real checkpoint evidence alongside short live clips."""
+import asyncio
+
 from matchos.schemas import PipelineResult, Tick, ViewerProfile
 from matchos.workflow import LiveTick
+
+DEMO_PLAYBACK_MS = 12_000
+DEMO_AFTER_REVIEW_MS = 3_000
 
 DEMO_STOPS = (
     {"id": "press", "title": "The press opens up", "timestamp_ms": 64 * 60000,
@@ -15,6 +20,31 @@ DEMO_STOPS = (
 def demo_viewers() -> list[ViewerProfile]:
     return [ViewerProfile(persona="broadcaster"), ViewerProfile(persona="fan", team_id="RED", language="es"),
             ViewerProfile(persona="analyst")]
+
+
+async def play_checkpoint(session, settled: asyncio.Event, send) -> None:
+    """Play at 1x until both the minimum clip and a post-review reading beat finish."""
+    stop_at = session.simulator.clock_ms + DEMO_PLAYBACK_MS
+    review_finished = False
+    session.running = True
+    try:
+        await send({"type": "demo_status", "step": session.demo_step,
+                    "requestId": session.demo_request_id, "phase": "playing", "running": True})
+        loop = asyncio.get_running_loop()
+        while True:
+            if settled.is_set() and not review_finished:
+                stop_at = max(stop_at, session.simulator.clock_ms + DEMO_AFTER_REVIEW_MS)
+                review_finished = True
+            if review_finished and session.simulator.clock_ms >= stop_at:
+                break
+            started = loop.time()
+            frame, events, _ = await session.tick(evaluate=False)
+            await send({"type": "frame", "frame": frame.model_dump(),
+                        "events": [event.model_dump() for event in events],
+                        "state": session.live_state_engine.state.model_dump()})
+            await asyncio.sleep(max(0.0, 0.1 - (loop.time() - started)))
+    finally:
+        session.running = False
 
 
 async def review_checkpoint(session) -> PipelineResult:

@@ -30,7 +30,7 @@ Cards update only when the selected story's copy and publication checks are comp
 
 ## Try the Judge demo
 
-Click **Judge demo** to compare the three viewers at frozen checkpoints in the default press-collapse scenario:
+Click **Judge demo** to compare the three viewers during short passages of the default press-collapse scenario, starting at these checkpoints:
 
 | Checkpoint | Development |
 |---|---|
@@ -40,7 +40,7 @@ Click **Judge demo** to compare the three viewers at frozen checkpoints in the d
 
 These are synthetic events, not a real fixture or confirmed starting lineups. Club and player identities provide context; the simulator generates the match.
 
-The guide reconstructs match evidence, then runs the normal model and publication workflows. It shows actual aired or held outcomes and waits for all three viewers before enabling the next checkpoint. Responses are not prerecorded, and distinct stories are not forced. Each checkpoint starts fresh viewer history while keeping its telemetry available for comparison.
+The guide reconstructs checkpoint evidence, then plays at least 12 seconds of the match at 1× while the normal model and publication workflows run. The pitch keeps moving until all three viewers finish, with at least three seconds after the last response before pausing for comparison. It shows actual aired or held outcomes; responses are not prerecorded, and distinct stories are not forced. Each checkpoint starts fresh viewer history while keeping its telemetry available for comparison.
 
 For regular playback with cloud models, start at **1×**. At high speeds, a story's match-time validity window can expire while inference is running.
 

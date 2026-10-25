@@ -109,7 +109,7 @@ The live feed runs approximately every 100 ms. It accumulates events and samples
 
 Pause stops playback without waiting for outstanding model calls. Seeking reconstructs the same seeded match and evidence in a background thread, preserving speed and pause state while clearing old work and traces. Warmup and historical replay make no model calls. Changing or removing a perspective cancels only that viewer's work; other viewers retain their history.
 
-The **Judge demo** replays to 64:00, 65:04 and 68:01, freezes the clock and requests review through the normal evidence and viewer workflows. Each checkpoint starts fresh editorial history; traces are retained across checkpoints. Its readiness indicator waits for all viewers to settle, including holds. Normal playback has no wait-for-all barrier.
+The **Judge demo** replays to 64:00, 65:04 and 68:01 and reviews that checkpoint's frozen evidence through the normal workflows. In parallel, live frames and statistics advance at 1× for at least 12 match seconds, extending until three seconds after all viewers settle, including holds. The clip then pauses for comparison. Clip ticks do not schedule further editorial reviews, so later snapshots cannot replace the checkpoint outcomes. Each checkpoint starts fresh editorial history; traces are retained across checkpoints. Normal playback has no wait-for-all barrier.
 
 In evidence mode, the browser draws historical paths only from the displayed story's recorded source events and hides current player/ball positions. Aggregate stories without event paths show metrics rather than invented movement. Live stat capsules and frozen story evidence serve different time contexts.
 

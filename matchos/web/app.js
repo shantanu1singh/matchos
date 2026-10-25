@@ -52,7 +52,8 @@ function connect() {
     state.speech = {available: false, message: "Reconnect to the match server to use audio."};
     renderAudioControls();
     state.serverReady = false;
-    if (state.demo.active && ["preparing", "evaluating"].includes(state.demo.phase)) {
+    if (state.demo.active && ["preparing", "evaluating", "playing"].includes(state.demo.phase)) {
+      state.running = false;
       state.demo.phase = "error";
       state.demo.message = "Connection lost. Refresh the page after restarting the backend to retry the demo.";
       renderDemoGuide();
@@ -1269,6 +1270,7 @@ function receiveDemo(message) {
     state.demo.settled = message.settled;
   } else {
     state.demo.phase = message.phase;
+    if (typeof message.running === "boolean") state.running = message.running;
     if (message.candidates) state.demo.candidates = message.candidates.candidates;
     state.demo.message = message.message || "";
     if (message.results) {
@@ -1287,11 +1289,11 @@ function renderDemoGuide() {
   document.getElementById("add-view").disabled = demo.active || state.comparisonViewers.length >= 2;
   document.getElementById("timeline").disabled = demo.active;
   document.getElementById("pause").disabled = demo.active;
-  document.getElementById("pause").textContent = demo.active ? "Held for demo" : state.running ? "Pause" : "Resume";
+  document.getElementById("pause").textContent = demo.active ? (demo.phase === "playing" ? "Demo playing" : "Held for demo") : state.running ? "Pause" : "Resume";
   renderAudioControls();
   if (!demo.active) return;
   const checkpoint = demo.stops[demo.step];
-  const busy = demo.phase === "preparing" || demo.phase === "evaluating";
+  const busy = ["preparing", "evaluating", "playing"].includes(demo.phase);
   document.getElementById("demo-title").textContent = checkpoint.title;
   document.getElementById("demo-description").textContent = checkpoint.description;
   document.getElementById("demo-stops").innerHTML = demo.stops.map((stop, index) =>
@@ -1300,6 +1302,7 @@ function renderDemoGuide() {
     button.addEventListener("click", () => requestDemo(Number(button.dataset.demoStep)));
   });
   document.getElementById("demo-status").textContent = demo.phase === "preparing" ? "Replaying the match to this checkpoint…" :
+    demo.phase === "playing" ? `Playing at 1× · ${demo.settled}/3 viewers finished · the match will pause for comparison.` :
     demo.phase === "evaluating" ? `Match held · ${demo.settled}/3 viewers finished · waiting for model decisions and copy…` :
     demo.phase === "error" ? demo.message : "Match held · 3/3 viewers finished · compare their stories or inspect evidence.";
   document.getElementById("demo-retry").hidden = demo.phase !== "error";
@@ -1315,7 +1318,7 @@ function renderDemoGuide() {
     const status = result ? (aired ? `Aired · ${storyName(result.result.moment?.frame)}` : "Held · no interruption") : demo.phase === "error" ? "Did not finish" : "Evaluating…";
     return `<span title="${escapeHtml(result?.result.overlay?.headline || result?.explanation.reason || purposes[index])}"><b>${personaNames[role]}</b><small>${purposes[index]}</small>${escapeHtml(status)}</span>`;
   }).join("");
-  setLive("Judge demo · held");
+  setLive(demo.phase === "playing" ? "Judge demo · 1×" : "Judge demo · held");
 }
 
 document.getElementById("judge-demo").addEventListener("click", () => state.demo.active ? startMatch() : requestDemo());

@@ -65,15 +65,41 @@ test('a supported backend receives the requested demo checkpoint and clears earl
 });
 
 test('losing the socket during review stops the waiting state and shows a recovery action',()=>{
-  const {context,state,notice}=demoController({stops:[{id:'press'}]});
-  context.connect();
-  state.demo.active=true; state.demo.phase='evaluating';
-  state.ws.onclose();
-  assert.equal(state.serverReady,false);
-  assert.equal(state.demo.phase,'error');
-  assert.equal(state.live,'Disconnected');
-  assert.match(state.demo.message,/refresh/i);
-  assert.equal(notice.hidden,false);
+  for (const phase of ['evaluating','playing']) {
+    const {context,state,notice}=demoController({stops:[{id:'press'}]});
+    context.connect();
+    state.demo.active=true; state.demo.phase=phase; state.running=true;
+    state.ws.onclose();
+    assert.equal(state.serverReady,false);
+    assert.equal(state.demo.phase,'error');
+    assert.equal(state.running,false);
+    assert.equal(state.live,'Disconnected');
+    assert.match(state.demo.message,/refresh/i);
+    assert.equal(notice.hidden,false);
+  }
+});
+
+test('finished viewer results do not enable the next checkpoint until playback pauses',()=>{
+  const source=fs.readFileSync('matchos/web/app.js','utf8');
+  const elements=new Map();
+  const document={getElementById(id) {
+    if (!elements.has(id)) elements.set(id,{textContent:'',querySelectorAll:()=>[]});
+    return elements.get(id);
+  },querySelectorAll:()=>[]};
+  const state={running:true,comparisonViewers:[{},{}],demo:{active:true,step:0,phase:'playing',settled:3,
+    stops:[{title:'Pressing change',description:'Compare viewers',timestamp_ms:3840000}],outcomes:{}}};
+  const context=vm.createContext({state,document,renderAudioControls(){},setLive(text){state.live=text;},
+    clockOf:()=> '64:00',escapeHtml:String,personaNames:{},storyName:String});
+  vm.runInContext(source.slice(source.indexOf('function renderDemoGuide('),source.indexOf('document.getElementById("judge-demo").addEventListener')),context);
+  context.renderDemoGuide();
+  assert.equal(document.getElementById('demo-next').disabled,true);
+  assert.match(document.getElementById('demo-status').textContent,/Playing at 1× · 3\/3/);
+  assert.equal(state.live,'Judge demo · 1×');
+  state.demo.phase='ready'; state.running=false;
+  context.renderDemoGuide();
+  assert.equal(document.getElementById('demo-next').disabled,false);
+  assert.equal(document.getElementById('pause').textContent,'Held for demo');
+  assert.equal(state.live,'Judge demo · held');
 });
 
 function evidenceRenderer() {
@@ -121,7 +147,10 @@ test('demo ignores late results from a previous retry and records held outcomes 
   context.receiveDemo({type:'demo_status',step:0,requestId:1,phase:'ready',results:[]});
   assert.equal(state.demo.phase,'evaluating');
   const held={index:0,explanation:{status:'no_interruption'},result:{moment:null,overlay:null}};
-  context.receiveDemo({type:'demo_status',step:0,requestId:2,phase:'ready',results:[held]});
+  context.receiveDemo({type:'demo_status',step:0,requestId:2,phase:'playing',running:true});
+  assert.equal(state.running,true);
+  context.receiveDemo({type:'demo_status',step:0,requestId:2,phase:'ready',running:false,results:[held]});
+  assert.equal(state.running,false);
   assert.equal(state.demo.phase,'ready'); assert.equal(state.demo.settled,1);
   assert.equal(state.demo.outcomes[0].result.moment,null);
   state.demo.active=false;

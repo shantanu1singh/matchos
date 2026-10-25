@@ -81,11 +81,14 @@ class MatchSession:
 
         return await asyncio.to_thread(replay)
 
-    async def tick(self) -> tuple[TrackingFrame, list[MatchEvent], list[PipelineResult]]:
+    async def tick(self, *, evaluate: bool = True) -> tuple[TrackingFrame, list[MatchEvent], list[PipelineResult]]:
         frame_started = time.perf_counter()
         dt = max(100, int(100 * self.speed))
         tick = await asyncio.to_thread(self.simulator.step, dt)
         self.live_state_engine.ingest(tick)
+        if not evaluate:
+            # Guided clips advance live frames while reviewing one checkpoint's evidence.
+            return tick.frame, tick.events, []
         # Keep one pending batch, preserving evidence while replacing its frame.
         # The workflow owns a separate rolling engine, changed only by its worker.
         if self._pending_tick is None:
