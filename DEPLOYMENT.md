@@ -4,9 +4,9 @@ MatchOS deploys to Azure Container Apps Consumption in East US 2. This is a prod
 
 Current deployment: [Open MatchOS](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io). Resource group: `rg-matchos-prod`, Container App: `matchos-prod`, region: `eastus2`.
 
-The current password-protected release is revision `matchos-prod--0000003`, deployed on 25 October 2026 from application commit `fc162e1f8460b85dd40777aa435c6d854e34fb97`. Its immutable image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:a5f9b735f1eb342c1e892c710801123ceb73542f1ff0462182c09f25077f086a`.
+The current password-protected release is revision `matchos-prod--0000004`, deployed on 25 October 2026 from application commit `38b76357f3878ff3542848d266048b93dda2b844`. Its immutable image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:e5d03f072f339e9d231fd7707777b17de2c0c0fcc22831c9f9467a1725cbd26e`. The revision is healthy and serves 100% of traffic. The image-only rollout preserved the existing authentication, managed identity, Key Vault references, model settings, probes and capacity.
 
-Judge demo now plays at least 12 seconds at 1× while the independent Agent Framework viewer workflows produce stories, then pauses for comparison. The default viewers are an English broadcaster, a Spanish Liverpool fan and an English analyst. English/French/Spanish/Hindi story and speech support remains available. The image-only rollout preserved the existing password gate, managed identity, Key Vault references, probes and service configuration.
+Judge demo plays at least 12 seconds at 1× while the independent Agent Framework viewer workflows produce stories, then pauses for comparison. The default viewers are an English broadcaster, a Spanish Liverpool fan and an English analyst. English/French/Spanish/Hindi story and speech support remains available.
 
 ## What is implemented
 
@@ -117,10 +117,15 @@ That is a proposed target, **not infrastructure deployed by these templates**. B
 
 Other next steps: sign-in or invitation controls for non-demo access, per-user quotas and abuse protection, synthetic uptime alerts with a named on-call recipient, billing alerts, autoscale based on measured load, staged rollout, and an evaluation gate before changing models or prompts. CI validation is configured now; automatic CD/OIDC, alert delivery and these larger-scale features are not configured by this deployment. For a hackathon, show the working deployed URL, traces and evaluation results, and explain these concrete limits and the target diagram.
 
-## Test baseline
+## Verified release
 
-This release passed 84 focused backend tests and all 26 frontend tests. ACR built the production image with dependency consistency checks. Deployed checks confirmed the password gate, HTTPS/assets/WebSocket access, a goal checkpoint with three actual Decision-1/gpt-6-luna outcomes, 120 live frames advancing 12 seconds before pausing, and one Azure Speech synthesis request.
+Before deployment, this application commit passed 304 backend tests, 26 browser tests, all 24 offline evaluation cases, Ruff lint/format checks and an installed-wheel smoke test. Seeded warmup plus ten minutes of replay produced identical output across all six scenarios before and after the refactor. ACR built the non-root Python 3.13 production image using the hashed dependency lock and dependency consistency checks.
 
-The press and dismissal checkpoints also passed deployed playback/provider checks, with 13.7 and 12 seconds of live frames respectively and three viewer traces containing the framework selection/publication stages. The analyst held the press story; the broadcaster and Spanish fan aired momentum updates. All three viewers aired the dismissal. A model hold remains a valid editorial outcome.
+Live checks confirmed:
 
-The release evidence above describes the deployed image. The current repository's validation workflow now runs the full offline backend suite, all browser tests, Ruff lint/format checks and an installed-wheel check before the infrastructure/container checks. The former failing tests have been updated to exercise the current viewer workflow and explicit simulator contact/onside conditions. Current checkout verification: 303 backend tests and 26 browser tests pass; the offline evaluation baseline passes all 24 rows.
+- Public health responds; unauthenticated page, audio and WebSocket requests are blocked. The existing judge credentials and signed cookie work for page, assets, WebSocket and audio access.
+- All three Judge demo checkpoints use real Azure Decision-1 selection and gpt-6-luna writing, with an English broadcaster, Spanish Liverpool fan and English analyst. Each checkpoint delivered 120 live frames over 12 match seconds, then paused after all viewer outcomes arrived.
+- At the press checkpoint, the broadcaster selected momentum while the fan and analyst selected press breakdown. All three viewers aired the goal and dismissal. Agreement and model holds remain valid editorial outcomes; the app does not force disagreement.
+- The telemetry inspector returned the three viewer workflows and their editorial stages/outcomes for the press and dismissal checkpoints. One Azure Speech request returned playable MP3 audio.
+
+The previous tested password-protected rollback image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:a5f9b735f1eb342c1e892c710801123ceb73542f1ff0462182c09f25077f086a` (previous revision `matchos-prod--0000003`). Use an immutable image digest when rolling back; preserve the current access and service configuration.
