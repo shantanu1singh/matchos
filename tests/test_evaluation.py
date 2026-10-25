@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from runtime_helpers import viewer_dependencies
 
 from matchos.evaluation import (
     cloud_rows,
@@ -159,6 +160,7 @@ def test_expired_case_runs_real_worker_without_calling_models():
         telemetry=Telemetry(),
         services=SimpleNamespace(decisions=SimpleNamespace(select=forbidden)),
     )
+    session.viewer_dependencies = viewer_dependencies(session)
     case.update(id="expired", mode="expired", expected_frames=["NONE"], expected_publication="HOLD")
     row = asyncio.run(evaluate_case(session, batch, case, viewer, 0))
     assert row["passed"] and row["model_calls"] == []

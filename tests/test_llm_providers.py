@@ -9,7 +9,9 @@ import httpx
 import pytest
 from agent_framework import Message
 
-from matchos.decision_client import GatewayDecisionClient, LocalDecisionClient, build_decision_client
+from matchos.decisions import build_decision_client
+from matchos.decisions.gateway import GatewayDecisionClient
+from matchos.decisions.local import LocalDecisionClient
 from matchos.language_agent import (
     INSTRUCTIONS,
     build_language_agent,
@@ -60,7 +62,7 @@ def test_gateway_decision_contract_and_focused_player(monkeypatch, model):
 
     actual_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        "matchos.decisions.gateway.httpx.AsyncClient",
         lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
     )
     state = StateEngine().state
@@ -103,7 +105,7 @@ def test_gateway_handles_failed_or_invalid_answers(monkeypatch, failure):
 
     actual_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        "matchos.decisions.gateway.httpx.AsyncClient",
         lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
     )
     decision = asyncio.run(
@@ -300,7 +302,7 @@ def test_gateway_logs_actionable_error_without_api_key(monkeypatch, caplog):
 
     actual_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        "matchos.decisions.gateway.httpx.AsyncClient",
         lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
     )
     decision = asyncio.run(

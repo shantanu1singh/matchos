@@ -7,11 +7,11 @@ from test_editorial_selection import setup_candidates
 
 from matchos import server
 from matchos.copy import prose_is_faithful, render_overlay
-from matchos.decision_client import _editorial_state
+from matchos.decisions.schema import _editorial_state
 from matchos.language_agent import prompt_payload
 from matchos.pitch import event_label
 from matchos.schemas import ViewerProfile
-from matchos.simulator import MatchSimulator
+from matchos.simulation import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.teams import PLAYERS, TEAMS
 
@@ -29,7 +29,7 @@ def test_tracking_and_substitute_keep_slot_ids_with_actual_shirt_numbers():
         assert len(set(numbers)) == 11
     assert sim.players["red_2"].number == 30  # Frimpong, not slot 2
     assert sim.players["blue_10"].number == 47  # Foden, not slot 10
-    events = sim._substitute("red_7", "red_17")
+    events = sim.events._substitute("red_7", "red_17")
     assert sim.players["red_17"].number == 29
     assert not sim.players["red_7"].on_pitch
     assert "Federico Chiesa #14 off, Bradley Barcola #29 on" == event_label(events[0])

@@ -44,7 +44,8 @@ def build_context(destination: Path):
         "requirements-production.lock",
     ):
         shutil.copy2(ROOT / name, destination / name)
-    for source in [*(ROOT / "matchos").glob("*.py"), *(ROOT / "matchos" / "web").glob("*")]:
+    runtime_directories = ("matchos", "matchos/decisions", "matchos/simulation", "matchos/web")
+    for source in (source for directory in runtime_directories for source in (ROOT / directory).glob("*")):
         if (
             source.is_file()
             and not source.is_symlink()

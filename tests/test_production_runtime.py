@@ -45,6 +45,7 @@ def test_build_context_contains_only_runtime_files(tmp_path):
     build_context(tmp_path)
     files = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
     assert "Dockerfile" in files and "matchos/server.py" in files and "matchos/web/app.js" in files
+    assert "matchos/decisions/remote.py" in files and "matchos/simulation/movement.py" in files
     assert not any(
         part in {".env", ".env.local", ".git", "lib", "bin", "__pycache__"}
         for name in files

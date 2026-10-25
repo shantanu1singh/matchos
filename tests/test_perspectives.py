@@ -1,9 +1,10 @@
 import asyncio
 from types import SimpleNamespace
 
+from runtime_helpers import viewer_dependencies
 from test_editorial_selection import answers, setup_candidates
 
-from matchos.decision_client import _parse_selection
+from matchos.decisions.schema import _parse_selection
 from matchos.editorial import explain
 from matchos.perspective import Perspective
 from matchos.schemas import PipelineResult, ProducerDecision, VerifiedCandidates, ViewerProfile
@@ -33,7 +34,7 @@ def test_worker_coalesces_without_cancelling_inflight_selection_and_cancels_on_c
         async def send(message):
             messages.append(message)
 
-        worker = Perspective(session, ViewerProfile(persona="casual"), 2, send)
+        worker = Perspective(viewer_dependencies(session), ViewerProfile(persona="casual"), 2, send)
 
         def batch(stamp):
             state = engine.state.model_copy(deep=True)

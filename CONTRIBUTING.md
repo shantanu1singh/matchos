@@ -37,6 +37,7 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md). The shared evidence workflow and 
 - **Editorial behavior:** selection owns relevance; publication policy owns freshness, duplication and cadence. Keep those responsibilities separate. Test selection, abstention, holds and expiry during inference.
 - **Personas and languages:** carry the profile through selection, copy, validation and Speech. Preserve neutral roles' lack of team allegiance. Keep localized fallback copy usable when a provider fails.
 - **Providers:** retain asynchronous deadlines, credential redaction and cancellation. New providers must implement selection from the verified pool or generation from the selected facts, with visible fallback diagnostics.
+- **Runtime boundaries:** keep HTTP/process resources in `server.py`, connection lifecycle in `connection.py`, and evidence processing in `session.py`. Viewer workflows consume `ViewerDependencies`, not session internals. Decision adapters implement the neutral contract in `decisions/`; simulation changes belong to the relevant world, movement, event or restart component in `simulation/`.
 - **Browser behavior:** match/pitch UI is in `app.js`; `demo.js`, `telemetry.js` and `audio.js` own their respective controllers. Assets must be included in content-versioned delivery and the deployment smoke check.
 
 Add regression tests for changed behavior, especially async lifecycle boundaries. Do not replace meaningful assertions with unconditional skips or canned model outputs to make the demo look different.
@@ -52,6 +53,8 @@ Build a distributable wheel with:
 The wheel includes the browser assets and license, excluding virtual environments, tests, credentials and video projects. Installing it provides both `python -m matchos` and the `matchos` command. Source runs load dotenv files from the checkout root; installed wheels load them from the directory where the app is launched.
 
 Runtime requirements are mirrored in `pyproject.toml` and `requirements.txt`; a test checks they agree. Development tools live in `requirements-dev.txt`. Optional tracing/evaluation dependencies are documented in [evals/README.md](evals/README.md).
+
+When adding a runtime package, include it in both setuptools' package list and the deployment script's build-context allowlist. Verify that the built wheel and staged container context contain it.
 
 Regenerate the Linux production lock with uv after changing runtime requirements:
 

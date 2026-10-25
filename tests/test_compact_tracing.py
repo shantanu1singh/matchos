@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import pytest
+from runtime_helpers import viewer_dependencies
 
 from matchos import observability
 from matchos.model_logging import ModelCall
@@ -230,7 +231,7 @@ def test_real_checkpoint_and_three_workers_keep_one_trace_without_sdk_orphans(co
             await session.seek_to(DEMO_STOPS[1]["timestamp_ms"])
             batch = await review_checkpoint(session)
             for index, viewer in enumerate(demo_viewers()):
-                worker = Perspective(session, viewer, index, send)
+                worker = Perspective(viewer_dependencies(session), viewer, index, send)
                 workers.append(worker)
                 worker.offer(batch)
             await asyncio.gather(*(worker.task for worker in workers))

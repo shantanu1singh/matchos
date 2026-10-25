@@ -2,14 +2,16 @@
 
 import asyncio
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from runtime_helpers import viewer_dependencies
 from test_editorial_selection import answers, setup_candidates
 
 import matchos.language_agent as language_module
 from matchos.copy import render_overlay
-from matchos.decision_client import _parse_selection
+from matchos.decisions.schema import _parse_selection
 from matchos.perspective import Perspective
 from matchos.schemas import PipelineResult, VerifiedCandidates, ViewerProfile
 from matchos.telemetry import Telemetry
@@ -39,7 +41,7 @@ def worker_setup(monkeypatch, render, *, timeout=1, persona="analyst", agent=Tru
     async def send(message):
         messages.append(message)
 
-    worker = Perspective(session, ViewerProfile(persona=persona), 0, send)
+    worker = Perspective(viewer_dependencies(session), ViewerProfile(persona=persona), 0, send)
     batch = PipelineResult(
         kind="candidates",
         candidates=VerifiedCandidates(candidates=candidates),
@@ -149,7 +151,7 @@ def test_language_validation_happens_before_publication(monkeypatch):
             async def run(self, prompt):
                 return SimpleNamespace(text="Liverpool made 999 shots.")
 
-        worker.session.services.agent = Agent()
+        worker.dependencies = replace(worker.dependencies, agent=Agent())
         worker.offer(batch)
         await asyncio.wait_for(worker.task, 1)
         assert len(messages) == 1
@@ -164,7 +166,7 @@ def test_language_validation_happens_before_publication(monkeypatch):
 
 
 def test_shared_evidence_workflow_never_invokes_editorial_models(monkeypatch):
-    from matchos.simulator import MatchSimulator
+    from matchos.simulation import MatchSimulator
     from matchos.workflow import LiveTick, build_shared_workflow, new_services
 
     async def run():
@@ -195,7 +197,7 @@ def test_already_expired_candidates_skip_both_model_calls(monkeypatch):
             raise AssertionError("stale stories must skip models")
 
         worker, batch, engine, target, messages = worker_setup(monkeypatch, forbidden)
-        worker.session.services.decisions.select = forbidden
+        worker.dependencies.decisions.select = forbidden
         engine.state.timestamp_ms = max(m.expires_at_ms for m in batch.candidates.candidates)
         worker.offer(batch)
         await asyncio.wait_for(worker.task, 1)

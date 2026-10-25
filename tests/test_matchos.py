@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import math
 
+from runtime_helpers import viewer_dependencies
+
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
 from matchos.schemas import (
@@ -15,7 +17,7 @@ from matchos.schemas import (
     VerifiedMoment,
     ViewerProfile,
 )
-from matchos.simulator import MatchSimulator
+from matchos.simulation import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.trigger_engine import TriggerEngine
 from matchos.verifier import Verifier
@@ -213,7 +215,7 @@ def test_all_lab_scenarios_keep_tracking_coherent() -> None:
 
 
 def test_player_decision_uses_the_selected_player() -> None:
-    from matchos.decision_client import LocalDecisionClient
+    from matchos.decisions.local import LocalDecisionClient
 
     state = MatchState(
         match_id="m-player-focus",
@@ -305,7 +307,7 @@ def test_workflow_airs_press_breakdown() -> None:
         async def send(message):
             messages.append(message)
 
-        worker = Perspective(session, session.viewer, 0, send)
+        worker = Perspective(viewer_dependencies(session), session.viewer, 0, send)
         try:
             await session.seek_to(64 * 60_000)
             batch = await review_checkpoint(session)
@@ -347,26 +349,26 @@ def test_pass_planner_uses_current_player_positions() -> None:
     red_9 = sim.players["red_9"]
     red_9.x, red_9.y = 56.0, 30.0
 
-    target = sim._select_target(red_8, long_ball=False)
+    target = sim.events._select_target(red_8, long_ball=False)
     assert target is not None
     assert target.player_id == "red_9"
 
-    receive = sim._receive_point(target, "RED")
+    receive = sim.events._receive_point(target, "RED")
     assert math.hypot(receive.x - red_9.x, receive.y - red_9.y) < 6.0
 
     red_9.x, red_9.y = 94.0, 60.0
-    assert sim._select_target(red_8, long_ball=False) is None
+    assert sim.events._select_target(red_8, long_ball=False) is None
 
 
 def test_players_hold_shape_inside_a_soft_tactical_zone() -> None:
     sim = MatchSimulator(seed=3, scenario_id="balanced")
     player = sim.players["red_6"]
-    anchor_x, anchor_y = sim._target(player)
+    anchor_x, anchor_y = sim.formation_target(player)
     player.x, player.y = anchor_x + 1.0, anchor_y
     player.vx = player.vy = 0.0
     before = (player.x, player.y)
 
-    sim._move_players(0.05)
+    sim.movement.move_players(0.05)
 
     assert math.hypot(player.x - before[0], player.y - before[1]) < 0.15
 
@@ -383,7 +385,7 @@ def test_interceptor_must_be_near_the_actual_pass_lane() -> None:
     blue_6 = sim.players["blue_6"]
     blue_6.x, blue_6.y = 55.0, 35.0
 
-    challenge = sim._named_interceptor(start, end, "RED")
+    challenge = sim.events._named_interceptor(start, end, "RED")
     assert challenge is not None
     point, player_id = challenge
     assert player_id == "blue_6"
@@ -396,7 +398,7 @@ def test_kickoff_resets_ball_at_centre_without_a_fake_flight() -> None:
     sim.carrier_id = None
     sim.ball = Point(x=105.0, y=34.0)
 
-    sim._kickoff()
+    sim.restarts.kickoff()
 
     assert sim.flight is None
     assert sim.carrier_id is not None
@@ -416,7 +418,7 @@ def test_foul_creates_a_free_kick_and_can_show_a_yellow_card() -> None:
 
     # Force the optional card branch with a defender in tackling range.
     sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
-    events = sim._foul(carrier)
+    events = sim.events._foul(carrier)
     types = [event.type for event in events]
 
     assert "FOUL" in types
@@ -437,7 +439,7 @@ def test_foul_requires_a_nearby_defender() -> None:
         if player.team_id == "BLUE":
             player.x, player.y = 90.0, 60.0
 
-    events = sim._foul(carrier)
+    events = sim.events._foul(carrier)
 
     assert not any(event.type == "FOUL" for event in events)
 
@@ -453,13 +455,13 @@ def test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot() -> None:
 
     sim.players["blue_4"].x, sim.players["blue_4"].y = 95.0, 34.0
     sim.rng.random = lambda: 0.9  # type: ignore[method-assign]
-    events = sim._foul(carrier)
+    events = sim.events._foul(carrier)
     assert any(event.type == "PENALTY" for event in events)
     assert sim.pending_penalty_taker == carrier.player_id
     assert abs(sim.ball.x - 94.0) < 0.01
     assert abs(sim.ball.y - 34.0) < 0.01
 
-    shot = sim._take_penalty()
+    shot = sim.events.take_penalty()
     assert len(shot) == 1
     assert shot[0].type == "SHOT"
     assert shot[0].qualifiers.get("penalty") is True
@@ -486,7 +488,7 @@ def test_forward_pass_can_generate_offside_and_free_kick_events() -> None:
     target.vx = target.vy = 0.0
 
     sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
-    events = sim._pass(carrier, long_ball=False)
+    events = sim.events._pass(carrier, long_ball=False)
 
     assert any(event.type == "OFFSIDE" for event in events)
     assert any(event.type == "FREE_KICK" and event.qualifiers.get("reason") == "OFFSIDE" for event in events)
@@ -502,12 +504,12 @@ def test_pass_out_creates_throw_in_and_restarts_with_opponent() -> None:
     sim.carrier_id = carrier.player_id
     sim.possession = "RED"
 
-    sim._select_target = lambda _carrier, _long_ball: target  # type: ignore[method-assign]
-    sim._pass_success = lambda *_args, **_kwargs: 0.0  # type: ignore[method-assign]
+    sim.events._select_target = lambda _carrier, _long_ball: target  # type: ignore[method-assign]
+    sim.events._pass_success = lambda *_args, **_kwargs: 0.0  # type: ignore[method-assign]
     # An onside target, failed pass and deterministic OUT branch, independent of RNG draw count.
     sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
 
-    events = sim._pass(carrier, long_ball=False)
+    events = sim.events._pass(carrier, long_ball=False)
     throw_in = next(event for event in events if event.type == "THROW_IN")
     assert throw_in.team_id == "BLUE"
     assert sim.pending_restart is not None
@@ -532,7 +534,7 @@ def test_saved_wide_shot_can_create_corner_restart() -> None:
     sim.rng.uniform = lambda _a, _b: 3.5  # type: ignore[method-assign]
     sim.rng.random = lambda: 0.2  # type: ignore[method-assign]
 
-    events = sim._shot(carrier)
+    events = sim.events._shot(carrier)
     corner = next(event for event in events if event.type == "CORNER")
     assert corner.team_id == "RED"
     assert sim.pending_restart is not None
@@ -557,7 +559,7 @@ def test_off_target_shot_creates_goal_kick_restart() -> None:
     sim.rng.uniform = lambda _a, _b: 0.0  # type: ignore[method-assign]
     sim.rng.random = lambda: 0.99  # type: ignore[method-assign]
 
-    events = sim._shot(carrier)
+    events = sim.events._shot(carrier)
     goal_kick = next(event for event in events if event.type == "GOAL_KICK")
     assert goal_kick.team_id == "BLUE"
     assert sim.pending_restart is not None

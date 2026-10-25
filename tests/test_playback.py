@@ -7,7 +7,7 @@ from fastapi import WebSocketDisconnect
 from matchos import server
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
-from matchos.simulator import MatchSimulator
+from matchos.simulation import MatchSimulator
 
 
 def configure(monkeypatch):
@@ -58,7 +58,7 @@ def test_frames_pause_and_seek_continue_while_viewer_text_is_pending(monkeypatch
 
     import matchos.language_agent as language_module
     from matchos.copy import render_overlay
-    from matchos.decision_client import _parse_selection
+    from matchos.decisions.schema import _parse_selection
     from matchos.schemas import VerifiedCandidates
 
     engine, candidates = setup_candidates()

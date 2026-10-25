@@ -37,7 +37,7 @@ requires = ["setuptools>=77,<81", "wheel>=0.45,<1"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["matchos", "matchos.web"]
+packages = ["matchos", "matchos.decisions", "matchos.simulation", "matchos.web"]
 
 [tool.setuptools.package-data]
 matchos = ["web/*.html", "web/*.js", "web/*.css"]

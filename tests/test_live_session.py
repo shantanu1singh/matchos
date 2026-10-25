@@ -3,8 +3,8 @@
 import asyncio
 from types import SimpleNamespace
 
+from matchos.connection import run_playback
 from matchos.schemas import PipelineResult, VerifiedMoment, ViewerProfile
-from matchos.server import _run
 from matchos.session import MatchSession
 
 
@@ -126,7 +126,7 @@ def test_server_sends_frames_and_pause_does_not_wait_for_models(monkeypatch):
                 session.running = False
 
         try:
-            await asyncio.wait_for(_run(None, session, send), 1.5)
+            await asyncio.wait_for(run_playback(session, send), 1.5)
             assert waiting.is_set() and not finished.is_set()
             frames = [item for item in messages if item["type"] == "frame"]
             assert len(frames) == 4
@@ -171,6 +171,52 @@ def test_old_viewer_and_expired_moments_are_not_published(monkeypatch):
             _, _, outputs = await session.tick()
             assert outputs == []
         finally:
+            await session.close()
+
+    asyncio.run(run())
+
+
+def test_paused_connection_delivers_completed_evidence_without_advancing_playback(monkeypatch):
+    from matchos.connection import ConnectionCoordinator
+    from matchos.schemas import VerifiedCandidates
+
+    async def run():
+        session = _session(monkeypatch)
+        started, release = asyncio.Event(), asyncio.Event()
+        received = []
+
+        class DelayedEvidence:
+            async def run(self, incoming, stream):
+                started.set()
+                await release.wait()
+                yield SimpleNamespace(
+                    data=PipelineResult(
+                        kind="candidates",
+                        candidates=VerifiedCandidates(candidates=[]),
+                        state=session.state.model_copy(deep=True),
+                    )
+                )
+
+        session.workflow = DelayedEvidence()
+        coordinator = ConnectionCoordinator(SimpleNamespace(), SimpleNamespace())
+        coordinator.session = session
+        coordinator.perspectives = [SimpleNamespace(offer=received.append)]
+        delivery = None
+        try:
+            frame, _, _ = await session.tick()
+            await asyncio.wait_for(started.wait(), 1)
+            session.running = False
+            delivery = asyncio.create_task(coordinator.deliver_paused(session))
+            assert session.processing
+            release.set()
+            await asyncio.wait_for(delivery, 1)
+            assert len(received) == 1 and received[0] is session.latest_candidates
+            assert session.state.timestamp_ms == session.simulator.clock_ms == frame.timestamp_ms
+            assert not session.processing and session.drain_results() == []
+        finally:
+            if delivery is not None:
+                delivery.cancel()
+                await asyncio.gather(delivery, return_exceptions=True)
             await session.close()
 
     asyncio.run(run())

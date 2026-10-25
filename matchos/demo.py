@@ -2,8 +2,9 @@
 
 import asyncio
 
-from matchos.schemas import PipelineResult, Tick, ViewerProfile
-from matchos.workflow import LiveTick
+from matchos.runtime import SendMessage
+from matchos.schemas import PipelineResult, ViewerProfile
+from matchos.session import MatchSession
 
 DEMO_PLAYBACK_MS = 12_000
 DEMO_AFTER_REVIEW_MS = 3_000
@@ -38,7 +39,7 @@ def demo_viewers() -> list[ViewerProfile]:
     ]
 
 
-async def play_checkpoint(session, settled: asyncio.Event, send) -> None:
+async def play_checkpoint(session: MatchSession, settled: asyncio.Event, send: SendMessage) -> None:
     """Play at 1x until both the minimum clip and a post-review reading beat finish."""
     stop_at = session.simulator.clock_ms + DEMO_PLAYBACK_MS
     review_finished = False
@@ -75,22 +76,6 @@ async def play_checkpoint(session, settled: asyncio.Event, send) -> None:
         session.running = False
 
 
-async def review_checkpoint(session) -> PipelineResult:
-    """Review a frozen replay, using real state, verification, and framework telemetry."""
-    frame = session.simulator._frame()
-    tick = Tick(match_id=session.simulator.match_id, frame=frame, events=[], samples=[])
-    with session.telemetry.capture(
-        "Guided checkpoint evidence",
-        {
-            "timestamp_ms": frame.timestamp_ms,
-            "demoCheckpoint": session.demo_step,
-            "viewer": session.viewer.model_dump(),
-        },
-    ):
-        async for event in session.workflow.run(
-            LiveTick(tick=tick, viewer=session.viewer, review_requested=True), stream=True
-        ):
-            if isinstance(event.data, PipelineResult) and event.data.kind == "candidates":
-                session._remember(event.data)
-                return event.data
-    raise RuntimeError("Checkpoint produced no verified candidate pool")
+async def review_checkpoint(session: MatchSession) -> PipelineResult:
+    """Review a frozen replay through the session's public evidence interface."""
+    return await session.review()

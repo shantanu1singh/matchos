@@ -131,7 +131,7 @@ def test_websocket_demo_settles_all_viewers_and_retains_trace_history_across_ste
 
 
 def test_clip_continues_until_slow_viewer_finishes_then_pauses_without_extra_reviews(monkeypatch):
-    from matchos.decision_client import LocalDecisionClient
+    from matchos.decisions.local import LocalDecisionClient
 
     offline(monkeypatch)
     select = LocalDecisionClient.select
@@ -185,7 +185,7 @@ def test_invalid_demo_checkpoint_is_recoverable(monkeypatch):
 
 
 def test_demo_wait_is_responsive_and_new_match_cancels_pending_viewers(monkeypatch):
-    from matchos.decision_client import LocalDecisionClient
+    from matchos.decisions.local import LocalDecisionClient
 
     offline(monkeypatch)
     started, cancelled = threading.Event(), threading.Event()

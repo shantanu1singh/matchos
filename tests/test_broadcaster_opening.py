@@ -4,9 +4,10 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from runtime_helpers import viewer_dependencies
 from test_editorial_selection import answers, setup_candidates
 
-from matchos.decision_client import _editorial_state, _parse_selection, selection_hold_reason
+from matchos.decisions.schema import _editorial_state, _parse_selection, selection_hold_reason
 from matchos.perspective import Perspective
 from matchos.publication import PublicationPolicy
 from matchos.schemas import PipelineResult, VerifiedCandidates, ViewerProfile
@@ -55,7 +56,7 @@ def test_worker_tracks_actual_first_air_and_keeps_model_abstention():
         async def send(message):
             messages.append(message)
 
-        worker = Perspective(session, ViewerProfile(persona="broadcaster"), 0, send)
+        worker = Perspective(viewer_dependencies(session), ViewerProfile(persona="broadcaster"), 0, send)
         worker.started_at -= 120
         batch = PipelineResult(
             kind="candidates", candidates=VerifiedCandidates(candidates=candidates), state=engine.state
@@ -74,7 +75,7 @@ def test_worker_tracks_actual_first_air_and_keeps_model_abstention():
         assert aired["secondsWaitingForFirstStory"] is None
         assert contexts[-1]["recentUpdates"][0]["momentId"] == target.id
         assert len(worker.recent) == 1
-        assert Perspective(session, worker.viewer, 0, send).recent == []
+        assert Perspective(viewer_dependencies(session), worker.viewer, 0, send).recent == []
         await worker.close()
 
     asyncio.run(run())

@@ -8,14 +8,15 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Never, Protocol
+from typing import Never, Protocol
 
 from agent_framework import Case, Default, Executor, Workflow, WorkflowBuilder, WorkflowContext, handler
 
-from matchos.decision_client import selection_hold_reason
+from matchos.decisions.schema import selection_hold_reason
 from matchos.editorial import explain
 from matchos.language_agent import draft_overlay, validate_overlay
 from matchos.publication import PublicationPolicy
+from matchos.runtime import ViewerDependencies
 from matchos.schemas import (
     PipelineResult,
     ProducerDecision,
@@ -27,7 +28,7 @@ from matchos.telemetry import record
 
 
 class ViewerRuntime(Protocol):
-    session: Any
+    dependencies: ViewerDependencies
     viewer: ViewerProfile
     publication: PublicationPolicy
     recent: list[dict]
@@ -51,7 +52,7 @@ def _continue(packet: object) -> bool:
 
 def _policy_state(runtime: ViewerRuntime) -> dict:
     return {
-        "timestamp_ms": runtime.session.live_state_engine.state.timestamp_ms,
+        "timestamp_ms": runtime.dependencies.current_state().timestamp_ms,
         "active": runtime.active,
         "on_air_at": runtime.on_air_at,
         "wall_now": time.monotonic(),
@@ -72,7 +73,7 @@ class ViewerContextExecutor(Executor):
         candidates = [
             candidate
             for candidate in batch.candidates.candidates
-            if candidate.expires_at_ms > runtime.session.live_state_engine.state.timestamp_ms
+            if candidate.expires_at_ms > runtime.dependencies.current_state().timestamp_ms
             and not runtime.publication.has_aired(candidate)
         ]
         record(
@@ -122,7 +123,7 @@ class EditorialSelectionExecutor(Executor):
                 for item in runtime.recent
             ],
         }
-        result.decision = await runtime.session.services.decisions.select(
+        result.decision = await runtime.dependencies.decisions.select(
             result.state, packet.candidates, runtime.viewer, context
         )
         result.timings_ms["decision"] = result.decision.latency_ms
@@ -197,13 +198,13 @@ class PersonaLanguageExecutor(Executor):
         if self.runtime.closed:
             return
         started = time.perf_counter()
-        services = self.runtime.session.services
+        services = self.runtime.dependencies
         packet.result.overlay = await draft_overlay(
             services.agent,
             packet.result.moment,
             self.runtime.viewer,
             services.language_provider,
-            getattr(services, "reasoning_timeout_s", 15),
+            services.reasoning_timeout_s,
         )
         packet.result.timings_ms["language"] = (time.perf_counter() - started) * 1000
         record(

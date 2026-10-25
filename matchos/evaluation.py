@@ -144,7 +144,7 @@ async def evaluate_case(session, batch, case, viewer, index):
     async def send(payload):
         emitted.append(payload)
 
-    worker = Perspective(session, viewer, index, send)
+    worker = Perspective(session.viewer_dependencies, viewer, index, send)
     if case["mode"] in {"recent", "major-aired"}:
         now = time.monotonic()
         worker.publication.last_air[viewer.persona] = now - 5

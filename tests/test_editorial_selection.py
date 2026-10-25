@@ -5,11 +5,14 @@ import json
 
 import httpx
 import pytest
+from runtime_helpers import viewer_dependencies
 
-from matchos.decision_client import CloudflareDecisionClient, GatewayDecisionClient, _parse_selection
+from matchos.decisions.cloudflare import CloudflareDecisionClient
+from matchos.decisions.gateway import GatewayDecisionClient
+from matchos.decisions.schema import _parse_selection
 from matchos.llm_config import LLMConfig
 from matchos.schemas import MatchEvent, PipelineResult, PlayerRollup, TriggerResult, ViewerProfile
-from matchos.simulator import MatchSimulator
+from matchos.simulation import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.telemetry import Telemetry
 from matchos.verifier import Verifier
@@ -93,7 +96,7 @@ def test_native_editorial_request_and_restricted_output(monkeypatch, provider, s
 
     actual_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        f"matchos.decisions.{'cloudflare' if provider == 'cloudflare' else 'gateway'}.httpx.AsyncClient",
         lambda **kwargs: actual_client(transport=httpx.MockTransport(respond), **kwargs),
     )
     config = LLMConfig(gateway_api_key="test", cloudflare_account_id="account", cloudflare_api_token="test")
@@ -192,7 +195,10 @@ def test_workflow_verifies_before_selection_and_respects_exact_choice(monkeypatc
                 messages.append(message)
 
             worker = Perspective(
-                SimpleNamespace(services=services, live_state_engine=engine), viewer, 0, send
+                viewer_dependencies(SimpleNamespace(services=services, live_state_engine=engine)),
+                viewer,
+                0,
+                send,
             )
             worker.recent = [{"aired_at": __import__("time").monotonic(), "frame": "PLAYER_IMPACT"}]
             try:

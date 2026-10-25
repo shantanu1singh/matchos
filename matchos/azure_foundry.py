@@ -31,12 +31,8 @@ from azure.core.pipeline.policies import (
 from azure.core.rest import HttpRequest
 from azure.identity.aio import DefaultAzureCredential
 
-from matchos.decision_client import (
-    GatewayDecisionClient,
-    _decision_state,
-    _parse_systemone,
-    _systemone_questions,
-)
+from matchos.decisions.remote import RemoteDecisionClient
+from matchos.decisions.schema import _decision_state, _parse_systemone, _systemone_questions
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
 from matchos.schemas import MatchState, MomentDecision
@@ -45,15 +41,18 @@ TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
 logger = logging.getLogger(__name__)
 
 
-class FoundryDecisionClient(GatewayDecisionClient):
+class FoundryDecisionClient(RemoteDecisionClient):
     native_systemone = True
 
     def __init__(self, config: LLMConfig) -> None:
-        super().__init__(config)
-        self.model = config.azure_decision_deployment
-        self.provider = f"azure-foundry:{self.model}"
-        self.api_key = config.azure_key("decision")
-        self.endpoint = f"{config.azure_resource_endpoint('decision')}/providers/microsoft/v1/systemone"
+        model = config.azure_decision_deployment
+        super().__init__(
+            config,
+            model=model,
+            provider=f"azure-foundry:{model}",
+            api_key=config.azure_key("decision"),
+            endpoint=f"{config.azure_resource_endpoint('decision')}/providers/microsoft/v1/systemone",
+        )
 
     async def _request(self, payload: dict) -> dict:
         async def send():

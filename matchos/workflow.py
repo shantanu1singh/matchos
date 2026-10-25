@@ -14,7 +14,7 @@ from agent_framework import (
     handler,
 )
 
-from matchos.decision_client import DecisionClient
+from matchos.decisions.contracts import DecisionClient
 from matchos.language_agent import Agent, build_language_agent
 from matchos.llm_config import LLMConfig
 from matchos.observability import trace_carrier
@@ -232,7 +232,7 @@ class VerificationExecutor(Executor):
 
 def new_services() -> MatchServices:
     state_engine = StateEngine()
-    from matchos.decision_client import build_decision_client
+    from matchos.decisions import build_decision_client
 
     config = LLMConfig.from_env()
     return MatchServices(

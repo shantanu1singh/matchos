@@ -5,16 +5,18 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from runtime_helpers import viewer_dependencies
 
 from matchos.copy import prose_is_faithful, render_overlay
-from matchos.decision_client import LocalDecisionClient, _editorial_state
+from matchos.decisions.local import LocalDecisionClient
+from matchos.decisions.schema import _editorial_state
 from matchos.language_agent import prompt_payload
 from matchos.perspective import Perspective
 from matchos.publication import PublicationPolicy
 from matchos.scenarios import style_for
 from matchos.schemas import PipelineResult, VerifiedCandidates, ViewerProfile
 from matchos.session import MatchSession
-from matchos.simulator import MatchSimulator
+from matchos.simulation import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.telemetry import Telemetry
 from matchos.verifier import MAJOR_STORY_TTL_MS, Verifier
@@ -53,8 +55,8 @@ def test_press_collapse_has_one_added_goal_one_dismissal_and_real_match_effects(
     assert [(s.blue.red_cards, s.blue.players_on_pitch) for s, _, _ in snapshots] == [(0, 11), (1, 10)]
     assert engine.state.red.players_on_pitch == 11
     assert not sim.players["blue_8"].on_pitch and sim.players["blue_5"].on_pitch
-    assert all(p.player_id != "blue_8" for p in sim._frame().players)
-    assert len(sim._on_pitch("BLUE")) == 10
+    assert all(p.player_id != "blue_8" for p in sim.frame().players)
+    assert len(sim.on_pitch("BLUE")) == 10
     assert not any(e.player_id == "blue_8" and e.timestamp_ms > 68 * 60000 for e in events)
     before, after = style_for("press_collapse", 67, "BLUE"), style_for("press_collapse", 75, "BLUE")
     assert (
@@ -115,7 +117,7 @@ def test_each_persona_airs_each_turning_point_once_even_when_pool_ids_change(rep
             async def send(message, target=messages):
                 target.append(message)
 
-            worker = Perspective(session, ViewerProfile(persona=persona), 0, send)
+            worker = Perspective(viewer_dependencies(session), ViewerProfile(persona=persona), 0, send)
             for state, pool, _ in snapshots:
                 live.state = state
                 batch = PipelineResult(kind="candidates", candidates=pool, state=state)
@@ -159,7 +161,7 @@ def test_seek_rebuilds_goal_score_cards_and_player_counts(monkeypatch, replay):
         session = MatchSession("press_collapse", 47129, 1, ViewerProfile(persona="analyst"))
         try:
             frame = await session.seek_to(75 * 60000)
-            assert frame == replay[0]._frame()
+            assert frame == replay[0].frame()
             assert session.live_state_engine.state.blue.red_cards == 1
             assert session.live_state_engine.state.blue.players_on_pitch == 10
             assert session.services.state_engine.state == session.live_state_engine.state

@@ -48,7 +48,7 @@ jobs:
           python -m build --wheel --outdir /tmp/matchos-dist
           python -m pip install --force-reinstall --no-deps /tmp/matchos-dist/*.whl
           cd /tmp
-          python -c 'from importlib.resources import files; from matchos.__main__ import main; assert callable(main); assert (files("matchos") / "web" / "demo.js").is_file(); assert (files("matchos") / "web" / "telemetry.js").is_file()'
+          python -c 'from importlib.resources import files; from matchos.__main__ import main; from matchos.server import app; from matchos.simulation import MatchSimulator; from matchos.decisions import build_decision_client; assert callable(main); assert app.title == "MatchOS"; assert (files("matchos") / "web" / "demo.js").is_file(); assert (files("matchos") / "web" / "telemetry.js").is_file()'
       - name: Compile infrastructure
         run: |
           az bicep install --version v0.48.1

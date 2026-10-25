@@ -9,8 +9,9 @@ from dataclasses import dataclass, field
 
 from agent_framework import Workflow
 
-from matchos.schemas import MatchEvent, PipelineResult, Tick, TrackingFrame, ViewerProfile
-from matchos.simulator import MatchSimulator
+from matchos.runtime import ViewerDependencies
+from matchos.schemas import MatchEvent, MatchState, PipelineResult, Tick, TrackingFrame, ViewerProfile
+from matchos.simulation import MatchSimulator
 from matchos.state_engine import THIRTY, StateEngine
 from matchos.telemetry import Telemetry
 from matchos.workflow import LiveTick, MatchServices, build_shared_workflow
@@ -34,17 +35,19 @@ class MatchSession:
     telemetry: Telemetry = field(default_factory=Telemetry)
     running: bool = True
     demo_step: int | None = None
-    demo_request_id: int | None = None
+    demo_request_id: int | str | None = None
     candidates: list[Candidate] = field(default_factory=list)
     active: PipelineResult | None = None
     latest_candidates: PipelineResult | None = None
     on_air_at: float = 0.0
     started_wall: float = field(default_factory=time.perf_counter)
     live_state_engine: StateEngine = field(default_factory=StateEngine)
-    _model_task: asyncio.Task | None = field(default=None, init=False)
+    _model_task: asyncio.Task[None] | None = field(default=None, init=False)
     _pending_tick: Tick | None = field(default=None, init=False)
     _pending_started: float = field(default=0.0, init=False)
-    _outputs: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=32), init=False)
+    _outputs: asyncio.Queue[tuple[PipelineResult, ViewerProfile]] = field(
+        default_factory=lambda: asyncio.Queue(maxsize=32), init=False
+    )
 
     def __post_init__(self) -> None:
         self.simulator = MatchSimulator(seed=self.seed, scenario_id=self.scenario_id)
@@ -71,7 +74,7 @@ class MatchSession:
                 tick = self.simulator.step(min(1000, target - self.simulator.clock_ms))
                 events.extend(tick.events)
                 samples.extend(tick.samples)
-            frame = self.simulator._frame()
+            frame = self.simulator.frame()
             # Replay physics once; compute rolling aggregates only at the destination.
             history = Tick(match_id=self.simulator.match_id, frame=frame, events=events, samples=samples)
             self.services.state_engine.ingest(history)
@@ -113,17 +116,88 @@ class MatchSession:
             )
         if self._model_task is None or self._model_task.done():
             self._model_task = asyncio.create_task(self._process_models())
-        outputs: list[PipelineResult] = []
+        return tick.frame, tick.events, self.drain_results()
+
+    @property
+    def state(self) -> MatchState:
+        return self.live_state_engine.state
+
+    @property
+    def viewer_dependencies(self) -> ViewerDependencies:
+        return ViewerDependencies(
+            decisions=self.services.decisions,
+            agent=self.services.agent,
+            language_provider=self.services.language_provider,
+            reasoning_timeout_s=self.services.reasoning_timeout_s,
+            current_state=lambda: self.state,
+            telemetry=self.telemetry,
+            demo_step=self.demo_step,
+        )
+
+    @property
+    def processing(self) -> bool:
+        """Whether shared evidence processing or undelivered output remains."""
+        return bool(self._model_task and not self._model_task.done()) or not self._outputs.empty()
+
+    def drain_results(self) -> list[PipelineResult]:
+        """Consume completed batches, including while playback is paused."""
+        outputs = []
         while not self._outputs.empty():
             data, viewer = self._outputs.get_nowait()
             if data.kind != "candidates" and viewer != self.viewer:
                 continue
-            if data.kind in {"moment"} and data.moment is not None:
-                if data.moment.expires_at_ms <= tick.frame.timestamp_ms:
+            if data.kind == "moment" and data.moment is not None:
+                if data.moment.expires_at_ms <= self.state.timestamp_ms:
                     continue
             outputs.append(data)
-            self._remember(data)
-        return tick.frame, tick.events, outputs
+            self.record_result(data)
+        return outputs
+
+    def configure_focuses(self, viewers: list[ViewerProfile]) -> None:
+        """Refresh player-specific evidence without discarding the shared pool."""
+        previous = self.services.additional_focus_ids
+        focuses = [self.viewer.player_id, *[v.player_id for v in viewers if v.persona == "player"]]
+        self.services.additional_focus_ids = focuses
+        batch = self.latest_candidates
+        if batch is None or set(previous) == set(focuses):
+            return
+        refreshed = self.services.verifier.candidates(batch.state, [], self.viewer.player_id, focuses)
+        required_players = {self.viewer.player_id, *focuses}
+        preserved = [
+            candidate
+            for candidate in batch.candidates.candidates
+            if candidate.frame != "PLAYER_IMPACT" or candidate.player_id in required_players
+        ]
+        known = {candidate.player_id for candidate in preserved if candidate.frame == "PLAYER_IMPACT"}
+        preserved.extend(
+            candidate
+            for candidate in refreshed.candidates
+            if candidate.frame == "PLAYER_IMPACT" and candidate.player_id not in known
+        )
+        pool = batch.candidates.model_copy(update={"candidates": preserved})
+        self.latest_candidates = batch.model_copy(update={"candidates": pool})
+
+    async def review(self) -> PipelineResult:
+        """Run an explicit evidence review at the current replay checkpoint."""
+        if self.processing:
+            raise RuntimeError("Cannot review a checkpoint while shared processing is active")
+        frame = self.simulator.frame()
+        tick = Tick(match_id=self.simulator.match_id, frame=frame, events=[], samples=[])
+        with self.telemetry.capture(
+            "Guided checkpoint evidence",
+            {
+                "timestamp_ms": frame.timestamp_ms,
+                "demoCheckpoint": self.demo_step,
+                "viewer": self.viewer.model_dump(),
+            },
+        ):
+            async for event in self.workflow.run(
+                LiveTick(tick=tick, viewer=self.viewer, review_requested=True), stream=True
+            ):
+                if isinstance(event.data, PipelineResult) and event.data.kind == "candidates":
+                    self.record_result(event.data)
+                    return event.data
+        raise RuntimeError("Checkpoint produced no verified candidate pool")
 
     async def _process_models(self) -> None:
         try:
@@ -162,7 +236,7 @@ class MatchSession:
         while not self._outputs.empty():
             self._outputs.get_nowait()
 
-    def _remember(self, result: PipelineResult) -> None:
+    def record_result(self, result: PipelineResult) -> None:
         if result.kind == "candidates":
             self.latest_candidates = result
         if result.kind == "moment" and result.moment is not None:

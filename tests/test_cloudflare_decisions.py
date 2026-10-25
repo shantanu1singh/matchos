@@ -8,12 +8,10 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from matchos.decision_client import (
-    CloudflareDecisionClient,
-    GatewayDecisionClient,
-    LocalDecisionClient,
-    build_decision_client,
-)
+from matchos.decisions import build_decision_client
+from matchos.decisions.cloudflare import CloudflareDecisionClient
+from matchos.decisions.gateway import GatewayDecisionClient
+from matchos.decisions.local import LocalDecisionClient
 from matchos.llm_config import LLMConfig
 from matchos.schemas import PlayerRollup
 from matchos.state_engine import StateEngine
@@ -59,7 +57,7 @@ def _result():
 def _mock_client(monkeypatch, respond):
     actual_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        "matchos.decisions.cloudflare.httpx.AsyncClient",
         lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
     )
 

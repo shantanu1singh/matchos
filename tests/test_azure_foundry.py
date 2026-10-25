@@ -16,7 +16,8 @@ from azure.core.pipeline.transport import AsyncHttpTransport
 from azure.core.rest import AsyncHttpResponse
 
 from matchos.azure_foundry import TOKEN_SCOPE, FoundryDecisionClient
-from matchos.decision_client import LocalDecisionClient, build_decision_client
+from matchos.decisions import build_decision_client
+from matchos.decisions.local import LocalDecisionClient
 from matchos.language_agent import build_language_agent, personalize, prompt_payload, render_from_messages
 from matchos.llm_config import LLMConfig
 from matchos.schemas import ViewerProfile

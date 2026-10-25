@@ -33,7 +33,7 @@ def explain(result: PipelineResult, viewer: ViewerProfile) -> dict:
     # Recency claims are explained by producer policy instead of unverified model text.
     if reason_code == "ALREADY_SHOWN":
         valid_reason = False
-    from matchos.decision_client import selection_hold_reason
+    from matchos.decisions.schema import selection_hold_reason
 
     model_held = bool(result.decision and selection_hold_reason(result.decision))
     fallback = bool(result.decision and result.decision.provider.startswith("local"))

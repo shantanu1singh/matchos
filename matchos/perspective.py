@@ -8,25 +8,30 @@ import time
 
 from matchos.editorial import explain
 from matchos.publication import PublicationPolicy
-from matchos.schemas import PipelineResult, ProducerDecision
+from matchos.runtime import SendMessage, ViewerDependencies
+from matchos.schemas import PipelineResult, ProducerDecision, VerifiedMoment, ViewerProfile
 from matchos.viewer_workflow import build_viewer_workflow
 
 
 class Perspective:
-    def __init__(self, session, viewer, index, send):
-        self.session, self.viewer, self.index, self.send = session, viewer.model_copy(deep=True), index, send
+    def __init__(
+        self, dependencies: ViewerDependencies, viewer: ViewerProfile, index: int, send: SendMessage
+    ) -> None:
+        self.dependencies = dependencies
+        self.viewer = viewer.model_copy(deep=True)
+        self.index, self.send = index, send
         self.publication = PublicationPolicy()
-        self.recent = []
-        self.active = None
+        self.recent: list[dict] = []
+        self.active: VerifiedMoment | None = None
         self.on_air_at = 0
-        self.pending = None
-        self.task = None
+        self.pending: PipelineResult | None = None
+        self.task: asyncio.Task[None] | None = None
         self.closed = False
-        self.last_batch = None
+        self.last_batch: tuple[int, tuple[str, ...]] | None = None
         self.started_at = time.monotonic()
         self.workflow = build_viewer_workflow(self)
 
-    def offer(self, batch):
+    def offer(self, batch: PipelineResult) -> None:
         if self.closed or batch.candidates is None or batch.state is None:
             return
         batch_id = (batch.state.timestamp_ms, tuple(item.id for item in batch.candidates.candidates))
@@ -37,7 +42,7 @@ class Perspective:
         if self.task is None or self.task.done():
             self.task = asyncio.create_task(self.run())
 
-    async def close(self):
+    async def close(self) -> None:
         self.closed = True
         self.pending = None
         if self.task:
@@ -49,7 +54,7 @@ class Perspective:
             except Exception as exc:
                 logging.getLogger(__name__).debug("Viewer worker closed after %s", type(exc).__name__)
 
-    async def emit(self, result, phase="decision"):
+    async def emit(self, result: PipelineResult, phase: str = "decision") -> None:
         if not self.closed:
             await self.send(
                 {
@@ -62,17 +67,17 @@ class Perspective:
                 }
             )
 
-    async def run(self):
+    async def run(self) -> None:
         while self.pending is not None and not self.closed:
             batch, self.pending = self.pending, None
             try:
-                with self.session.telemetry.capture(
+                with self.dependencies.telemetry.capture(
                     "Viewer editorial selection",
                     {
                         "timestamp_ms": batch.state.timestamp_ms,
                         "viewer": self.viewer.model_dump(),
                         "viewIndex": self.index,
-                        "demoCheckpoint": getattr(self.session, "demo_step", None),
+                        "demoCheckpoint": self.dependencies.demo_step,
                     },
                     parent=batch.trace_context,
                 ):
@@ -95,7 +100,7 @@ class Perspective:
                 )
                 await self.emit(result)
 
-    async def process(self, batch):
+    async def process(self, batch: PipelineResult) -> None:
         """Schedule one framework run; the graph owns the editorial sequence."""
         async for event in self.workflow.run(batch, stream=True):
             if event.type == "output" and isinstance(event.data, PipelineResult) and not self.closed:

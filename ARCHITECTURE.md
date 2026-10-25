@@ -105,6 +105,10 @@ Routine candidates expire after 40 match seconds; goal/dismissal candidates afte
 
 Each WebSocket connection owns a match session, simulator, two state engines, shared evidence workflow, viewer schedulers and local trace history. The live state engine advances with playback; the workflow state engine processes serial evidence batches. This keeps live statistics current while inference runs against a consistent snapshot.
 
+`ConnectionCoordinator` owns that connection's message dispatch, playback tasks, viewer lifecycle and guided-demo checkpoints. The FastAPI server owns HTTP routes, admission limits and process-wide resources. `MatchSession` exposes operations for replay, evidence review, completed results and player-focus changes; the coordinator never reads its worker task or output queue directly.
+
+Viewer schedulers receive an immutable `ViewerDependencies` bundle: a decision client, language Agent/settings, telemetry and a live-state reader. The editorial graph depends on that typed interface rather than the whole session. It reads current time for publication checks while retaining the frozen evidence snapshot used for selection and writing.
+
 The live feed runs approximately every 100 ms. It accumulates events and samples into a bounded pending evidence batch while keeping the latest frame. After the shared workflow produces a frozen pool, each viewer scheduler runs its own framework graph independently. A viewer has one active run and only the newest pending pool, rather than a queue of model requests for every frame. A failed viewer run produces a held outcome and rebuilds its graph for the next review.
 
 Pause stops playback without waiting for outstanding model calls. Seeking reconstructs the same seeded match and evidence in a background thread, preserving speed and pause state while clearing old work and traces. Warmup and historical replay make no model calls. Changing or removing a perspective cancels only that viewer's work; other viewers retain their history.
@@ -121,6 +125,8 @@ In evidence mode, the browser draws historical paths only from the displayed sto
 | Persona language | Azure Foundry `gpt-6-luna` through Agent Framework | LiteLLM, including the Vertex AI adapter; local fact-based rendering. |
 
 These are repository defaults, not guarantees of provider availability. `DECISION_PROVIDER` and `REASONING_PROVIDER` select adapters independently. Azure inference accepts resource keys or Entra credentials; the deployment uses managed identity. Per-role endpoint/key overrides support separate resources.
+
+The `decisions` package separates the decision protocol, questions/response validation, local fallback and remote-call lifecycle. Azure, Cloudflare and Vercel adapters share a provider-neutral remote base; each owns its authentication, endpoint and wire-format adaptation. Azure and Cloudflare do not inherit Vercel behavior.
 
 Calls are asynchronous with overall deadlines (10 seconds for selection and 15 for language by default) and no automatic SDK retries. Failed or invalid selection responses use a labelled local fallback restricted to verified candidates. Language errors, timeouts or rejected copy use localized templates. Cancellation propagates so obsolete runs cannot publish.
 
@@ -184,11 +190,12 @@ Start with the two graph builders, then follow how the application schedules the
 |---|---|
 | Shared evidence graph | [`workflow.py`](matchos/workflow.py): `build_shared_workflow()` connects state, trigger and verification stages. |
 | Complete viewer graph | [`viewer_workflow.py`](matchos/viewer_workflow.py): `build_viewer_workflow()` connects context, selection, preflight, language, validation, commit and terminal outcome. |
-| Scheduling and transport | [`session.py`](matchos/session.py) owns shared processing; [`perspective.py`](matchos/perspective.py) schedules each viewer; [`server.py`](matchos/server.py) configures views and delivers updates. |
-| Match evidence | [`simulator.py`](matchos/simulator.py), [`state_engine.py`](matchos/state_engine.py), [`trigger_engine.py`](matchos/trigger_engine.py) and [`verifier.py`](matchos/verifier.py). |
-| Model adapters and copy | [`decision_client.py`](matchos/decision_client.py), [`azure_foundry.py`](matchos/azure_foundry.py), [`language_agent.py`](matchos/language_agent.py) and [`copy.py`](matchos/copy.py). |
+| Scheduling and transport | [`server.py`](matchos/server.py) owns routes and process resources; [`connection.py`](matchos/connection.py) coordinates each connection; [`session.py`](matchos/session.py) processes shared evidence; [`perspective.py`](matchos/perspective.py) schedules each viewer. |
+| Simulation | [`simulation/`](matchos/simulation/): `MatchSimulator` advances one shared `MatchWorld`; `MovementSystem` animates players/ball, `EventGenerator` produces seeded football and scenario events, and `RestartSystem` resolves possession and dead balls. |
+| Match evidence | [`state_engine.py`](matchos/state_engine.py), [`trigger_engine.py`](matchos/trigger_engine.py) and [`verifier.py`](matchos/verifier.py) aggregate and verify the feed. |
+| Model adapters and copy | [`decisions/`](matchos/decisions/) owns decision contracts, validation, fallback and Vercel/Cloudflare adapters; [`azure_foundry.py`](matchos/azure_foundry.py) adapts Azure decision/language calls; [`language_agent.py`](matchos/language_agent.py) and [`copy.py`](matchos/copy.py) handle writing and templates. |
 | Publication and explanations | [`publication.py`](matchos/publication.py) owns delivery rules; [`editorial.py`](matchos/editorial.py) explains selection and holds. |
-| Contracts and configuration | [`schemas.py`](matchos/schemas.py), [`llm_config.py`](matchos/llm_config.py) and [`.env.example`](.env.example). |
+| Contracts and configuration | [`schemas.py`](matchos/schemas.py) defines feed/result contracts; [`runtime.py`](matchos/runtime.py) defines viewer dependencies; [`llm_config.py`](matchos/llm_config.py) and [`.env.example`](.env.example) configure providers. |
 | Browser and speech | [`web/`](matchos/web/): main match UI, separate demo/telemetry controllers and audio player; [`speech.py`](matchos/speech.py) handles synthesis. |
 | Observability and evaluation | [`telemetry.py`](matchos/telemetry.py), [`observability.py`](matchos/observability.py), [`model_logging.py`](matchos/model_logging.py) and [`evaluation.py`](matchos/evaluation.py). |
 | Infrastructure | [`infra/`](infra/) and [deployment instructions](DEPLOYMENT.md). |

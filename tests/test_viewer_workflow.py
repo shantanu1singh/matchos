@@ -5,9 +5,10 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from runtime_helpers import viewer_dependencies
 from test_editorial_selection import answers, setup_candidates
 
-from matchos.decision_client import _parse_selection
+from matchos.decisions.schema import _parse_selection
 from matchos.perspective import Perspective
 from matchos.publication import PublicationPolicy
 from matchos.schemas import PipelineResult, VerifiedCandidates, ViewerProfile
@@ -28,7 +29,9 @@ def setup(selector, *, viewer=None, agent=None):
             decisions=selector, agent=agent, language_provider="test", reasoning_timeout_s=1
         ),
     )
-    worker = Perspective(session, viewer or ViewerProfile(persona="broadcaster"), 0, send)
+    worker = Perspective(
+        viewer_dependencies(session), viewer or ViewerProfile(persona="broadcaster"), 0, send
+    )
     batch = PipelineResult(
         kind="candidates",
         candidates=VerifiedCandidates(candidates=candidates),
@@ -63,7 +66,7 @@ def test_framework_owns_stage_order_and_only_terminal_output_reaches_the_ui():
                 yield event
 
         worker.workflow.run = capture
-        with worker.session.telemetry.capture(
+        with worker.dependencies.telemetry.capture(
             "Viewer editorial selection", {"viewer": worker.viewer.model_dump()}
         ):
             await worker.process(batch)
@@ -78,7 +81,7 @@ def test_framework_owns_stage_order_and_only_terminal_output_reaches_the_ui():
         ]
         assert len(messages) == 1 and messages[0]["result"]["kind"] == "moment"
         assert messages[0]["result"]["producer"]["action"] == "AIR"
-        steps = worker.session.telemetry.snapshot()["runs"][0]["steps"]
+        steps = worker.dependencies.telemetry.snapshot()["runs"][0]["steps"]
         names = [s["name"] for s in steps]
         assert (
             names.index("publication preflight")
@@ -179,7 +182,7 @@ def test_slow_viewer_does_not_delay_other_framework_workflows_or_live_frames(mon
             outputs.append(payload)
 
         workers = [
-            Perspective(session, ViewerProfile(persona=role), i, send)
+            Perspective(viewer_dependencies(session), ViewerProfile(persona=role), i, send)
             for i, role in enumerate(("fan", "analyst", "broadcaster"))
         ]
         try:

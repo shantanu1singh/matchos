@@ -8,7 +8,9 @@ import pytest
 from test_editorial_selection import answers, setup_candidates
 
 from matchos.copy import render_overlay
-from matchos.decision_client import CloudflareDecisionClient, GatewayDecisionClient, LocalDecisionClient
+from matchos.decisions.cloudflare import CloudflareDecisionClient
+from matchos.decisions.gateway import GatewayDecisionClient
+from matchos.decisions.local import LocalDecisionClient
 from matchos.editorial import explain
 from matchos.language_agent import prompt_payload
 from matchos.llm_config import LLMConfig
@@ -38,7 +40,7 @@ def test_neutrality_reaches_native_decisions_and_language(monkeypatch, persona, 
 
     actual = httpx.AsyncClient
     monkeypatch.setattr(
-        "matchos.decision_client.httpx.AsyncClient",
+        f"matchos.decisions.{'cloudflare' if provider == 'cloudflare' else 'gateway'}.httpx.AsyncClient",
         lambda **kw: actual(transport=httpx.MockTransport(respond), **kw),
     )
     viewer = ViewerProfile(persona=persona, team_id=team, player_id="blue_9")
