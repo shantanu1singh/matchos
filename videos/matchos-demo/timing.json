@@ -1,0 +1,90 @@
+[
+  {
+    "scene": 1,
+    "scene_start": 0,
+    "scene_end": 8,
+    "speech_start": 0.6,
+    "speech_end": 5.933,
+    "text": "One match. Three viewers. Why should they all hear the same story? This is Match O S.",
+    "voice": "af_nova",
+    "original_duration": 5.013,
+    "tempo": 0.9371
+  },
+  {
+    "scene": 2,
+    "scene_start": 8,
+    "scene_end": 32,
+    "speech_start": 8.6,
+    "speech_end": 27.76,
+    "text": "Here's the same moment through three perspectives. The broadcaster gets a concise, neutral cue: Liverpool are getting through City's press. The Liverpool fan sees what that means for their team. The analyst gets the before-and-after numbers. Each viewer makes an independent editorial choice from shared evidence, including the choice to hold a story.",
+    "voice": "af_nova",
+    "original_duration": 17.643,
+    "tempo": 0.92
+  },
+  {
+    "scene": 3,
+    "scene_start": 32,
+    "scene_end": 42,
+    "speech_start": 32.6,
+    "speech_end": 40.677,
+    "text": "Then Liverpool score. The broadcaster leads with the score change. The fan gets Liverpool's story. The analyst retains the match context.",
+    "voice": "af_nova",
+    "original_duration": 8.085,
+    "tempo": 1.0
+  },
+  {
+    "scene": 4,
+    "scene_start": 42,
+    "scene_end": 52,
+    "speech_start": 42.6,
+    "speech_end": 51.383,
+    "text": "City's red card changes the angle again. A neutral dismissal update, Liverpool's player advantage, and the numbers behind the new match situation.",
+    "voice": "af_nova",
+    "original_duration": 8.789,
+    "tempo": 1.0
+  },
+  {
+    "scene": 5,
+    "scene_start": 52,
+    "scene_end": 74,
+    "speech_start": 52.6,
+    "speech_end": 72.713,
+    "text": "Microsoft Agent Framework orchestrates the pipeline. Deterministic match state produces evidence-backed candidates. Each persona independently asks Microsoft's Foundry Decision One which story matters, or whether to wait. G P T six Luna turns selected facts into tailored copy. Production rules limit repeats, while asynchronous model calls let the pitch keep flowing.",
+    "voice": "af_nova",
+    "original_duration": 20.117,
+    "tempo": 1.0
+  },
+  {
+    "scene": 6,
+    "scene_start": 74,
+    "scene_end": 92,
+    "speech_start": 74.6,
+    "speech_end": 91.567,
+    "text": "Execution telemetry exposes deterministic inputs, model calls, outputs and publication decisions. Compact traces flow to Application Insights and Foundry. Saved runs can go to four separate Foundry graders: editorial selection, persona quality, semantic grounding and restraint. Grading stays outside live playback.",
+    "voice": "af_nova",
+    "original_duration": 18.56,
+    "tempo": 1.095
+  },
+  {
+    "scene": 7,
+    "scene_start": 92,
+    "scene_end": 106,
+    "speech_start": 92.6,
+    "speech_end": 105.565,
+    "text": "The app is deployed on Azure Container Apps, with a private container registry, managed identity, Key Vault secrets and password-protected access. Azure Speech can read aired stories aloud. The deployment includes health probes and rollback.",
+    "voice": "af_nova",
+    "original_duration": 13.803,
+    "tempo": 1.0658
+  },
+  {
+    "scene": 8,
+    "scene_start": 106,
+    "scene_end": 120,
+    "speech_start": 106.6,
+    "speech_end": 117.935,
+    "text": "Next: licensed live feeds, deeper player perspectives, and shared state for reconnecting viewers and horizontal scale. One match. Every perspective. A useful story, grounded in evidence.",
+    "voice": "af_nova",
+    "original_duration": 10.901,
+    "tempo": 0.9605
+  }
+]

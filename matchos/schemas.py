@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 TeamId = Literal["RED", "BLUE"]
 Persona = Literal["casual", "analyst", "fan", "player", "broadcaster"]
-Language = Literal["en", "hi"]
+Language = Literal["en", "fr", "es", "hi"]
 
 EventType = Literal[
     "PASS",

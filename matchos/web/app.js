@@ -7,7 +7,7 @@ const state = {
   seeking: false,
   scrubbing: false,
   comparisonMoment: null,
-  comparisonViewers: [{ persona: "fan", team_id: "RED", language: "en", player_id: "red_9" }, { persona: "analyst", team_id: null, language: "en", player_id: "red_9" }],
+  comparisonViewers: [{ persona: "fan", team_id: "RED", language: "es", player_id: "red_9" }, { persona: "analyst", team_id: null, language: "en", player_id: "red_9" }],
   viewerDisplays: {},
   primaryEditorial: null,
   comparisonEditorial: [],
@@ -994,6 +994,8 @@ document.getElementById("lab-form").addEventListener("submit", (event) => {
   startMatch();
 });
 
+const languageNames = { en: "English", fr: "French", es: "Spanish", hi: "Hindi" };
+
 const personaNames = { casual: "Casual", analyst: "Analyst", fan: "Home fan", player: "Player", broadcaster: "Broadcaster" };
 
 function comparisonViews() {
@@ -1014,7 +1016,7 @@ function normalizeViewer(viewer) {
 }
 
 function viewerLabel(viewer) {
-  return `${personaNames[viewer.persona]} · ${isNeutralViewer(viewer) ? "Neutral" : teamLabel(viewer.team_id, true)} · ${viewer.language === "hi" ? "Hindi" : "English"}`;
+  return `${personaNames[viewer.persona]} · ${isNeutralViewer(viewer) ? "Neutral" : teamLabel(viewer.team_id, true)} · ${languageNames[viewer.language] || viewer.language}`;
 }
 
 function viewerLabelMarkup(viewer) {
@@ -1133,7 +1135,7 @@ function buildComparisonCards() {
         <div class="controls">
           <label>Viewer<select data-field="persona" aria-label="View ${index + 2} persona">${Object.entries(personaNames).map(([value, label]) => `<option value="${value}" ${value === viewer.persona ? "selected" : ""}>${label}</option>`).join("")}</select></label>
           <label ${isNeutralViewer(viewer) ? "hidden" : ""}>Team<select ${isNeutralViewer(viewer) ? "disabled" : ""} data-field="team_id" aria-label="View ${index + 2} team"><option value="BLUE" ${viewer.team_id === "BLUE" ? "selected" : ""}>Manchester City</option><option value="RED" ${viewer.team_id === "RED" ? "selected" : ""}>Liverpool</option></select></label>
-          <label>Language<select data-field="language" aria-label="View ${index + 2} language"><option value="en" ${viewer.language === "en" ? "selected" : ""}>English</option><option value="hi" ${viewer.language === "hi" ? "selected" : ""}>Hindi</option></select></label>
+          <label>Language<select data-field="language" aria-label="View ${index + 2} language">${Object.entries(languageNames).map(([code, name]) => `<option value="${code}" ${viewer.language === code ? "selected" : ""}>${name}</option>`).join("")}</select></label>
           <label>Focus player<select id="view-player-${index}" data-field="player_id" aria-label="View ${index + 2} focus player" ${viewer.persona === "player" ? "" : "disabled"}>${playerOptions(viewer)}</select></label>
           <p class="viewer-help">Independent selection. Analyst and Broadcaster cover both teams neutrally.</p>
           <button class="remove-view" type="button" data-remove="${index}">Remove this view</button>

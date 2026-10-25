@@ -11,6 +11,7 @@ function controls() {
     state:{pulse:{score_red:1,score_blue:2,red:{possession_last5:.6,press_bypass_rate:.25,final_third_entries_last5:12},
                  blue:{possession_last5:.4,press_bypass_rate:.75,final_third_entries_last5:4}}},
   });
+  vm.runInContext(source.match(/const languageNames = [^;]+;/)[0],context);
   vm.runInContext(source.slice(source.indexOf('function isNeutralViewer('),source.indexOf('function updatePrimaryLabel(')),context);
   vm.runInContext(source.slice(source.indexOf('function statCapsules('),source.indexOf('function renderPulse(')),context);
   return context;
@@ -30,6 +31,14 @@ test('switching neutral roles removes allegiance and fan mode defaults to Liverp
   ui.normalizeViewer(viewer);
   assert.equal(viewer.team_id,null);
   assert.equal(ui.viewerLabel(viewer),'Broadcaster · Neutral · English');
+});
+
+test('viewer labels show French and Spanish and all settings expose four languages',()=>{
+  const ui=controls();
+  assert.equal(ui.viewerLabel({persona:'fan',team_id:'RED',language:'es'}),'Home fan · Liverpool · Spanish');
+  assert.equal(ui.viewerLabel({persona:'analyst',team_id:null,language:'fr'}),'Analyst · Neutral · French');
+  const html=fs.readFileSync('matchos/web/index.html','utf8');
+  for (const language of ['en','fr','es','hi']) assert.ok(html.includes(`value="${language}"`));
 });
 
 test('neutral stat capsules compare both sides while fan stats follow Liverpool',()=>{

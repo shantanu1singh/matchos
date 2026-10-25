@@ -1,0 +1,65 @@
+{
+  "source": "Authenticated deployed MatchOS Judge demo",
+  "duration": 53.005945916,
+  "speed": 1,
+  "marks": [
+    {
+      "name": "before-launch",
+      "time": 0.1398842079999998
+    },
+    {
+      "name": "four-languages",
+      "time": 3.294889458000002
+    },
+    {
+      "name": "launch",
+      "time": 4.827233625
+    },
+    {
+      "name": "all-personas-ready",
+      "time": 13.863907375
+    },
+    {
+      "name": "personas-ready",
+      "time": 14.026535540999998
+    },
+    {
+      "name": "spanish-speech-start",
+      "time": 29.42228725
+    },
+    {
+      "name": "spanish-listen",
+      "time": 29.615845750000002
+    },
+    {
+      "name": "spanish-speech-stop",
+      "time": 34.321383999999995
+    },
+    {
+      "name": "compare-personas",
+      "time": 35.922630958
+    },
+    {
+      "name": "decision-open",
+      "time": 39.96858049999999
+    },
+    {
+      "name": "facts-open",
+      "time": 44.95769595799999
+    },
+    {
+      "name": "pitch-evidence",
+      "time": 48.971227999999996
+    }
+  ],
+  "languages": [
+    "English",
+    "French",
+    "Spanish",
+    "Hindi"
+  ],
+  "speechStart": 29.42228725,
+  "speechEnd": 34.321383999999995,
+  "selectedSpanishAudioDuration": 4.528,
+  "audioSource": "Actual /api/speech response requested by the recorded fan Listen interaction"
+}

@@ -1,0 +1,53 @@
+{
+  "press": [
+    {
+      "persona": "broadcaster",
+      "headline": "At 1–1, Liverpool are getting through Manchester City's press",
+      "body": "Liverpool have played through Manchester City’s first pressing line on 86% of recent attempts, up from 36%."
+    },
+    {
+      "persona": "fan",
+      "headline": "Liverpool in control of the press",
+      "body": "Liverpool have found it much easier to play through Manchester City’s first press, with the bypass rate rising from 36% to 86%. City’s defensive line has moved back from 30.46 to 27.83 metres."
+    },
+    {
+      "persona": "analyst",
+      "headline": "Press effectiveness down",
+      "body": "At 1-1 with 11 players each, Liverpool’s rate of playing through Manchester City’s first press rose from 36% to 86%. City’s defensive line moved from 30.46 metres to 27.83 metres."
+    }
+  ],
+  "goal": [
+    {
+      "persona": "broadcaster",
+      "headline": "Liverpool take a 2–1 lead",
+      "body": "Alexander Isak’s 65th-minute goal breaks the 1–1 deadlock."
+    },
+    {
+      "persona": "fan",
+      "headline": "A goal for Liverpool",
+      "body": "Alexander Isak puts Liverpool ahead, making it 2–1 after the teams were level. Both sides have 11 players on the pitch."
+    },
+    {
+      "persona": "analyst",
+      "headline": "Score update",
+      "body": "Alexander Isak’s goal puts Liverpool ahead 2–1 after the teams were level at 1–1 in the 65th minute. Both sides remain at 11 players."
+    }
+  ],
+  "card": [
+    {
+      "persona": "broadcaster",
+      "headline": "Manchester City down to 10",
+      "body": "Mateo Kovacic’s dismissal in the 68th minute leaves Manchester City with one fewer player than Liverpool."
+    },
+    {
+      "persona": "fan",
+      "headline": "Liverpool have a player advantage",
+      "body": "Manchester City are down to 10 after Mateo Kovacic’s dismissal, while Liverpool still have 11. At 2–1, Liverpool have the player advantage."
+    },
+    {
+      "persona": "analyst",
+      "headline": "Dismissal: Manchester City",
+      "body": "Mateo Kovacic is sent off in the 68th minute, leaving Manchester City with 10 players against Liverpool’s 11. Liverpool lead 2–1."
+    }
+  ]
+}

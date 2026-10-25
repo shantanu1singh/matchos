@@ -1,0 +1,65 @@
+[
+  {
+    "scene": 1,
+    "name": "Launch",
+    "scene_start": 0,
+    "scene_end": 8,
+    "text": "This is MatchOS. Three perspectives. Let's run the actual press-resistance demo."
+  },
+  {
+    "scene": 2,
+    "name": "Independent choices",
+    "scene_start": 8,
+    "scene_end": 20,
+    "text": "Judge demo replays one match state. Each persona independently chooses a story. Here, the broadcaster highlights Liverpool playing through City's press."
+  },
+  {
+    "scene": 3,
+    "name": "Four languages",
+    "scene_start": 20,
+    "scene_end": 28,
+    "text": "The fan gets Liverpool's story in Spanish. Viewers choose English, French, Spanish or Hindi."
+  },
+  {
+    "scene": 4,
+    "name": "Voice and analysis",
+    "scene_start": 34,
+    "scene_end": 40,
+    "text": "Microsoft Voice speaks their language. The analyst focuses on tactical detail."
+  },
+  {
+    "scene": 5,
+    "name": "Evidence",
+    "scene_start": 40,
+    "scene_end": 52,
+    "text": "Inspect the editorial decision and supporting facts. Then open the source events on the pitch. Every story stays connected to its evidence."
+  },
+  {
+    "scene": 6,
+    "name": "Agent framework",
+    "scene_start": 52,
+    "scene_end": 74,
+    "text": "Microsoft Agent Framework coordinates the pipeline. Deterministic match state produces verified candidates. Each persona asks Foundry Decision One what matters, or whether to wait. GPT six Luna writes tailored copy from selected facts. Publication guards limit repeats. The pitch runs asynchronously."
+  },
+  {
+    "scene": 7,
+    "name": "Tracing and grading",
+    "scene_start": 74,
+    "scene_end": 92,
+    "text": "Telemetry exposes inputs, model calls, outputs and publication decisions. Compact traces reach Application Insights and Foundry. Separate saved-run graders assess editorial selection, persona quality, grounding and restraint, outside live playback."
+  },
+  {
+    "scene": 8,
+    "name": "Azure deployment",
+    "scene_start": 92,
+    "scene_end": 106,
+    "text": "MatchOS runs on Azure Container Apps, with private container images, managed identity and Key Vault. Health probes, secure access and rollback support the deployment."
+  },
+  {
+    "scene": 9,
+    "name": "Future",
+    "scene_start": 106,
+    "scene_end": 120,
+    "text": "Next: licensed live feeds, deeper player perspectives, and shared state for reconnecting viewers and horizontal scale. One match. Every perspective. A useful story, grounded in evidence."
+  }
+]

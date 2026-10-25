@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920,height=1080">
+  <title>MatchOS · One match. Every perspective.</title>
+  <link rel="stylesheet" href="assets/theme.css">
+  <script src="assets/gsap.min.js"></script>
+  <style>
+    html,body{width:1920px;height:1080px;margin:0;overflow:hidden;background:#07110d}
+    #root{position:relative;width:1920px;height:1080px;overflow:hidden}
+    .scene-slot{position:absolute;inset:0;width:1920px;height:1080px;overflow:hidden}
+    audio{display:none}
+  </style>
+</head>
+<body>
+  <div data-hf-id="hf-jrvh" id="root" data-composition-id="main" data-start="0" data-duration="120" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-xqtu" id="walkthrough-host" class="clip scene-slot" data-composition-id="walkthrough" data-composition-src="compositions/walkthrough.html" data-start="0" data-duration="52" data-track-index="0" data-track-kind="graphics"></div>
+    <div data-hf-id="hf-tz1g" id="slot-5" class="clip scene-slot" data-composition-id="beat-5" data-composition-src="compositions/beat-5.html" data-start="51.55" data-duration="22.45" data-track-index="0"></div>
+    <div data-hf-id="hf-7scp" id="slot-6" class="clip scene-slot" data-composition-id="beat-6" data-composition-src="compositions/beat-6.html" data-start="73.55" data-duration="18.45" data-track-index="1"></div>
+    <div data-hf-id="hf-lwgz" id="slot-7" class="clip scene-slot" data-composition-id="beat-7" data-composition-src="compositions/beat-7.html" data-start="91.55" data-duration="14.45" data-track-index="0"></div>
+    <div data-hf-id="hf-46y3" id="slot-8" class="clip scene-slot" data-composition-id="beat-8" data-composition-src="compositions/beat-8.html" data-start="105.55" data-duration="14.45" data-track-index="1"></div>
+    <audio id="spanish-commentary" src="assets/spanish-commentary.wav" data-start="29.422" data-duration="4.528" data-track-index="4" data-volume="1"></audio>
+    <audio data-hf-id="hf-79bg" id="narration" src="narration.wav" data-start="0" data-duration="120" data-track-index="3" data-volume="1"></audio>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const film = gsap.timeline({paused:true});
+    // Scene-container crossfades are transitions; content has no exit tween.
+    const pairs=[['#walkthrough-host','#slot-5',51.55],['#slot-5','#slot-6',73.55],['#slot-6','#slot-7',91.55],['#slot-7','#slot-8',105.55]];
+    pairs.forEach(([outgoing,incoming,at])=>{
+      film.fromTo(incoming,{opacity:0},{opacity:1,duration:.45,ease:'sine.inOut',immediateRender:false},at);
+      film.fromTo(outgoing,{opacity:1},{opacity:0,duration:.45,ease:'sine.inOut',immediateRender:false},at);
+    });
+    window.__timelines.main=film;
+  </script>
+</body>
+</html>

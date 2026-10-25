@@ -99,6 +99,17 @@ def prepare_speech(result: PipelineResult, viewer: ViewerProfile, config: Speech
     else:
         base, style, rate = ("hi-IN-Grant" if hindi else "en-GB-Harry"), "neutral", "0%"
         delivery = "Clear, conversational delivery"
+    if viewer.language in {"fr", "es"}:
+        locale = "fr-FR" if viewer.language == "fr" else "es-MX"
+        expressive = "Soleil" if viewer.language == "fr" else "Valeria"
+        if viewer.persona == "fan":
+            base = f"{locale}-{expressive}"
+        elif viewer.persona == "broadcaster" and major:
+            base = f"{locale}-{'Marc' if viewer.language == 'fr' else 'Valeria'}"
+        elif viewer.persona in {"broadcaster", "analyst"}:
+            base = f"{locale}-Harper"
+        else:
+            base = f"{locale}-Grant"
     # Locale-specific overrides must support the mapped SSML style.
     override = os.getenv(f"AZURE_SPEECH_VOICE_{viewer.persona.upper()}_{viewer.language.upper()}", "").strip()
     voice = override or f"{base}:{config.model}"

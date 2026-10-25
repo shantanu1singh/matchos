@@ -7,8 +7,9 @@ import re
 from matchos.teams import team_name, shirt_number
 from matchos.pitch import shirt
 from matchos.schemas import Overlay, VerifiedMoment, ViewerProfile
+from matchos.localization import localized_copy, localize_stat_labels
 
-_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 
 
 def _pct(value: object) -> str:
@@ -43,13 +44,13 @@ def render_overlay(moment: VerifiedMoment, viewer: ViewerProfile, *, rich: bool,
     language = viewer.language
     persona = viewer.persona
     kicker, headline, body = _copy(moment, viewer, rich)
-    if rich and persona in {"fan", "analyst"} and moment.frame == "SHOT_CHANCE":
+    if rich and language in {"en", "hi"} and persona in {"fan", "analyst"} and moment.frame == "SHOT_CHANCE":
         team = _side(facts["team"], language)
         if persona == "fan":
             headline = f"{team} का मौका" if language == "hi" else f"Chance for {team}"
         else:
             headline = "शॉट का नतीजा" if language == "hi" else "Shot outcome"
-    stats = _stats(moment, language)
+    stats = localize_stat_labels(_stats(moment, "en" if language in {"fr", "es"} else language), language)
     graphic = None
     if persona == "broadcaster":
         graphic = {
@@ -81,7 +82,7 @@ def render_overlay(moment: VerifiedMoment, viewer: ViewerProfile, *, rich: bool,
 def prose_is_faithful(text: str, moment: VerifiedMoment) -> bool:
     allowed = _allowed_numbers(moment)
     for token in _NUMBER.findall(text):
-        value = float(token)
+        value = float(token.replace(",", "."))
         if not any(abs(value - candidate) <= 0.15 for candidate in allowed):
             return False
     return True
@@ -161,6 +162,8 @@ def _stats(moment: VerifiedMoment, language: str) -> list[dict[str, str]]:
 
 
 def _copy(moment: VerifiedMoment, viewer: ViewerProfile, rich: bool) -> tuple[str, str, str]:
+    if viewer.language in {"fr", "es"}:
+        return localized_copy(moment, viewer, rich=rich)
     language = viewer.language
     persona = viewer.persona
     frame = moment.frame

@@ -4,7 +4,9 @@ MatchOS deploys to Azure Container Apps Consumption in East US 2. This is a prod
 
 Current deployment: [Open MatchOS](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io). Resource group: `rg-matchos-prod`, Container App: `matchos-prod`, region: `eastus2`.
 
-The initial production release passed HTTPS/assets/WebSocket checks, a real three-persona goal checkpoint using managed-identity Decision-1 and gpt-6-luna calls, and one MAI speech synthesis request. The current password-protected release is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:8654d2c203a634fcb4ee85d6c5ebb5ed7389905eb65a845046cb86dae618aa9a`.
+The initial production release passed HTTPS/assets/WebSocket checks, a real three-persona goal checkpoint using managed-identity Decision-1 and gpt-6-luna calls, and one MAI speech synthesis request. The current password-protected release is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:d1169185c5b124b0632c440901a26ace8f44498aa3651bfbd5b9fbe8b112f66a`.
+
+The current release adds English/French/Spanish/Hindi story and speech support; Judge demo defaults the Liverpool fan to Spanish. This release passed 124 focused backend tests and all 25 frontend tests.
 
 ## What is implemented
 

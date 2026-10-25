@@ -1,0 +1,19 @@
+# Reproducible source stays in Git; generated inspection/capture work stays local.
+.hyperframes/
+.media/
+.tts-cache/
+snapshots*/
+renders/
+node_modules/
+CLAUDE.md
+assets/vo-*.wav
+assets/*-raw.wav
+assets/brand.png
+capture/*
+!capture/screenshots/
+capture/screenshots/*
+!capture/screenshots/press-walkthrough.png
+!capture/screenshots/telemetry.png
+assets/telemetry.mp4
+.thumbnails/
+.render-cache/

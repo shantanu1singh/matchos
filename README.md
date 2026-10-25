@@ -57,6 +57,11 @@ Routine candidates have a 40-second **match-time** validity window; major goal/d
 
 ## Viewer modes
 
+Viewer stories and spoken commentary support **English, French, Spanish and Hindi**. Each persona can choose its own language. Both model-generated supporting copy and deterministic fallback headlines, summaries and evidence labels follow that choice. The Judge demo defaults to an English broadcaster, a Liverpool fan in Spanish, and an English analyst. Language changes do not add team allegiance to neutral roles.
+
+Click **Listen** on an aired story to hear that same approved copy with Microsoft MAI-Voice models through Azure Speech. French and Spanish use locale-specific voices and supported delivery styles; speech does not invent a separate commentary. French/Spanish decimal commas are included in the numeric validation rules.
+
+
 Casual, analyst, home fan, player focus, and broadcaster all read the same verified facts. Each viewer can choose a different story or no interruption. The same immutable candidate pool supplies all viewers; the model is not forced to disagree. Why this decision explains selection and suppression, while Facts & evidence exposes the exact underlying checks and events.
 
 Analyst and Broadcaster model inputs omit team allegiance and inactive player focus. Fan inputs retain the supported team; Player inputs retain the focused player. The local fallback also uses persona preferences, recent-story history and interruption cadence, and can choose `NONE`. Its scores are editorial heuristics, not calibrated model probabilities. Different personas may still choose the same supported story.

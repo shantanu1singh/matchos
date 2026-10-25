@@ -1,0 +1,22 @@
+<template>
+  <div data-hf-id="hf-oulu" id="walkthrough" class="film-scene" data-composition-id="walkthrough" data-start="0" data-duration="52" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-pj7e" id="recording-frame" data-layout-allow-overflow="Camera reframes one continuous product recording" data-hold="The real model wait and evidence reading remain at actual speed">
+      <video data-hf-id="hf-0c2u" id="product-recording" class="clip" src="../assets/walkthrough.mp4" data-start="0" data-duration="52" data-track-index="2" muted playsinline></video>
+    </div>
+    <style>
+      #walkthrough{position:relative;width:1920px;height:1080px;overflow:hidden;background:#07110d}
+      #walkthrough #recording-frame{position:absolute;inset:0;overflow:hidden}
+      #walkthrough #product-recording{display:block;width:1920px;height:1080px;object-fit:contain;transform-origin:right top}
+    </style>
+    <script>
+      (()=>{
+        const tl=gsap.timeline({paused:true});
+        // One uncut 1x recording. Only the viewing camera changes.
+        tl.fromTo('#product-recording',{scale:1,y:0},{scale:1.28,y:-84,duration:1.2,ease:'sine.inOut',immediateRender:false},13.7);
+        tl.to('#product-recording',{scale:1,y:0,duration:1.2,ease:'sine.inOut'},41.7);
+        window.__timelines=window.__timelines||{};
+        window.__timelines.walkthrough=tl;
+      })();
+    </script>
+  </div>
+</template>

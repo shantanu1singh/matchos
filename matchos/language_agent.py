@@ -46,7 +46,7 @@ Fan: same facts, framed for the viewer's team: celebrate their goals, explain se
 Player: what the focused player can take from the facts.
 Broadcaster: write supporting copy beneath the supplied presentation.headline, for a neutral live commentary audience. Use one or two short sentences, at most 45 words, and one key statistic or before-and-after comparison. Explain the story plainly; do not repeat the headline or score already in it. Avoid technical metric lists and decimal distances; use rounded metres. Exact supporting metrics remain in Facts & evidence. Do not claim causation, urgency, a chance or a goal that the facts do not establish.
 For PRESS_BREAKDOWN, pressBypassBefore/Now measure attackingTeam playing through defendingTeam's first pressing line. The defensiveLine fields belong to defendingTeam. Do not attribute that defensive line to the attacking team.
-If the language is hi, write in Hindi. Otherwise write in English.
+Follow the requested language code: en = English, fr = French, es = Spanish, hi = Hindi. Write all supporting copy in that language, retaining club and player names.
 Return only the supporting sentences, with no JSON, headline or preamble.
 """
 
@@ -223,14 +223,14 @@ def faithful_text(text: str, moment: VerifiedMoment, viewer: ViewerProfile) -> s
     cleaned = " ".join(text.strip().split())
     ratios = {ratio for key, value in moment.facts.items() if key in PERCENT_FACTS
               for ratio in (float(value), round(float(value), 2))}
-    fractional = any(float(number) in ratios and 0 < float(number) < 1
-                     for number in re.findall(r"(?<![\d.])\d+\.\d+(?![\d.])", cleaned))
+    fractional = any(float(number.replace(",", ".")) in ratios and 0 < float(number.replace(",", ".")) < 1
+                     for number in re.findall(r"(?<![\d.,])\d+[.,]\d+(?!\d)", cleaned))
     fallback = render_overlay(moment, viewer, rich=True, provider="template")
     broadcast_ok = True
     if viewer.persona == "broadcaster":
         headline = fallback.headline.casefold().rstrip(".!।")
         repeated_headline = cleaned.casefold().startswith(headline)
-        decimal_distance = bool(re.search(r"\d+\.\d+\s*(?:m\b|met(?:re|er)s?\b|मीटर)", cleaned, re.IGNORECASE))
+        decimal_distance = bool(re.search(r"\d+[.,]\d+\s*(?:m\b|m[eè]t(?:re|er|ro)s?\b|मीटर)", cleaned, re.IGNORECASE))
         sentences = [part for part in re.split(r"[.!?।]+(?:\s|$)", cleaned) if part.strip()]
         broadcast_ok = not repeated_headline and not decimal_distance and len(cleaned.split()) <= 45 and len(sentences) <= 2
     accepted = bool(cleaned and not fractional and broadcast_ok and prose_is_faithful(cleaned, moment))

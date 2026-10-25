@@ -1,0 +1,17 @@
+This is MatchOS. Three perspectives. Let's run the actual press-resistance demo.
+
+Judge demo replays one match state. Each persona independently chooses a story. Here, the broadcaster highlights Liverpool playing through City's press.
+
+The fan gets Liverpool's story in Spanish. Viewers choose English, French, Spanish or Hindi.
+
+Microsoft Voice speaks their language. The analyst focuses on tactical detail.
+
+Inspect the editorial decision and supporting facts. Then open the source events on the pitch. Every story stays connected to its evidence.
+
+Microsoft Agent Framework coordinates the pipeline. Deterministic match state produces verified candidates. Each persona asks Foundry Decision One what matters, or whether to wait. GPT six Luna writes tailored copy from selected facts. Publication guards limit repeats. The pitch runs asynchronously.
+
+Telemetry exposes inputs, model calls, outputs and publication decisions. Compact traces reach Application Insights and Foundry. Separate saved-run graders assess editorial selection, persona quality, grounding and restraint, outside live playback.
+
+MatchOS runs on Azure Container Apps, with private container images, managed identity and Key Vault. Health probes, secure access and rollback support the deployment.
+
+Next: licensed live feeds, deeper player perspectives, and shared state for reconnecting viewers and horizontal scale. One match. Every perspective. A useful story, grounded in evidence.

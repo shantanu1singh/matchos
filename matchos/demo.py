@@ -13,7 +13,7 @@ DEMO_STOPS = (
 
 
 def demo_viewers() -> list[ViewerProfile]:
-    return [ViewerProfile(persona="broadcaster"), ViewerProfile(persona="fan", team_id="RED"),
+    return [ViewerProfile(persona="broadcaster"), ViewerProfile(persona="fan", team_id="RED", language="es"),
             ViewerProfile(persona="analyst")]
 
 

@@ -1,0 +1,1435 @@
+[
+  {
+    "text": "One",
+    "start": 0,
+    "end": 0.24,
+    "id": "w0"
+  },
+  {
+    "text": "match,",
+    "start": 0.63,
+    "end": 0.79,
+    "id": "w1"
+  },
+  {
+    "text": "three",
+    "start": 0.79,
+    "end": 1.11,
+    "id": "w2"
+  },
+  {
+    "text": "viewers.",
+    "start": 1.19,
+    "end": 2,
+    "id": "w3"
+  },
+  {
+    "text": "Why",
+    "start": 2,
+    "end": 2.17,
+    "id": "w4"
+  },
+  {
+    "text": "should",
+    "start": 2.17,
+    "end": 2.5,
+    "id": "w5"
+  },
+  {
+    "text": "they",
+    "start": 2.55,
+    "end": 2.73,
+    "id": "w6"
+  },
+  {
+    "text": "all",
+    "start": 2.73,
+    "end": 2.87,
+    "id": "w7"
+  },
+  {
+    "text": "hear",
+    "start": 2.96,
+    "end": 3.1,
+    "id": "w8"
+  },
+  {
+    "text": "the",
+    "start": 3.15,
+    "end": 3.2,
+    "id": "w9"
+  },
+  {
+    "text": "same",
+    "start": 3.33,
+    "end": 3.51,
+    "id": "w10"
+  },
+  {
+    "text": "story?",
+    "start": 3.51,
+    "end": 3.99,
+    "id": "w11"
+  },
+  {
+    "text": "This",
+    "start": 3.99,
+    "end": 4.37,
+    "id": "w12"
+  },
+  {
+    "text": "is",
+    "start": 4.37,
+    "end": 4.55,
+    "id": "w13"
+  },
+  {
+    "text": "MatchOS.",
+    "start": 4.6,
+    "end": 5,
+    "id": "w14"
+  },
+  {
+    "text": "Here's",
+    "start": 5,
+    "end": 5.75,
+    "id": "w15"
+  },
+  {
+    "text": "the",
+    "start": 5.75,
+    "end": 6.5,
+    "id": "w16"
+  },
+  {
+    "text": "same",
+    "start": 6.5,
+    "end": 7.25,
+    "id": "w17"
+  },
+  {
+    "text": "moment",
+    "start": 7.25,
+    "end": 8,
+    "id": "w18"
+  },
+  {
+    "text": "through",
+    "start": 8,
+    "end": 8.38,
+    "id": "w19"
+  },
+  {
+    "text": "three",
+    "start": 8.63,
+    "end": 9.03,
+    "id": "w20"
+  },
+  {
+    "text": "perspectives.",
+    "start": 9.03,
+    "end": 11,
+    "id": "w21"
+  },
+  {
+    "text": "The",
+    "start": 11,
+    "end": 11.23,
+    "id": "w22"
+  },
+  {
+    "text": "broadcaster",
+    "start": 11.63,
+    "end": 12.09,
+    "id": "w23"
+  },
+  {
+    "text": "gets",
+    "start": 12.09,
+    "end": 12.38,
+    "id": "w24"
+  },
+  {
+    "text": "a",
+    "start": 12.4,
+    "end": 12.47,
+    "id": "w25"
+  },
+  {
+    "text": "concise,",
+    "start": 12.47,
+    "end": 13.17,
+    "id": "w26"
+  },
+  {
+    "text": "neutral",
+    "start": 13.17,
+    "end": 13.72,
+    "id": "w27"
+  },
+  {
+    "text": "cue.",
+    "start": 13.72,
+    "end": 14.1,
+    "id": "w28"
+  },
+  {
+    "text": "Liverpool",
+    "start": 14.1,
+    "end": 14.41,
+    "id": "w29"
+  },
+  {
+    "text": "are",
+    "start": 14.41,
+    "end": 14.51,
+    "id": "w30"
+  },
+  {
+    "text": "getting",
+    "start": 14.51,
+    "end": 14.75,
+    "id": "w31"
+  },
+  {
+    "text": "through",
+    "start": 14.75,
+    "end": 15,
+    "id": "w32"
+  },
+  {
+    "text": "City's",
+    "start": 15,
+    "end": 15.39,
+    "id": "w33"
+  },
+  {
+    "text": "press.",
+    "start": 15.46,
+    "end": 16,
+    "id": "w34"
+  },
+  {
+    "text": "The",
+    "start": 16,
+    "end": 16.19,
+    "id": "w35"
+  },
+  {
+    "text": "Liverpool",
+    "start": 16.63,
+    "end": 16.76,
+    "id": "w36"
+  },
+  {
+    "text": "fan",
+    "start": 16.76,
+    "end": 16.95,
+    "id": "w37"
+  },
+  {
+    "text": "sees",
+    "start": 16.95,
+    "end": 17.11,
+    "id": "w38"
+  },
+  {
+    "text": "what",
+    "start": 17.19,
+    "end": 17.45,
+    "id": "w39"
+  },
+  {
+    "text": "that",
+    "start": 17.45,
+    "end": 17.7,
+    "id": "w40"
+  },
+  {
+    "text": "means",
+    "start": 17.7,
+    "end": 18.01,
+    "id": "w41"
+  },
+  {
+    "text": "for",
+    "start": 18.01,
+    "end": 18.2,
+    "id": "w42"
+  },
+  {
+    "text": "their",
+    "start": 18.2,
+    "end": 18.5,
+    "id": "w43"
+  },
+  {
+    "text": "team.",
+    "start": 18.55,
+    "end": 19,
+    "id": "w44"
+  },
+  {
+    "text": "The",
+    "start": 19,
+    "end": 19.21,
+    "id": "w45"
+  },
+  {
+    "text": "analyst",
+    "start": 19.63,
+    "end": 19.72,
+    "id": "w46"
+  },
+  {
+    "text": "gets",
+    "start": 19.72,
+    "end": 20.01,
+    "id": "w47"
+  },
+  {
+    "text": "the",
+    "start": 20.01,
+    "end": 20.21,
+    "id": "w48"
+  },
+  {
+    "text": "before",
+    "start": 20.21,
+    "end": 20.64,
+    "id": "w49"
+  },
+  {
+    "text": "and",
+    "start": 20.68,
+    "end": 20.86,
+    "id": "w50"
+  },
+  {
+    "text": "after",
+    "start": 20.86,
+    "end": 21.22,
+    "id": "w51"
+  },
+  {
+    "text": "numbers.",
+    "start": 21.22,
+    "end": 22,
+    "id": "w52"
+  },
+  {
+    "text": "Each",
+    "start": 22,
+    "end": 22.18,
+    "id": "w53"
+  },
+  {
+    "text": "viewer",
+    "start": 22.18,
+    "end": 22.45,
+    "id": "w54"
+  },
+  {
+    "text": "makes",
+    "start": 22.63,
+    "end": 22.68,
+    "id": "w55"
+  },
+  {
+    "text": "an",
+    "start": 22.68,
+    "end": 22.77,
+    "id": "w56"
+  },
+  {
+    "text": "independent",
+    "start": 22.77,
+    "end": 23.21,
+    "id": "w57"
+  },
+  {
+    "text": "editorial",
+    "start": 23.37,
+    "end": 23.69,
+    "id": "w58"
+  },
+  {
+    "text": "choice",
+    "start": 23.69,
+    "end": 24,
+    "id": "w59"
+  },
+  {
+    "text": "from",
+    "start": 24,
+    "end": 24.43,
+    "id": "w60"
+  },
+  {
+    "text": "shared",
+    "start": 24.45,
+    "end": 25.09,
+    "id": "w61"
+  },
+  {
+    "text": "evidence,",
+    "start": 25.09,
+    "end": 26.06,
+    "id": "w62"
+  },
+  {
+    "text": "including",
+    "start": 26.3,
+    "end": 26.62,
+    "id": "w63"
+  },
+  {
+    "text": "the",
+    "start": 26.62,
+    "end": 26.79,
+    "id": "w64"
+  },
+  {
+    "text": "choice",
+    "start": 26.79,
+    "end": 27.13,
+    "id": "w65"
+  },
+  {
+    "text": "to",
+    "start": 27.13,
+    "end": 27.21,
+    "id": "w66"
+  },
+  {
+    "text": "hold",
+    "start": 27.23,
+    "end": 27.4,
+    "id": "w67"
+  },
+  {
+    "text": "a",
+    "start": 27.4,
+    "end": 27.51,
+    "id": "w68"
+  },
+  {
+    "text": "story.",
+    "start": 27.51,
+    "end": 27.93,
+    "id": "w69"
+  },
+  {
+    "text": "Then",
+    "start": 30,
+    "end": 30.33,
+    "id": "w70"
+  },
+  {
+    "text": "Liverpool",
+    "start": 30.63,
+    "end": 31.07,
+    "id": "w71"
+  },
+  {
+    "text": "score,",
+    "start": 31.07,
+    "end": 31.63,
+    "id": "w72"
+  },
+  {
+    "text": "the",
+    "start": 31.68,
+    "end": 31.89,
+    "id": "w73"
+  },
+  {
+    "text": "broadcaster",
+    "start": 31.89,
+    "end": 32.8,
+    "id": "w74"
+  },
+  {
+    "text": "leads",
+    "start": 32.8,
+    "end": 33.2,
+    "id": "w75"
+  },
+  {
+    "text": "with",
+    "start": 33.21,
+    "end": 33.54,
+    "id": "w76"
+  },
+  {
+    "text": "the",
+    "start": 33.54,
+    "end": 33.79,
+    "id": "w77"
+  },
+  {
+    "text": "score",
+    "start": 33.79,
+    "end": 34.06,
+    "id": "w78"
+  },
+  {
+    "text": "change.",
+    "start": 34.3,
+    "end": 35,
+    "id": "w79"
+  },
+  {
+    "text": "The",
+    "start": 35,
+    "end": 35.19,
+    "id": "w80"
+  },
+  {
+    "text": "fan",
+    "start": 35.19,
+    "end": 35.39,
+    "id": "w81"
+  },
+  {
+    "text": "gets",
+    "start": 35.39,
+    "end": 35.43,
+    "id": "w82"
+  },
+  {
+    "text": "Liverpool's",
+    "start": 35.43,
+    "end": 36.42,
+    "id": "w83"
+  },
+  {
+    "text": "story.",
+    "start": 36.42,
+    "end": 37,
+    "id": "w84"
+  },
+  {
+    "text": "The",
+    "start": 37,
+    "end": 37.34,
+    "id": "w85"
+  },
+  {
+    "text": "analyst",
+    "start": 37.34,
+    "end": 38.13,
+    "id": "w86"
+  },
+  {
+    "text": "retains",
+    "start": 38.66,
+    "end": 38.92,
+    "id": "w87"
+  },
+  {
+    "text": "the",
+    "start": 38.92,
+    "end": 39.26,
+    "id": "w88"
+  },
+  {
+    "text": "match",
+    "start": 39.26,
+    "end": 39.83,
+    "id": "w89"
+  },
+  {
+    "text": "context.",
+    "start": 39.83,
+    "end": 41,
+    "id": "w90"
+  },
+  {
+    "text": "City's",
+    "start": 41,
+    "end": 41.66,
+    "id": "w91"
+  },
+  {
+    "text": "red",
+    "start": 41.66,
+    "end": 41.99,
+    "id": "w92"
+  },
+  {
+    "text": "card",
+    "start": 41.99,
+    "end": 42.43,
+    "id": "w93"
+  },
+  {
+    "text": "changes",
+    "start": 42.43,
+    "end": 43.2,
+    "id": "w94"
+  },
+  {
+    "text": "the",
+    "start": 43.2,
+    "end": 43.51,
+    "id": "w95"
+  },
+  {
+    "text": "angle",
+    "start": 43.55,
+    "end": 44.08,
+    "id": "w96"
+  },
+  {
+    "text": "again.",
+    "start": 44.08,
+    "end": 45,
+    "id": "w97"
+  },
+  {
+    "text": "A",
+    "start": 45,
+    "end": 45.05,
+    "id": "w98"
+  },
+  {
+    "text": "neutral",
+    "start": 45.05,
+    "end": 45.44,
+    "id": "w99"
+  },
+  {
+    "text": "dismissal",
+    "start": 45.46,
+    "end": 45.94,
+    "id": "w100"
+  },
+  {
+    "text": "update,",
+    "start": 45.94,
+    "end": 46.38,
+    "id": "w101"
+  },
+  {
+    "text": "Liverpool's",
+    "start": 46.38,
+    "end": 46.93,
+    "id": "w102"
+  },
+  {
+    "text": "player",
+    "start": 46.93,
+    "end": 47.32,
+    "id": "w103"
+  },
+  {
+    "text": "advantage,",
+    "start": 47.32,
+    "end": 48,
+    "id": "w104"
+  },
+  {
+    "text": "and",
+    "start": 48,
+    "end": 48.21,
+    "id": "w105"
+  },
+  {
+    "text": "the",
+    "start": 48.21,
+    "end": 48.42,
+    "id": "w106"
+  },
+  {
+    "text": "numbers",
+    "start": 48.42,
+    "end": 48.91,
+    "id": "w107"
+  },
+  {
+    "text": "behind",
+    "start": 48.91,
+    "end": 49.33,
+    "id": "w108"
+  },
+  {
+    "text": "the",
+    "start": 49.33,
+    "end": 49.66,
+    "id": "w109"
+  },
+  {
+    "text": "new",
+    "start": 49.66,
+    "end": 49.75,
+    "id": "w110"
+  },
+  {
+    "text": "match",
+    "start": 49.75,
+    "end": 50.01,
+    "id": "w111"
+  },
+  {
+    "text": "situation.",
+    "start": 50.1,
+    "end": 50.95,
+    "id": "w112"
+  },
+  {
+    "text": "Microsoft",
+    "start": 51.63,
+    "end": 51.66,
+    "id": "w113"
+  },
+  {
+    "text": "agent",
+    "start": 51.66,
+    "end": 52.03,
+    "id": "w114"
+  },
+  {
+    "text": "framework",
+    "start": 52.03,
+    "end": 52.69,
+    "id": "w115"
+  },
+  {
+    "text": "orchestrates",
+    "start": 52.69,
+    "end": 53.57,
+    "id": "w116"
+  },
+  {
+    "text": "the",
+    "start": 53.57,
+    "end": 53.79,
+    "id": "w117"
+  },
+  {
+    "text": "pipeline.",
+    "start": 53.79,
+    "end": 54.6,
+    "id": "w118"
+  },
+  {
+    "text": "Deterministic",
+    "start": 54.6,
+    "end": 55.54,
+    "id": "w119"
+  },
+  {
+    "text": "match",
+    "start": 55.54,
+    "end": 55.89,
+    "id": "w120"
+  },
+  {
+    "text": "state",
+    "start": 55.92,
+    "end": 56.21,
+    "id": "w121"
+  },
+  {
+    "text": "produces",
+    "start": 56.21,
+    "end": 56.43,
+    "id": "w122"
+  },
+  {
+    "text": "evidence-backed",
+    "start": 56.43,
+    "end": 57.97,
+    "id": "w123"
+  },
+  {
+    "text": "candidates.",
+    "start": 57.97,
+    "end": 59,
+    "id": "w124"
+  },
+  {
+    "text": "Each",
+    "start": 59,
+    "end": 59.21,
+    "id": "w125"
+  },
+  {
+    "text": "persona",
+    "start": 59.21,
+    "end": 59.63,
+    "id": "w126"
+  },
+  {
+    "text": "independently",
+    "start": 59.63,
+    "end": 60.21,
+    "id": "w127"
+  },
+  {
+    "text": "asks",
+    "start": 60.37,
+    "end": 60.48,
+    "id": "w128"
+  },
+  {
+    "text": "Microsoft's",
+    "start": 60.48,
+    "end": 61.03,
+    "id": "w129"
+  },
+  {
+    "text": "foundry",
+    "start": 61.15,
+    "end": 61.4,
+    "id": "w130"
+  },
+  {
+    "text": "decision,",
+    "start": 61.41,
+    "end": 61.87,
+    "id": "w131"
+  },
+  {
+    "text": "one",
+    "start": 61.96,
+    "end": 62.08,
+    "id": "w132"
+  },
+  {
+    "text": "which",
+    "start": 62.08,
+    "end": 62.34,
+    "id": "w133"
+  },
+  {
+    "text": "story",
+    "start": 62.34,
+    "end": 62.6,
+    "id": "w134"
+  },
+  {
+    "text": "matters",
+    "start": 62.6,
+    "end": 62.96,
+    "id": "w135"
+  },
+  {
+    "text": "or",
+    "start": 62.96,
+    "end": 63.06,
+    "id": "w136"
+  },
+  {
+    "text": "whether",
+    "start": 63.29,
+    "end": 63.44,
+    "id": "w137"
+  },
+  {
+    "text": "to",
+    "start": 63.46,
+    "end": 63.54,
+    "id": "w138"
+  },
+  {
+    "text": "wait.",
+    "start": 63.54,
+    "end": 64,
+    "id": "w139"
+  },
+  {
+    "text": "GPT-6",
+    "start": 64,
+    "end": 64.56,
+    "id": "w140"
+  },
+  {
+    "text": "Luna",
+    "start": 64.63,
+    "end": 64.89,
+    "id": "w141"
+  },
+  {
+    "text": "turns",
+    "start": 64.89,
+    "end": 65.21,
+    "id": "w142"
+  },
+  {
+    "text": "selected",
+    "start": 65.37,
+    "end": 65.96,
+    "id": "w143"
+  },
+  {
+    "text": "facts",
+    "start": 65.96,
+    "end": 66.37,
+    "id": "w144"
+  },
+  {
+    "text": "into",
+    "start": 66.37,
+    "end": 66.7,
+    "id": "w145"
+  },
+  {
+    "text": "tailored",
+    "start": 66.7,
+    "end": 67.36,
+    "id": "w146"
+  },
+  {
+    "text": "copy.",
+    "start": 67.36,
+    "end": 68,
+    "id": "w147"
+  },
+  {
+    "text": "Production",
+    "start": 68,
+    "end": 68.74,
+    "id": "w148"
+  },
+  {
+    "text": "rules",
+    "start": 68.74,
+    "end": 69.11,
+    "id": "w149"
+  },
+  {
+    "text": "limit",
+    "start": 69.11,
+    "end": 69.37,
+    "id": "w150"
+  },
+  {
+    "text": "repeats",
+    "start": 69.47,
+    "end": 69.86,
+    "id": "w151"
+  },
+  {
+    "text": "while",
+    "start": 69.86,
+    "end": 70.28,
+    "id": "w152"
+  },
+  {
+    "text": "asynchronous",
+    "start": 70.28,
+    "end": 70.97,
+    "id": "w153"
+  },
+  {
+    "text": "model",
+    "start": 70.97,
+    "end": 71.25,
+    "id": "w154"
+  },
+  {
+    "text": "calls",
+    "start": 71.25,
+    "end": 71.53,
+    "id": "w155"
+  },
+  {
+    "text": "let",
+    "start": 71.53,
+    "end": 71.7,
+    "id": "w156"
+  },
+  {
+    "text": "the",
+    "start": 71.7,
+    "end": 71.87,
+    "id": "w157"
+  },
+  {
+    "text": "pitch",
+    "start": 71.87,
+    "end": 72.15,
+    "id": "w158"
+  },
+  {
+    "text": "keep",
+    "start": 72.15,
+    "end": 72.38,
+    "id": "w159"
+  },
+  {
+    "text": "flowing.",
+    "start": 72.66,
+    "end": 73,
+    "id": "w160"
+  },
+  {
+    "text": "Execution",
+    "start": 73,
+    "end": 73.63,
+    "id": "w161"
+  },
+  {
+    "text": "telemetry",
+    "start": 73.63,
+    "end": 74.11,
+    "id": "w162"
+  },
+  {
+    "text": "exposes",
+    "start": 74.19,
+    "end": 74.6,
+    "id": "w163"
+  },
+  {
+    "text": "deterministic",
+    "start": 74.6,
+    "end": 75.42,
+    "id": "w164"
+  },
+  {
+    "text": "inputs,",
+    "start": 75.45,
+    "end": 75.87,
+    "id": "w165"
+  },
+  {
+    "text": "model",
+    "start": 75.96,
+    "end": 76.2,
+    "id": "w166"
+  },
+  {
+    "text": "calls,",
+    "start": 76.31,
+    "end": 76.62,
+    "id": "w167"
+  },
+  {
+    "text": "outputs,",
+    "start": 76.69,
+    "end": 77.26,
+    "id": "w168"
+  },
+  {
+    "text": "and",
+    "start": 77.29,
+    "end": 77.43,
+    "id": "w169"
+  },
+  {
+    "text": "publication",
+    "start": 77.46,
+    "end": 78.15,
+    "id": "w170"
+  },
+  {
+    "text": "decisions.",
+    "start": 78.15,
+    "end": 78.93,
+    "id": "w171"
+  },
+  {
+    "text": "Compact",
+    "start": 78.93,
+    "end": 79.63,
+    "id": "w172"
+  },
+  {
+    "text": "traces",
+    "start": 79.63,
+    "end": 80.01,
+    "id": "w173"
+  },
+  {
+    "text": "flow",
+    "start": 80.01,
+    "end": 80.22,
+    "id": "w174"
+  },
+  {
+    "text": "to",
+    "start": 80.37,
+    "end": 80.47,
+    "id": "w175"
+  },
+  {
+    "text": "application",
+    "start": 80.47,
+    "end": 81.33,
+    "id": "w176"
+  },
+  {
+    "text": "insights",
+    "start": 81.33,
+    "end": 81.87,
+    "id": "w177"
+  },
+  {
+    "text": "and",
+    "start": 81.96,
+    "end": 82.18,
+    "id": "w178"
+  },
+  {
+    "text": "foundry.",
+    "start": 82.18,
+    "end": 83,
+    "id": "w179"
+  },
+  {
+    "text": "Saved",
+    "start": 83,
+    "end": 83.21,
+    "id": "w180"
+  },
+  {
+    "text": "runs",
+    "start": 83.29,
+    "end": 83.38,
+    "id": "w181"
+  },
+  {
+    "text": "can",
+    "start": 83.38,
+    "end": 83.51,
+    "id": "w182"
+  },
+  {
+    "text": "go",
+    "start": 83.51,
+    "end": 83.55,
+    "id": "w183"
+  },
+  {
+    "text": "to",
+    "start": 83.6,
+    "end": 83.67,
+    "id": "w184"
+  },
+  {
+    "text": "four",
+    "start": 83.67,
+    "end": 83.81,
+    "id": "w185"
+  },
+  {
+    "text": "separate",
+    "start": 83.87,
+    "end": 84.17,
+    "id": "w186"
+  },
+  {
+    "text": "foundry",
+    "start": 84.17,
+    "end": 84.43,
+    "id": "w187"
+  },
+  {
+    "text": "graders.",
+    "start": 84.49,
+    "end": 84.93,
+    "id": "w188"
+  },
+  {
+    "text": "Editorial",
+    "start": 84.93,
+    "end": 85.63,
+    "id": "w189"
+  },
+  {
+    "text": "selection,",
+    "start": 85.63,
+    "end": 86.11,
+    "id": "w190"
+  },
+  {
+    "text": "persona",
+    "start": 86.19,
+    "end": 86.53,
+    "id": "w191"
+  },
+  {
+    "text": "quality,",
+    "start": 86.53,
+    "end": 87.03,
+    "id": "w192"
+  },
+  {
+    "text": "semantic",
+    "start": 87.15,
+    "end": 87.49,
+    "id": "w193"
+  },
+  {
+    "text": "grounding,",
+    "start": 87.49,
+    "end": 88.1,
+    "id": "w194"
+  },
+  {
+    "text": "and",
+    "start": 88.11,
+    "end": 88.2,
+    "id": "w195"
+  },
+  {
+    "text": "restraint.",
+    "start": 88.33,
+    "end": 88.99,
+    "id": "w196"
+  },
+  {
+    "text": "Grading",
+    "start": 88.99,
+    "end": 89.61,
+    "id": "w197"
+  },
+  {
+    "text": "stays",
+    "start": 89.61,
+    "end": 90.05,
+    "id": "w198"
+  },
+  {
+    "text": "outside",
+    "start": 90.05,
+    "end": 90.37,
+    "id": "w199"
+  },
+  {
+    "text": "live",
+    "start": 90.37,
+    "end": 90.93,
+    "id": "w200"
+  },
+  {
+    "text": "playback.",
+    "start": 91.71,
+    "end": 92,
+    "id": "w201"
+  },
+  {
+    "text": "The",
+    "start": 92,
+    "end": 92.17,
+    "id": "w202"
+  },
+  {
+    "text": "app",
+    "start": 92.17,
+    "end": 92.34,
+    "id": "w203"
+  },
+  {
+    "text": "is",
+    "start": 92.34,
+    "end": 92.45,
+    "id": "w204"
+  },
+  {
+    "text": "deployed",
+    "start": 92.63,
+    "end": 92.92,
+    "id": "w205"
+  },
+  {
+    "text": "on",
+    "start": 92.92,
+    "end": 93.03,
+    "id": "w206"
+  },
+  {
+    "text": "Azure",
+    "start": 93.03,
+    "end": 93.22,
+    "id": "w207"
+  },
+  {
+    "text": "Container",
+    "start": 93.37,
+    "end": 93.85,
+    "id": "w208"
+  },
+  {
+    "text": "Apps",
+    "start": 93.85,
+    "end": 94.03,
+    "id": "w209"
+  },
+  {
+    "text": "with",
+    "start": 94.15,
+    "end": 94.31,
+    "id": "w210"
+  },
+  {
+    "text": "a",
+    "start": 94.31,
+    "end": 94.37,
+    "id": "w211"
+  },
+  {
+    "text": "private",
+    "start": 94.37,
+    "end": 94.78,
+    "id": "w212"
+  },
+  {
+    "text": "container",
+    "start": 94.78,
+    "end": 95.2,
+    "id": "w213"
+  },
+  {
+    "text": "registry,",
+    "start": 95.33,
+    "end": 95.99,
+    "id": "w214"
+  },
+  {
+    "text": "managed",
+    "start": 95.99,
+    "end": 96.4,
+    "id": "w215"
+  },
+  {
+    "text": "identity,",
+    "start": 96.46,
+    "end": 97,
+    "id": "w216"
+  },
+  {
+    "text": "key",
+    "start": 97,
+    "end": 97.17,
+    "id": "w217"
+  },
+  {
+    "text": "vault",
+    "start": 97.17,
+    "end": 97.38,
+    "id": "w218"
+  },
+  {
+    "text": "secrets,",
+    "start": 97.46,
+    "end": 97.93,
+    "id": "w219"
+  },
+  {
+    "text": "and",
+    "start": 97.93,
+    "end": 98.2,
+    "id": "w220"
+  },
+  {
+    "text": "password",
+    "start": 98.2,
+    "end": 98.75,
+    "id": "w221"
+  },
+  {
+    "text": "protected",
+    "start": 98.75,
+    "end": 99.37,
+    "id": "w222"
+  },
+  {
+    "text": "access.",
+    "start": 99.37,
+    "end": 100,
+    "id": "w223"
+  },
+  {
+    "text": "Azure",
+    "start": 100,
+    "end": 100.26,
+    "id": "w224"
+  },
+  {
+    "text": "Speech",
+    "start": 100.26,
+    "end": 100.63,
+    "id": "w225"
+  },
+  {
+    "text": "can",
+    "start": 100.63,
+    "end": 100.72,
+    "id": "w226"
+  },
+  {
+    "text": "read",
+    "start": 100.72,
+    "end": 100.93,
+    "id": "w227"
+  },
+  {
+    "text": "aired",
+    "start": 100.93,
+    "end": 101.11,
+    "id": "w228"
+  },
+  {
+    "text": "stories",
+    "start": 101.19,
+    "end": 101.55,
+    "id": "w229"
+  },
+  {
+    "text": "aloud.",
+    "start": 101.55,
+    "end": 102,
+    "id": "w230"
+  },
+  {
+    "text": "The",
+    "start": 102,
+    "end": 102.25,
+    "id": "w231"
+  },
+  {
+    "text": "deployment",
+    "start": 102.25,
+    "end": 103.09,
+    "id": "w232"
+  },
+  {
+    "text": "includes",
+    "start": 103.09,
+    "end": 103.78,
+    "id": "w233"
+  },
+  {
+    "text": "health",
+    "start": 103.78,
+    "end": 104.06,
+    "id": "w234"
+  },
+  {
+    "text": "probes",
+    "start": 104.3,
+    "end": 104.8,
+    "id": "w235"
+  },
+  {
+    "text": "and",
+    "start": 104.8,
+    "end": 105.05,
+    "id": "w236"
+  },
+  {
+    "text": "rollback.",
+    "start": 105.05,
+    "end": 105.93,
+    "id": "w237"
+  },
+  {
+    "text": "Next: licensed live feeds, deeper player perspectives, and shared state for reconnecting viewers and horizontal scale. One match. Every perspective. A useful story, grounded in evidence.",
+    "start": 106.6,
+    "end": 117.935
+  }
+]
