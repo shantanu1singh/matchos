@@ -1,8 +1,8 @@
 # MatchOS architecture
 
-MatchOS turns a synthetic football feed into verified, personalized match updates. A Python backend simulates the match and computes evidence; Microsoft Agent Framework orchestrates the intelligence workflow. A browser renders the pitch, viewer perspectives, production history, and execution telemetry.
+MatchOS turns a synthetic football feed into verified, personalized match updates. A Python backend simulates the match and computes evidence. Microsoft Agent Framework orchestrates shared evidence generation and each viewer's complete editorial workflow; application code schedules runs and delivers live frames. A browser renders the pitch, viewer perspectives, production history, and execution telemetry.
 
-This document describes the current implementation. Setup and environment variables are documented in [README.md](README.md).
+**Implementation status:** this document describes the code in this checkout, including the implemented [Agent Framework viewer workflows](#agent-framework-architecture). An existing Azure image is unchanged until the next deployment. Setup and environment variables are documented in [README.md](README.md).
 
 ## System overview
 
@@ -26,7 +26,7 @@ flowchart LR
         Simulator["Seeded match simulator"]
         LiveState["Live rolling state"]
         Workflow["Agent Framework shared evidence workflow"]
-        Viewers["Independent viewer selection and language workers"]
+        Viewers["Independent Agent Framework viewer workflows"]
         Traces["Session telemetry and model logs"]
         Server --> Session
         Simulator -->|"Events and tracking ticks"| Session
@@ -55,6 +55,130 @@ The guided demo (`demo.py`) replays the same seeded simulator to three checkpoin
 
 The browser's evidence mode draws only the attached source-event locations, hiding current player and ball positions. Its before/after comparisons use the selected moment's facts, and stories without source paths expose aggregate metrics without inventing movement. Telemetry summaries are derived from captured call and publication records, while detailed payload elements remain stable during polling.
 
+## Agent Framework architecture
+
+The implementation runs one shared evidence workflow and one independently scheduled editorial workflow per configured viewer. With the default three viewers, this means three editorial workflows using two reusable model roles each. It does not require six model deployments or six new Foundry-hosted agents.
+
+```mermaid
+flowchart TB
+    Feed["Simulator or future feed adapter"]
+    Live["Live state, pitch frames and playback"]
+    Batch["Bounded pending evidence batch"]
+    Feed --> Live
+    Feed --> Batch
+
+    subgraph AF["Microsoft Agent Framework: intelligence orchestration"]
+        subgraph Evidence["SharedEvidenceWorkflow: deterministic executors"]
+            State["StateUpdateExecutor"]
+            Trigger{"TriggerExecutor: review needed?"}
+            Quiet["Quiet result: no model call"]
+            Verify["VerificationExecutor"]
+            Pool["Immutable verified candidate and state snapshot"]
+            State --> Trigger
+            Trigger -->|"No"| Quiet
+            Trigger -->|"Yes"| Verify --> Pool
+        end
+        Broadcaster["BroadcasterEditorialWorkflow<br/>Neutral, English"]
+        Fan["FanEditorialWorkflow<br/>Liverpool, Spanish"]
+        Analyst["AnalystEditorialWorkflow<br/>Neutral, English"]
+    end
+
+    Batch --> State
+    Pool --> Dispatch["Application scheduler: offer latest pool independently"]
+    Dispatch --> Broadcaster
+    Dispatch --> Fan
+    Dispatch --> Analyst
+    Broadcaster --> Results["Finished card or held-story outcome"]
+    Fan --> Results
+    Analyst --> Results
+    Results --> Socket["FastAPI WebSocket delivery"]
+    Live --> Socket
+    Socket --> UI["Browser: shared pitch and viewer cards"]
+    UI -->|"Listen to an aired story"| Speech["Registered Azure Speech clip"]
+```
+
+The scheduler remains application code: it starts runs, keeps only the newest pending pool per viewer and cancels obsolete work. All editorial stage ordering, branching and result production are inside the viewer workflows. There is no wait-for-all barrier between viewers during normal playback. The guided Judge demo may observe completion of all three workflows for its readiness indicator without changing their selection logic.
+
+### Agents, executors and models
+
+An Agent Framework **workflow** connects stages; an **executor** is a typed stage that can run ordinary code or invoke a model; a generative **Agent** supplies model instructions and invocation. Being part of the workflow does not turn every stage into an LLM agent.
+
+| Piece | Kind | Responsibility | Model call |
+|---|---|---|---|
+| Shared evidence workflow | Framework workflow with deterministic executors | Aggregate events, evaluate triggers and construct all supported candidates with facts and source evidence. | None. |
+| Editorial selector for each viewer | Custom framework executor wrapping the typed decision client | Choose one verified candidate or `NONE`, using that viewer's profile, match context and aired history. Owns editorial relevance and importance. | Foundry `Decision-1` through its native decision API. |
+| Publication preflight | Deterministic framework executor | Avoid spending language tokens on an expired, duplicate or temporarily ineligible result. Does not select a different story. | None. |
+| Persona writer for each viewer | Framework language `Agent`, hosted in the viewer workflow through a typed executor/adapter | Write complete copy from the selected facts in the viewer's language and style. | Foundry `gpt-6-luna` through the framework chat client. |
+| Copy validation | Deterministic framework executor | Check supported numbers, units and output constraints; use localized fact-based fallback on failure. | None. |
+| Publication commit | Deterministic framework executor | Recheck freshness, cancellation/profile validity and publication state; commit aired history only after a finished card is ready. | None. |
+| Held-story outcome | Framework terminal executor/output | Return a labelled model-abstention, publication-policy or error/fallback explanation; retain the previous aired card. | None. |
+
+For the default three viewers there are **three logical editorial selectors and three logical persona writers**. They reuse the same two configured deployments. These are independent per-viewer roles, not debating agents. Selection/history state belongs to the viewer run; prose generation needs no shared conversation history. The typed Decision-1 selector is a custom executor rather than a chat `Agent`. Its Azure Core transport is unchanged; the framework owns when it runs and what its result triggers. The persona writers use independent invocations of the shared stateless language Agent, with an explicit viewer profile in each prompt.
+
+There is no producer LLM, verifier LLM or supervisor LLM in this design. A supervising model would add cost and latency without a defined decision to make here. Azure Speech is a service invoked for published text, and saved-run graders are a separate evaluation path.
+
+### Inside every viewer workflow
+
+```mermaid
+flowchart TD
+    Input["Frozen candidates, state, viewer profile and aired history"]
+    Eligible{"Any current, unseen candidate?"}
+    Select["EditorialSelectionExecutor<br/>Decision-1 selects ID or NONE"]
+    Choice{"Selected a valid candidate<br/>and chose to surface it?"}
+    Preflight{"PublicationPreflightExecutor<br/>Freshness, duplication, cadence and on-air interval"}
+    Writer["PersonaLanguageExecutor<br/>Framework Agent using gpt-6-luna"]
+    Guard["CopyValidationExecutor<br/>Validate copy or use localized fallback"]
+    Commit{"PublicationCommitExecutor<br/>Still current and eligible?"}
+    Air["AIR: finished card, evidence and explanation<br/>Commit publication history"]
+    Hold["HOLD: structured reason<br/>Keep last aired card visible"]
+
+    Input --> Eligible
+    Eligible -->|"No: skip models"| Hold
+    Eligible -->|"Yes"| Select --> Choice
+    Choice -->|"NONE or no"| Hold
+    Choice -->|"Yes"| Preflight
+    Preflight -->|"Hold"| Hold
+    Preflight -->|"Continue"| Writer --> Guard --> Commit
+    Commit -->|"No"| Hold
+    Commit -->|"Yes"| Air
+```
+
+The two publication checks serve different times: the preflight avoids an unnecessary language call; the commit protects against a story expiring or the viewer changing during that call. Neither is a second model evaluation of whether the story is interesting. Every stage and terminal reason is recorded in local telemetry. Full tracing can expose framework executor spans; compact cloud tracing retains the existing connected evidence, model-call and persona-outcome structure.
+
+### Publication policy and model authority
+
+`PublicationPolicy` in [`publication.py`](matchos/publication.py) replaces the former producer's mixed responsibility. It enforces freshness, duplicate suppression, minimum viewer/update intervals, the current on-air interval and a short tactical hold after a goal. Major-event interruption exceptions remain explicit delivery rules. `check()` is a non-mutating preflight; `commit()` rechecks and records only an actual air, without an await between those operations.
+
+Decision-1 owns relevance, importance and whether to surface a candidate. `EditorialSelectionExecutor` interprets its publication predicate (`should_surface >= 0.5`) and treats `NONE` as terminal. There are no additional publication importance thresholds or persona/frame whitelists. Publication suppression never reranks candidates or invents an alternative. Candidate membership validation, bounded score parsing and labelled provider fallbacks still apply.
+
+The public `PipelineResult.producer` / `ProducerDecision` wire fields and the old `Producer` import remain for compatibility; they now refer to deterministic publication outcomes. No producer model is called. Each viewer has its own policy and aired history. Publication commits are in-process; they are not durable transactions or cross-replica state.
+
+### Framework boundary and code map
+
+| Concern | Owner | Source |
+|---|---|---|
+| Shared evidence stages | Named Agent Framework workflow with deterministic executors. | `build_shared_workflow()` in [`workflow.py`](matchos/workflow.py). |
+| Viewer stage order, branching and terminal output | Named Agent Framework workflow with typed custom executors. | `build_viewer_workflow()` in [`viewer_workflow.py`](matchos/viewer_workflow.py). |
+| Decision inference | Framework `EditorialSelectionExecutor` calls the native typed decision adapter. | [`viewer_workflow.py`](matchos/viewer_workflow.py), [`azure_foundry.py`](matchos/azure_foundry.py). |
+| Language inference and validation | Framework `PersonaLanguageExecutor` invokes the language Agent; `CopyValidationExecutor` validates the unpublished draft or selects localized fallback. | [`viewer_workflow.py`](matchos/viewer_workflow.py), [`language_agent.py`](matchos/language_agent.py). |
+| Publication | Framework preflight and commit executors use one viewer-owned policy. | [`publication.py`](matchos/publication.py). |
+| Live playback and transport | Application FastAPI/WebSocket/simulator code. | [`server.py`](matchos/server.py), [`session.py`](matchos/session.py). |
+| Backpressure and lifecycle | Thin application scheduler: one current run and one latest pending pool per viewer; cancellation on removal/reset; rebuild after a failed framework run. | [`perspective.py`](matchos/perspective.py). |
+| Infrastructure and downstream services | Container Apps, identity, Key Vault, Speech and Application Insights. Framework orchestration does not itself add persistence or scale-out. | [Azure hosting](#azure-hosting). |
+
+Read the stitching code in this order:
+
+1. [`session.py`](matchos/session.py): `MatchSession.__post_init__()` creates the shared graph; `_process_models()` runs it.
+2. [`workflow.py`](matchos/workflow.py): `build_shared_workflow()` selects the deterministic evidence graph. A complete single-viewer legacy graph is retained for direct integrations; it is not the live app's three-viewer coordinator.
+3. [`server.py`](matchos/server.py): `configure_views()` creates `Perspective` instances and `compare()` offers the frozen batch to each.
+4. [`perspective.py`](matchos/perspective.py): `process()` runs the viewer framework graph and delivers only terminal `output` events. Executor-input bookkeeping events must not become UI updates.
+5. [`viewer_workflow.py`](matchos/viewer_workflow.py): `build_viewer_workflow()` connects context, editorial selection, publication preflight, persona language, copy validation, publication commit and terminal outcome. Conditional edges skip language for empty/expired evidence, model abstention and publication holds.
+6. [`language_agent.py`](matchos/language_agent.py): `generate_text()` calls the framework Agent; `draft_overlay()` handles the language deadline/fallback; `validate_overlay()` checks its text separately. The language factory also returns a generic `AgentExecutor` for compatibility, but the viewer graph uses a custom typed executor to preserve the moment/profile/card contracts rather than passing a shared conversation history.
+
+The same workflow is exercised by local evaluations through `Perspective.process()`. Regression tests cover model `NONE`/no-surface paths, old persona/importance filters no longer vetoing model choices, preflight holds skipping language, expiry during inference, duplicate suppression, major-event interruptions, failed-run recovery, cancellation/reset and a slow viewer not delaying frames or other viewers. The public viewer-update shape remains unchanged.
+
+**Microsoft Agent Framework orchestrates shared evidence generation and each viewer's editorial workflow; application code handles live playback, scheduling and transport.** Foundry hosts the model deployments and receives correlated traces. The Python workflows run in Container Apps, not inside a separately created Foundry prompt agent.
+
 ## Components
 
 | Component | Responsibility | Source |
@@ -67,11 +191,12 @@ The browser's evidence mode draws only the attached source-event locations, hidi
 | Trigger engine | Uses deterministic changes, sample thresholds, major events, and cooldowns to decide when model evaluation is worthwhile. | [`trigger_engine.py`](matchos/trigger_engine.py) |
 | Decision client | Selects a verified candidate or NONE and scores editorial importance through Azure Foundry, Cloudflare, Vercel, or existing local fallback logic. | [`decision_client.py`](matchos/decision_client.py) |
 | Verifier | Builds all supported candidates from deterministic state and events before model selection; attaches facts, checks, and evidence references. | [`verifier.py`](matchos/verifier.py) |
-| Producer | Applies importance, novelty, persona relevance, and cadence rules to air, suppress, or reject a moment. | [`producer.py`](matchos/producer.py) |
-| Copy renderer | Builds immediate, fact-based overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
+| Publication policy | Enforces delivery freshness, duplication and cadence; has no editorial importance or persona-category veto. | [`publication.py`](matchos/publication.py); [`producer.py`](matchos/producer.py) retains the old import. |
+| Copy renderer | Builds fact-based fallback overlays and checks numbers in generated prose. | [`copy.py`](matchos/copy.py) |
 | Language agent | Uses an Agent Framework agent and its Azure Responses client (or the retained LiteLLM adapter) to personalize verified facts; supplies local fallback copy. | [`language_agent.py`](matchos/language_agent.py) |
 | Workflow | Runs shared state, triggering and candidate verification; supports the complete single-viewer graph for direct workflow integrations. | [`workflow.py`](matchos/workflow.py) |
-| Perspective worker | Selects and renders independently for one viewer, with private producer/history, one pending pool and cancellation. | [`perspective.py`](matchos/perspective.py) |
+| Viewer workflow | Framework graph for selection, publication preflight, language, copy validation and publication commit. | [`viewer_workflow.py`](matchos/viewer_workflow.py) |
+| Perspective scheduler | Starts one viewer workflow at a time, retains the newest pending pool and delivers terminal outcomes; owns private policy/history and cancellation. | [`perspective.py`](matchos/perspective.py) |
 | Editorial explanation | Builds evidence summaries and held-candidate explanations; distinguishes model preference, producer policy and local fallback. | [`editorial.py`](matchos/editorial.py) |
 | Configuration | Selects providers, models, credentials, and timeouts; loads `.env` and `.env.local`. | [`llm_config.py`](matchos/llm_config.py) |
 | Observability | Captures session traces and correlated, redacted terminal model logs; optionally exports OpenTelemetry. | [`telemetry.py`](matchos/telemetry.py), [`model_logging.py`](matchos/model_logging.py) |
@@ -95,7 +220,7 @@ The deployment reuses the existing Foundry account and linked Application Insigh
 
 One replica is intentional: match sessions and speech registration/cache are in memory. Sticky sessions do not preserve state across restarts, and deployments can disconnect active matches. Shared state, durable feed ingestion and horizontal scale are future work. [DEPLOYMENT.md](DEPLOYMENT.md) explains deployment, validation, rollback, operational limits and the proposed larger-scale architecture.
 
-## Intelligence workflow
+## Intelligence flow
 
 ```mermaid
 flowchart TD
@@ -105,7 +230,7 @@ flowchart TD
     Quiet["quiet: stop without a model call"]
     Decision["decision: choose verified candidate ID or NONE"]
     Verify["verifier: evidence checks and candidate set"]
-    Produce{"producer: AIR, SUPPRESS, or REJECT"}
+    Produce{"publication preflight: continue or hold"}
     Trace["trace: retain candidate and rejection / suppression reason"]
     Publish["publish: one finished card"]
     Agent["language_agent: persona-specific prose"]
@@ -124,12 +249,12 @@ flowchart TD
     Current -->|"Expired or suppressed"| Trace
 ```
 
-The workflow mixes deterministic code executors with two model roles:
+This diagram summarizes the shared evidence graph and the separate per-viewer framework graphs. The system mixes deterministic framework executors with two model roles:
 
 - **Decision:** chooses which verified candidate is worth showing to the viewer now, or `NONE`. It receives candidate facts/checks, persona preferences, match time/score, and recent aired updates. Analyst and Broadcaster cover the whole match without a team allegiance; model profiles omit inactive team/player preferences. Fan profiles carry their supported team and Player profiles carry their focused player. It scores editorial importance and interruption probability. Unknown candidate IDs or invalid responses use a persona-aware local fallback with recent-story suppression and a `NONE` option, restricted to verified candidates; the model cannot invent a new candidate.
 - **Language:** renders an already verified moment for the requested persona and language. It does not compute the canonical match metrics. Provider failures use local copy; unsupported numbers or fractional possession/bypass values cause the language guard to use a verified template.
 
-The producer runs after evidence verification and editorial selection. Choosing `NONE` suppresses the update without generating language copy; producer suppression does not rerank other candidates. A separate session gate also prevents an ordinary update from replacing a graphic already on air too soon; major moments can interrupt. A workflow `AIR` result therefore does not guarantee final display.
+Publication policy is deterministic Python inside framework executors. Choosing `NONE` suppresses the update without language generation; publication suppression does not rerank candidates. Both preflight and commit enforce the viewer's on-air interval and freshness, with explicit major-event interruption exceptions. The legacy direct single-viewer integration also retains its session display gate.
 
 ### Data and units
 
@@ -155,7 +280,7 @@ sequenceDiagram
     participant Feed as Live feed task
     participant Session as MatchSession
     participant Worker as Shared evidence workflow
-    participant Viewer as Each viewer worker
+    participant Viewer as Each viewer framework workflow
     participant Model as Model provider
 
     UI->>Feed: Start or resume
@@ -178,11 +303,11 @@ sequenceDiagram
                     Viewer->>Model: Select candidate or NONE using own profile/history
                     Note over Feed,Model: Frames and shared evidence processing continue
                     Model-->>Viewer: Editorial choice or local fallback
-                    Viewer->>Viewer: Apply own producer and on-air rules
+                    Viewer->>Viewer: Framework publication preflight
                     opt Candidate selected and AIR
                         Viewer->>Model: Render selected facts for this viewer
                         Model-->>Viewer: Prose or fallback
-                        Viewer->>Viewer: Recheck expiry and commit air time
+                        Viewer->>Viewer: Framework copy validation and publication commit
                         Viewer-->>UI: One finished card and explanation (if current)
                     end
                 end
@@ -195,7 +320,7 @@ The live feed and workflow use **separate state engines**. The live engine advan
 
 There is one pending batch, rather than one queued model job per frame. It accumulates events and samples while retaining the newest frame, with evidence bounded to the rolling history window. A bounded output queue hands workflow results back to the feed. Expired moments and outputs for an old primary viewer profile are discarded.
 
-The sidebar defaults to three compact cards beside one shared pitch: neutral broadcaster in English (primary), Liverpool supporter in Spanish and neutral analyst in English. The shared Agent Framework workflow finishes after broadcasting a frozen `VerifiedCandidates` / state snapshot. Every viewer (including the primary viewer) then runs its own `Perspective` worker, typed editorial selection, producer policy, and language rendering. Selection histories and cadence are private to each viewer. A `NONE` result or slow model in one perspective does not delay the other perspectives or candidate generation. Player-focused candidates for configured viewers are included in the common pool.
+The sidebar defaults to three compact cards beside one shared pitch: neutral broadcaster in English (primary), Liverpool supporter in Spanish and neutral analyst in English. The shared Agent Framework workflow finishes after broadcasting a frozen `VerifiedCandidates` / state snapshot. Every viewer (including the primary viewer) has a `Perspective` scheduler running its own Agent Framework editorial workflow, publication policy and language rendering. Selection histories and cadence are private to each viewer. A `NONE` result or slow model in one perspective does not delay the other perspectives or candidate generation. Player-focused candidates for configured viewers are included in the common pool.
 
 Each perspective processes one pool at a time, retaining only the latest pending pool. The last aired card stays visible while language is prepared. One complete card is emitted after language validation (or persona fallback on error/deadline), a final expiry check, and production approval. Air-time and recent-update history begin at publication; there is no intermediate template or later enrichment replacement. Changes/removals close only affected workers; unchanged workers retain history. Settings changes use the latest pool and can refresh focused-player evidence. Snapshot timestamps and profile checks keep the UI tied to the correct viewer. Independent selections may agree; the system never fabricates distinct stories for a demo.
 
@@ -207,7 +332,7 @@ Pause stops the feed task without waiting for outstanding model calls. Resume re
 
 ## Model providers and configuration
 
-**Microsoft Agent Framework** owns workflow orchestration and calls the Azure generative deployment with its official `OpenAIChatClient` (Responses API). **Azure Core** supplies async authenticated SDK transport for Foundry Decision-1’s native `/providers/microsoft/v1/systemone` endpoint. Decision-1 uses bounded questions rather than chat. **LiteLLM**, Cloudflare and Vercel remain selectable adapters. [`azure_foundry.py`](matchos/azure_foundry.py) contains the Microsoft adapters.
+**Microsoft Agent Framework** orchestrates both the shared evidence workflow and every viewer's editorial workflow. Its language Agent uses the official `OpenAIChatClient` (Responses API). `Perspective.process()` runs the graph and forwards terminal outputs; its scheduler does not implement editorial branching. **Azure Core** supplies async authenticated SDK transport for Foundry Decision-1’s native `/providers/microsoft/v1/systemone` endpoint. Decision-1 uses bounded questions rather than chat. **LiteLLM**, Cloudflare and Vercel remain selectable adapters. [`azure_foundry.py`](matchos/azure_foundry.py) contains the Microsoft adapters.
 
 | Role | Configured default | Alternatives / fallback |
 |---|---|---|
@@ -270,7 +395,7 @@ Export requires `MATCHOS_OTEL_ENABLED=1` and the optional tracing SDKs. SDK sens
 flowchart LR
     Cases["Authored cases: match checkpoints and editorial history"]
     Replay["Seeded simulator replay and normal evidence workflow"]
-    Workers["Actual Perspective workers: select, produce, render"]
+    Workers["Actual viewer framework workflows: select, validate, publish"]
     Checks["Mechanical checks and authored expectations"]
     Saved["JSON, Markdown and JSONL reports"]
     Graders["Foundry cloud graders: editorial, persona, grounding, restraint"]
@@ -285,14 +410,14 @@ Foundry Projects SDK submits the actual saved outputs to the project Evals API. 
 
 ## Current boundaries
 
-The simulator is the implemented feed source. A future real-match adapter should produce the same event/tracking contracts and consistent units. The current app has no persistent match storage, distributed job queue, authentication layer, or cross-process session recovery. Numeric faithfulness checks constrain generated copy but do not prove every qualitative claim; deterministic verification establishes the canonical facts.
+The simulator is the implemented feed source. A future real-match adapter should produce the same event/tracking contracts and consistent units. The current app has no persistent match storage, distributed job queue, individual user accounts, or cross-process session recovery. Its deployed access control is a shared HTTP Basic gate with a signed browser cookie, as described above. Numeric faithfulness checks constrain generated copy but do not prove every qualitative claim; deterministic verification establishes the canonical facts.
 
 
 ### Default lab turning points and freshness
 
 The `press_collapse` feed stages an Isak goal from 65', then one City dismissal at 68' (Kovacic). These change the simulator's score, active roster and defensive shape. The state engine tracks active player counts from tracking and cumulative dismissals independently of rolling-stat expiry. Every verified moment includes the frozen score, players remaining and red-card counts, so decision and language inputs can explain the current match context without inventing consequences.
 
-Routine candidates expire after 40 match seconds. Goal/dismissal deadlines are 120 match seconds from the source event, not from each candidate refresh. Recent major evidence can be recovered for 60 match seconds after the event; each producer records aired source event IDs, and each viewer skips covered or already-expired candidates before calling a model. The final freshness check still rejects results that expire during decision/language waits. At accelerated playback, match-time windows elapse faster than model wall-clock latency. The retained card and held notice communicate that outcome separately from the new simulated event.
+Routine candidates expire after 40 match seconds. Goal/dismissal deadlines are 120 match seconds from the source event, not from each candidate refresh. Recent major evidence can be recovered for 60 match seconds after the event; each publication policy records aired source event IDs, and each viewer skips covered or already-expired candidates before calling a model. The final freshness check still rejects results that expire during decision/language waits. At accelerated playback, match-time windows elapse faster than model wall-clock latency. The retained card and held notice communicate that outcome separately from the new simulated event.
 
 ## Viewer languages
 

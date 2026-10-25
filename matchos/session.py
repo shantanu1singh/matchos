@@ -12,7 +12,7 @@ from matchos.language_agent import personalize
 from matchos.schemas import MatchEvent, Overlay, PipelineResult, Tick, TrackingFrame, ViewerProfile
 from matchos.simulator import MatchSimulator
 from matchos.state_engine import StateEngine, THIRTY
-from matchos.workflow import LiveTick, MatchServices, Workflow, build_workflow
+from matchos.workflow import LiveTick, MatchServices, Workflow, build_shared_workflow
 
 
 @dataclass
@@ -47,7 +47,7 @@ class MatchSession:
 
     def __post_init__(self) -> None:
         self.simulator = MatchSimulator(seed=self.seed, scenario_id=self.scenario_id)
-        self.workflow, self.services = build_workflow(shared_candidates_only=True)
+        self.workflow, self.services = build_shared_workflow()
 
     async def warmup(self) -> None:
         ticks = await asyncio.to_thread(self.simulator.collect_warmup)
@@ -129,7 +129,7 @@ class MatchSession:
         except Exception as exc:
             logging.getLogger(__name__).error("Model workflow failed (%s); live frames continue", type(exc).__name__)
             # A failed framework run must not leave its executors mid-run.
-            self.workflow, self.services = build_workflow(self.services)
+            self.workflow, self.services = build_shared_workflow(self.services)
 
     async def close(self) -> None:
         self.running = False

@@ -1,0 +1,43 @@
+{
+  "runId": "ebcfdb084e81",
+  "source": "Current local checkout, live Azure models, analyst dismissal checkpoint at 68:01",
+  "stages": [
+    "viewer context · complete · 0 ms",
+    "editorial selection: azure-foundry:Decision-1 · response · 1263.7 ms · call e1fddddf",
+    "editorial selection · complete · 1264.47 ms",
+    "publication preflight · complete · 0.04 ms",
+    "reasoning: azure-foundry:gpt-6-luna · response · 2990.33 ms · call a9abb79f",
+    "persona language · complete · 2992.12 ms",
+    "language fact guard · complete · 0 ms",
+    "final overlay · complete · 0.29 ms",
+    "publication commit · complete · 0.03 ms",
+    "viewer production · complete · 0 ms"
+  ],
+  "summary": [
+    {
+      "label": "Decision",
+      "value": "azure-foundry:Decision-1 · 1264 ms"
+    },
+    {
+      "label": "Language",
+      "value": "azure-foundry:gpt-6-luna · 2990 ms"
+    },
+    {
+      "label": "Story",
+      "value": "RED CARD"
+    },
+    {
+      "label": "Publication",
+      "value": "Aired"
+    },
+    {
+      "label": "Total",
+      "value": "4272 ms"
+    }
+  ],
+  "captureViewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "captureMethod": "Actual browser screenshot, native UI pixels; video crops and pans over workflow stages"
+}

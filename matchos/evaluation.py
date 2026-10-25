@@ -96,11 +96,11 @@ async def evaluate_case(session, batch, case, viewer, index):
     worker = Perspective(session, viewer, index, send)
     if case["mode"] in {"recent", "major-aired"}:
         now = time.monotonic()
-        worker.producer.last_air[viewer.persona] = now - 5
+        worker.publication.last_air[viewer.persona] = now - 5
         worker.recent = [{"aired_at": now - 5, "frame": candidate.frame, "momentId": candidate.id,
                           "headline": "This same verified story just aired."} for candidate in batch.candidates.candidates]
         if case["mode"] == "major-aired":
-            worker.producer.aired_major_events.update(event for candidate in batch.candidates.candidates
+            worker.publication.aired_major_events.update(event for candidate in batch.candidates.candidates
                 if candidate.frame in {"GOAL", "COMEBACK", "RED_CARD"} for event in candidate.evidence)
     history = [{key: value for key, value in item.items() if key != "aired_at"}
                | {"secondsAgo": 5} for item in worker.recent]

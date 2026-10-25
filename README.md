@@ -14,23 +14,26 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the system design, Mermaid diagrams, 
 
 ## Critical path
 
-Microsoft Agent Framework runs one workflow per live tick:
+Microsoft Agent Framework runs one shared evidence workflow and an independent editorial workflow for each configured viewer:
 
 ```text
-state update (code)
-  → trigger (code)
-      → quiet end, or
-      → verified candidates (code)
-      → one typed editorial selection call
-      → producer (code)
-      → language agent (Gemini 3.8 Flash on Vertex AI when configured)
-      → validated persona text or fallback
-      → publish one finished card
+SharedEvidenceWorkflow
+  state update → trigger → quiet end, or verified candidate pool
+
+Each ViewerEditorialWorkflow (broadcaster / Liverpool fan / analyst)
+  current candidates → Decision-1 selects candidate or NONE
+    → NONE / no-surface: held outcome, skip language
+    → publication preflight (freshness, duplication, cadence, on-air interval)
+    → language Agent (Foundry gpt-6-luna by default)
+    → numeric/copy validation or localized fallback
+    → publication commit → one finished card, or a held outcome
 ```
 
-When evidence produces candidates, each configured viewer makes an independent decision call that chooses a verified candidate or `NONE`. Triggers without a supported candidate skip the model call. The language model is a renderer. It only receives the verified moment, and any reply that introduces a number the moment does not contain is discarded.
+The graph builders are [`build_shared_workflow()`](matchos/workflow.py) and [`build_viewer_workflow()`](matchos/viewer_workflow.py). The viewer graph uses typed framework executors; its language stage calls the framework Agent. Decision-1 uses its native typed Azure API from the selection executor. Azure, Cloudflare, Vercel and LiteLLM provider alternatives remain selectable.
 
-The live feed sends frames every 100 ms independently of the model workflow. One shared evidence workflow runs at a time; separate background workers select and render for each viewer. Feed events and tracking samples arriving during evidence processing are combined into one pending batch with the latest frame. Separate rolling state engines keep the UI current and the model's evidence consistent. Each viewer publishes one finished card after its selected story clears production rules and its language response passes validation. The last aired card stays visible while the next response is prepared; no intermediate template is sent. Failures or the configured reasoning deadline produce one persona-specific fallback. Air-time and recent-story history start only when the final card is ready. Expired moments and results for an old viewer profile are discarded. Viewer changes cancel only the changed perspective and select again from the latest verified pool; pause controls do not wait for model calls.
+Decision-1 owns editorial relevance and importance. [`PublicationPolicy`](matchos/publication.py) enforces delivery constraints only; it has no second importance threshold or persona/category whitelist. The `producer` JSON field and old `Producer` import remain compatible names for publication outcomes, not an additional model.
+
+The live feed sends frames every 100 ms independently of the workflows. One shared evidence run is active at a time; each viewer scheduler independently runs its own graph and retains only its newest pending pool. Feed events/samples are coalesced with the latest frame. Separate state engines keep UI statistics current and the evidence snapshot consistent. Each viewer emits only the framework's terminal output, never its input/bookkeeping events. The last aired card stays visible while the next response is prepared. Language failure/deadline produces localized fallback; unsupported generated numbers are rejected by a separate copy-validation stage. Air-time and recent-story history begin only when the final card passes the commit check. Expired or closed-viewer results cannot publish. Viewer changes cancel only the affected workflow; pause does not wait for model calls.
 
 ## Run
 
@@ -182,7 +185,7 @@ Events follow a Kloppy-style ontology in StatsBomb-like JSON. Tracking is contin
 
 ```bash
 .venv/bin/python -m pytest
-node --test tests/telemetry-ui.test.cjs tests/viewer-cards.test.cjs
+node --test tests/*.test.cjs
 ```
 
 ### Playback and persona comparisons
@@ -199,7 +202,7 @@ above the thumb shows the time playback will resume from.
 
 The shared pitch fills roughly two-thirds of the desktop view; three compact viewer cards stack on the right. Neutral Broadcaster, Liverpool Home fan and neutral Analyst open by default; Broadcaster is the primary viewer. Each card has its own persona/team/language/player settings in the ellipsis popover. Remove an extra card there or use the plus button to add it back.
 
-Every viewer independently selects a candidate or `NONE` from the same verified pool, with separate recent-update history and producer rules. Each card may therefore show a different story, the same story, or no interruption. A slow selection or language response never blocks another viewer or the pitch. Each worker has one pending snapshot; a busy worker coalesces newer snapshots instead of cancelling its current request or queuing every frame. Removing/changing a perspective cancels its outdated work; unchanged perspectives keep their history.
+Every viewer independently selects a candidate or `NONE` from the same verified pool, with separate recent-update history and publication policy. Each card may therefore show a different story, the same story, or no interruption. A slow selection or language response never blocks another viewer or the pitch. Each worker has one pending snapshot; a busy worker coalesces newer snapshots instead of cancelling its current request or queuing every frame. Removing/changing a perspective cancels its outdated work; unchanged perspectives keep their history.
 
 **Why this decision?** shows the chosen story, evidence summaries, and candidates held back. Model preferences are labelled separately from factual checks, producer policy and local fallback selection. The last aired story stays visible until a new finished story replaces it or the viewer/match is reset. After its live validity window it is labelled Last aired; this does not make expired candidates eligible to air again. Later suppressions appear in a separate row below the message with their reason and match time, while Facts & evidence stays attached to the aired story. No candidate is invented to force visual differences. Each extra viewer adds its own decision call per processed candidate pool, plus a language call only when its producer airs a story.
 
@@ -299,7 +302,7 @@ After a trigger, the verifier checks every supported story category and builds e
 
 The producer retains its novelty, relevance, cadence, and on-air rules after model selection. It may suppress the selected candidate but does not substitute a different story. Model importance and selection confidence affect presentation priority; selection confidence is an editorial model score, not a probability that verified facts are true. Viewer cards share candidate verification and perform separate editorial selections. Telemetry includes the entire candidate set and the editorial selection input/output.
 
-Decision inputs include whether this viewer has received a story, wall-clock waiting time, and time since the last air. Before the broadcaster's first story, its guidance allows useful opening context backed by a meaningful development (such as sustained possession plus increased final-third entries). Later stories must add something new. The model can still choose `NONE`; publication and cadence checks remain in place. Held-story messages show the publication score or broadcaster importance threshold when either blocks an update.
+Decision inputs include whether this viewer has received a story, wall-clock waiting time, and time since the last air. Before the broadcaster's first story, its guidance allows useful opening context backed by a meaningful development (such as sustained possession plus increased final-third entries). Later stories must add something new. The model can still choose `NONE`; publication and cadence checks remain in place. Held-story messages distinguish model abstention/no-surface recommendations from deterministic freshness, duplication and cadence holds. Broadcaster importance is an editorial model judgment rather than an extra hard-coded publication threshold.
 
 Azure Foundry is the default, Cloudflare and Vercel remain available, and existing local/offline failure handling is retained, restricted to verified candidates. No new selectable deterministic editorial branch is introduced.
 

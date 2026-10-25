@@ -104,7 +104,7 @@ def test_frames_pause_and_seek_continue_while_viewer_text_is_pending(monkeypatch
             try: await asyncio.Event().wait()
             finally: cancelled.set()
         monkeypatch.setattr(server, "MatchSession", DemoSession)
-        monkeypatch.setattr(language_module, "personalize", personalize)
+        monkeypatch.setattr(language_module, "generate_text", personalize)
         task = asyncio.create_task(server.match_socket(Socket()))
         await queue.put({"type": "start", "scenario": "balanced", "viewer": {"persona":"analyst"},
                          "views": [{"persona":"fan", "player_id":"blue_9"}, {"persona":"casual"}]})
@@ -138,4 +138,8 @@ def test_frames_pause_and_seek_continue_while_viewer_text_is_pending(monkeypatch
         finally:
             await queue.put(None)
             await asyncio.wait_for(task, 2)
-    asyncio.run(run())
+    async def initialized():
+        # Socket handlers require the same startup state as the deployed app.
+        async with server.app.router.lifespan_context(server.app):
+            await run()
+    asyncio.run(initialized())

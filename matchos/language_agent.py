@@ -266,24 +266,29 @@ def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecu
     return executor, agent, provider
 
 
-async def personalize(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
+async def generate_text(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
+    """Invoke the framework Agent; validation is a separate workflow stage."""
     response = await agent.run(prompt_payload(moment, viewer))
-    text = response.text or ""
+    return response.text or ""
+
+
+async def personalize(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
+    text = await generate_text(agent, moment, viewer)
     checked = faithful_text(text, moment, viewer)
     if checked != " ".join(text.strip().split()):
         logging.getLogger("matchos.model_calls").info("Reasoning text rejected by fact check for moment %s persona=%s; template=%s", moment.id, viewer.persona, checked)
     return checked
 
 
-async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
+async def draft_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
                         provider: str, timeout_s: float = 15) -> Overlay:
-    """Prepare one complete card; never publish intermediate template copy."""
+    """Prepare unpublished copy; CopyValidationExecutor must validate it."""
     fallback = render_overlay(moment, viewer, rich=True, provider="template")
     if agent is None:
         fallback.source = "template"
         return fallback
     try:
-        text = await asyncio.wait_for(personalize(agent, moment, viewer), timeout=timeout_s)
+        text = await asyncio.wait_for(generate_text(agent, moment, viewer), timeout=timeout_s)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -297,3 +302,17 @@ async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: Vie
     overlay = render_overlay(moment, viewer, rich=True, provider=provider)
     overlay.body = text
     return overlay
+
+
+def validate_overlay(overlay: Overlay, moment: VerifiedMoment, viewer: ViewerProfile) -> Overlay:
+    checked = faithful_text(overlay.body, moment, viewer)
+    if checked != " ".join(overlay.body.strip().split()):
+        overlay.source = "template"
+    overlay.body = checked
+    return overlay
+
+
+async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
+                        provider: str, timeout_s: float = 15) -> Overlay:
+    """Compatibility composition for integrations outside the viewer workflow."""
+    return validate_overlay(await draft_overlay(agent, moment, viewer, provider, timeout_s), moment, viewer)

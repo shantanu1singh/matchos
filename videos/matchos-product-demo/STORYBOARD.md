@@ -10,11 +10,11 @@ Click the fan's Listen control and play the actual returned Microsoft audio at 2
 
 ## 52–74: Agent architecture
 
-Retain the original architecture sequence: shared deterministic state and verified candidates; three independent Decision-1 branches; gpt-6-luna language; publication guards; asynchronous pitch loop. Model and framework names trace to the repository.
+Show the shared evidence workflow and three independent Agent Framework viewer workflows. Each branch contains Decision-1 selection, gpt-6-luna copy and deterministic publication policy; the note identifies policy checks before and after language. Preserve the existing timing, diagram motion and recorded narration. Model and framework names trace to the repository.
 
 ## 74–92: Tracing and grading
 
-Retain the earlier actual telemetry capture, explicitly a separate captured run. Explain local full telemetry, compact Azure traces, and four separate saved-run Foundry graders. No invented scores or claim that cloud grading is part of live playback.
+Use a fresh screenshot from the refactored local app with live Azure models, explicitly a separate run at 68:01 for Analyst. Pan over the actual selection, publication preflight, persona language, copy guard and publication commit stages. Measured model calls: Decision-1 1263.7ms and gpt-6-luna 2990.33ms; on-screen rounded values are 1,264ms and 2,990ms. Explain local full telemetry, compact Azure traces, and four separate saved-run Foundry graders. No invented scores or claim that cloud grading is part of live playback.
 
 ## 92–106: Azure
 

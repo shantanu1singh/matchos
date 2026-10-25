@@ -66,7 +66,7 @@ union requests, dependencies
 .venv/bin/python -m matchos.evaluation run --case goal --output evals/results/azure-goal.json
 ```
 
-Each checkpoint is replayed once per run, without historical inference. Normal evidence verification builds the candidate pool; the required goal/press/card fixture must actually be present or the suite reports a setup error. Fresh perspective workers run normal selection, producer and language code. The match clock stays fixed for reproducibility, so this suite measures wall-clock latency but does not simulate evidence aging during a moving match. Existing live freshness/cancellation tests cover that behavior.
+Each checkpoint is replayed once per run, without historical inference. Normal evidence verification builds the candidate pool; the required goal/press/card fixture must actually be present or the suite reports a setup error. Fresh perspective schedulers run the same Agent Framework viewer workflows as the app: selection, publication preflight, language, copy validation and publication commit. No separate evaluation-only editorial pipeline is used. The match clock stays fixed for reproducibility, so this suite measures wall-clock latency but does not simulate evidence aging during a moving match. Existing live freshness/cancellation tests cover that behavior.
 
 Reports are written to ignored `evals/results/`:
 

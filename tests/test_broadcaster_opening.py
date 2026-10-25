@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from matchos.decision_client import _editorial_state, _parse_selection
+from matchos.decision_client import _editorial_state, _parse_selection, selection_hold_reason
 from matchos.perspective import Perspective
 from matchos.producer import Producer
 from matchos.schemas import PipelineResult, VerifiedCandidates, ViewerProfile
@@ -22,7 +22,8 @@ def test_broadcaster_policy_distinguishes_opening_from_followup():
     assert 'Still choose NONE' in opening['editorialPolicy']['guidance']
     assert 'team_id' not in opening['viewer']
     assert opening['editorialPolicy']['minimumPublicationScore'] == .5
-    assert opening['editorialPolicy']['minimumImportance'] == 2.75
+    assert 'minimumImportance' not in opening['editorialPolicy']
+    assert opening['editorialPolicy']['repeatWindowSeconds'] == 90
     later = _editorial_state(engine.state, candidates, viewer,
                              {'recentUpdates': [{'frame': 'MOMENTUM_SWING', 'secondsAgo': 30}]})
     assert later['viewingContext']['hasAiredStory'] is True
@@ -71,19 +72,17 @@ def test_worker_tracks_actual_first_air_and_keeps_model_abstention():
 def test_surface_hold_reports_exact_score_without_forcing_first_story(score, display):
     _, candidates = setup_candidates()
     target = next(c for c in candidates if c.frame == 'MOMENTUM_SWING')
-    decision = Producer().decide(target, True, score, ViewerProfile(persona='broadcaster'))
-    assert decision.action == 'SUPPRESS'
-    assert f'{display} for publication; at least 50%' in decision.reason
+    reply = answers(target.id, candidates)
+    reply['shouldSurface']['probability'] = score
+    decision = _parse_selection(reply, candidates, 'test', 1)
+    assert f'{display} for publication; at least 50%' in selection_hold_reason(decision)
 
 
-def test_broadcaster_importance_hold_explains_gate_and_preserves_cadence():
+def test_publication_does_not_override_model_importance_but_still_deduplicates():
     _, candidates = setup_candidates()
     target = next(c for c in candidates if c.frame == 'MOMENTUM_SWING')
     viewer = ViewerProfile(persona='broadcaster')
     producer = Producer(clock=lambda: 1000)
-    held = producer.decide(target.model_copy(update={'importance': .5}), True, .9, viewer)
-    assert held.action == 'SUPPRESS'
-    assert 'importance 2.5/5' in held.reason and 'at least 2.75/5' in held.reason
-    accepted = producer.decide(target.model_copy(update={'importance': .55}), True, .5, viewer)
+    accepted = producer.decide(target.model_copy(update={'importance': .1}), True, .9, viewer)
     assert accepted.action == 'AIR'
     assert 'Same story aired' in producer.decide(target, True, .9, viewer).reason

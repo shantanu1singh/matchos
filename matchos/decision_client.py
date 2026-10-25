@@ -19,6 +19,7 @@ from matchos.schemas import MatchState, MomentDecision, MomentFrame, VerifiedMom
 
 logger = logging.getLogger(__name__)
 FRAMES = get_args(MomentFrame)
+SURFACE_THRESHOLD = 0.5
 
 QUESTIONS = {
     "tacticalShift": "Has a team's pressing or territorial structure materially changed?",
@@ -253,7 +254,7 @@ def _selection_questions(candidates: list[VerifiedMoment]) -> list[dict]:
 
 def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict:
     from matchos.language_agent import PERCENT_FACTS
-    from matchos.producer import GAPS, SURFACE_THRESHOLD, BROADCAST_IMPORTANCE_THRESHOLD
+    from matchos.publication import GAPS
     recent = context.get("recentUpdates", [])
     viewing = context.get("viewingContext") or {"hasAiredStory": bool(recent),
         "secondsWatching": None, "secondsWaitingForFirstStory": None,
@@ -280,8 +281,9 @@ def _editorial_state(state: MatchState, candidates: list[VerifiedMoment], viewer
             "viewingContext": viewing,
             "editorialPolicy": {"guidance": policies[viewer.persona], "minimumGapSeconds": GAPS[viewer.persona],
                 "minimumPublicationScore": SURFACE_THRESHOLD,
-                **({"minimumImportance": BROADCAST_IMPORTANCE_THRESHOLD * 5, "importanceScale": "0–5",
-                    "importanceExemptFrames": ["GOAL", "PRESS_BREAKDOWN", "RED_CARD", "COMEBACK"]} if viewer.persona == "broadcaster" else {}),
+                "repeatWindowSeconds": 90, "onAirWindowSeconds": 40,
+                "postGoalTacticalHoldSeconds": 15,
+                "majorEventInterruptions": ["GOAL", "COMEBACK", "RED_CARD"],
                 "timeUnit": "wall-clock seconds"}, **context,
             "verifiedCandidates": [
                 {"id": moment.id, "frame": moment.frame, "team": moment.team_id, "player": moment.player_id,
@@ -523,7 +525,7 @@ class LocalDecisionClient:
 
 def _fallback_candidate_scores(state: MatchState, candidates: list[VerifiedMoment], viewer: ViewerProfile, context: dict) -> dict[str, float]:
     """Offline editorial preferences; scores are heuristics, not calibrated probabilities."""
-    from matchos.producer import GAPS
+    from matchos.publication import GAPS
     recent = context.get("recentUpdates", [])
     scores = {}
     major = {"GOAL", "COMEBACK", "RED_CARD"}
@@ -609,3 +611,13 @@ def _frame_scores(state: MatchState, reasons: list[str], focus_player_id: str | 
     }
 
 
+# Interpret the model's publication predicate once, at the editorial-selection stage.
+def selection_hold_reason(decision: MomentDecision) -> str | None:
+    if decision.selected_candidate_id is None:
+        return "Decision model chose no update."
+    if decision.should_surface < SURFACE_THRESHOLD:
+        from decimal import Decimal
+        score = f"{(Decimal(str(decision.should_surface)) * 100).normalize():f}%"
+        return (f"The model rated this story {score} for publication; at least 50% is required. "
+                "Waiting for a stronger update.")
+    return None

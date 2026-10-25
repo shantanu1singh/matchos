@@ -20,7 +20,7 @@ def worker_setup(monkeypatch, render, *, timeout=1, persona='analyst', agent=Tru
     class Selector:
         async def select(self, state, offered, viewer, context):
             return _parse_selection(answers(target.id, offered), offered, 'test', 1)
-    monkeypatch.setattr(language_module, 'personalize', render)
+    monkeypatch.setattr(language_module, 'generate_text', render)
     session = SimpleNamespace(services=SimpleNamespace(decisions=Selector(), agent=object() if agent else None,
                               language_provider='test-language', reasoning_timeout_s=timeout),
                               telemetry=Telemetry(), live_state_engine=engine)
@@ -112,7 +112,7 @@ def test_render_failure_publishes_one_persona_fallback(monkeypatch, failure):
 
 def test_language_validation_happens_before_publication(monkeypatch):
     async def run():
-        original = language_module.personalize
+        original = language_module.generate_text
         worker, batch, _, target, messages = worker_setup(monkeypatch, original)
         class Agent:
             async def run(self, prompt): return SimpleNamespace(text='Liverpool made 999 shots.')
@@ -137,7 +137,7 @@ def test_direct_workflow_also_waits_for_final_copy(monkeypatch):
             started.set()
             await release.wait()
             return 'Final analyst text'
-        monkeypatch.setattr(language_module, 'personalize', render)
+        monkeypatch.setattr(language_module, 'generate_text', render)
         engine, candidates = setup_candidates()
         services = new_services()
         services.state_engine, services.verifier.state_engine = engine, engine

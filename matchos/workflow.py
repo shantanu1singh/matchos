@@ -25,7 +25,7 @@ from agent_framework import (
 
 from matchos.telemetry import record, quiet
 from matchos.observability import trace_carrier
-from matchos.decision_client import DecisionClient
+from matchos.decision_client import DecisionClient, selection_hold_reason
 from matchos.language_agent import Agent, build_language_executor, final_overlay
 from matchos.llm_config import LLMConfig
 from matchos.producer import Producer
@@ -249,8 +249,8 @@ class ProducerExecutor(Executor):
         started = time.perf_counter()
         verification = packet.verification
         decision = packet.decision
-        if decision is not None and decision.selected_candidate_id is None:
-            packet.producer = ProducerDecision(action="SUPPRESS", reason="Decision model chose no update.")
+        if decision is not None and (held := selection_hold_reason(decision)):
+            packet.producer = ProducerDecision(action="SUPPRESS", reason=held)
         else:
             packet.producer = deepcopy(self.services.producer).decide(
                 verification.moment if verification else None,
@@ -341,7 +341,7 @@ def build_workflow(services: MatchServices | None = None, *, shared_candidates_o
     publish = PublishExecutor(services)
     trace = TraceExecutor()
     if services.shared_candidates_only:
-        workflow = (WorkflowBuilder(start_executor=state)
+        workflow = (WorkflowBuilder(start_executor=state, name="matchos-shared-evidence")
                     .add_edge(state, trigger)
                     .add_edge(trigger, quiet, condition=_quiet)
                     .add_edge(trigger, verifier, condition=_fired)
@@ -380,3 +380,8 @@ def new_services() -> MatchServices:
         producer=Producer(),
         language_provider="local-renderer",
     )
+
+
+def build_shared_workflow(services: MatchServices | None = None) -> tuple[Workflow, MatchServices]:
+    """Named entry point for the shared, deterministic evidence graph."""
+    return build_workflow(services, shared_candidates_only=True)
