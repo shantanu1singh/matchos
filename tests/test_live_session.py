@@ -4,8 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 from matchos.schemas import PipelineResult, VerifiedMoment, ViewerProfile
-from matchos.session import MatchSession
 from matchos.server import _run
+from matchos.session import MatchSession
 
 
 def _session(monkeypatch):
@@ -39,7 +39,7 @@ def test_frames_flow_while_decision_waits_and_pending_evidence_is_preserved(monk
             await asyncio.wait_for(started.wait(), 1)
             events, samples = [], []
             for _ in range(6):
-                frame, tick_events, _ = await asyncio.wait_for(session.tick(), .5)
+                frame, tick_events, _ = await asyncio.wait_for(session.tick(), 0.5)
                 events.extend(tick_events)
                 assert frame.timestamp_ms > first.timestamp_ms
                 assert len(calls) == 1
@@ -65,9 +65,17 @@ def test_frames_continue_until_final_language_result_is_ready(monkeypatch):
         session = _session(monkeypatch)
         waiting, release = asyncio.Event(), asyncio.Event()
         moment = VerifiedMoment(
-            id="slow-language", type="GOAL", frame="GOAL", team_id="RED",
-            importance=1, confidence=.9, facts={}, evidence=[], evidence_detail=[],
-            valid_from_ms=0, expires_at_ms=10**9,
+            id="slow-language",
+            type="GOAL",
+            frame="GOAL",
+            team_id="RED",
+            importance=1,
+            confidence=0.9,
+            facts={},
+            evidence=[],
+            evidence_detail=[],
+            valid_from_ms=0,
+            expires_at_ms=10**9,
         )
 
         class SlowLanguageWorkflow:
@@ -80,7 +88,7 @@ def test_frames_continue_until_final_language_result_is_ready(monkeypatch):
         try:
             await session.tick()
             await asyncio.wait_for(waiting.wait(), 1)
-            _, _, outputs = await asyncio.wait_for(session.tick(), .5)
+            _, _, outputs = await asyncio.wait_for(session.tick(), 0.5)
             assert outputs == []
             assert session.active is None
             assert not session._model_task.done()
@@ -144,11 +152,21 @@ def test_old_viewer_and_expired_moments_are_not_published(monkeypatch):
 
         session.workflow = QuietWorkflow()
         expired = VerifiedMoment(
-            id="expired", type="GOAL", frame="GOAL", importance=1, confidence=1,
-            facts={}, evidence=[], evidence_detail=[], valid_from_ms=0, expires_at_ms=1,
+            id="expired",
+            type="GOAL",
+            frame="GOAL",
+            importance=1,
+            confidence=1,
+            facts={},
+            evidence=[],
+            evidence_detail=[],
+            valid_from_ms=0,
+            expires_at_ms=1,
         )
         await session._outputs.put((PipelineResult(kind="trace"), ViewerProfile(persona="analyst")))
-        await session._outputs.put((PipelineResult(kind="moment", moment=expired), session.viewer.model_copy()))
+        await session._outputs.put(
+            (PipelineResult(kind="moment", moment=expired), session.viewer.model_copy())
+        )
         try:
             _, _, outputs = await session.tick()
             assert outputs == []

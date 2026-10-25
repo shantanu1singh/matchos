@@ -1,4 +1,5 @@
 """A counterattack ratio alone must not become a press-collapse narrative."""
+
 import asyncio
 
 from matchos.copy import render_overlay
@@ -14,23 +15,38 @@ def fixture():
     state.timestamp_ms = 3700000
     state.minute, state.second = 61, 40
     state.score_red = state.score_blue = 1
-    state.red.press_bypass_rate, state.red.press_bypass_prev = .875, 1 / 3
+    state.red.press_bypass_rate, state.red.press_bypass_prev = 0.875, 1 / 3
     state.red.press_bypass_sample = 8
     state.red.defensive_line_prev_m, state.red.defensive_line_m = 33.94, 33.51
     state.red.final_third_entries_prev5, state.red.final_third_entries_last5 = 2, 13
-    state.blue.press_bypass_rate, state.blue.press_bypass_prev = .9, .4
+    state.blue.press_bypass_rate, state.blue.press_bypass_prev = 0.9, 0.4
     state.blue.press_bypass_sample = 10
     state.blue.defensive_line_prev_m, state.blue.defensive_line_m = 37.15, 30.02
     state.blue.final_third_entries_prev5 = state.blue.final_third_entries_last5 = 4
     for defending in ("RED", "BLUE"):
         attacking = "BLUE" if defending == "RED" else "RED"
         for sequence in (1, 2):
-            engine.events.append(MatchEvent(id=f"{attacking}-{sequence}", match_id="test", sequence=sequence,
-                period=2, timestamp_ms=state.timestamp_ms - sequence * 1000, type="PASS", team_id=attacking,
-                player_id=f"{attacking.lower()}_8", target_player_id=f"{attacking.lower()}_9", possession_id=1,
-                location=Point(x=70 if defending == "RED" else 35, y=30),
-                end_location=Point(x=50 if defending == "RED" else 55, y=30), outcome="COMPLETE",
-                qualifiers={"defending_team": defending, "defending_first_line_x": 65 if defending == "RED" else 40}))
+            engine.events.append(
+                MatchEvent(
+                    id=f"{attacking}-{sequence}",
+                    match_id="test",
+                    sequence=sequence,
+                    period=2,
+                    timestamp_ms=state.timestamp_ms - sequence * 1000,
+                    type="PASS",
+                    team_id=attacking,
+                    player_id=f"{attacking.lower()}_8",
+                    target_player_id=f"{attacking.lower()}_9",
+                    possession_id=1,
+                    location=Point(x=70 if defending == "RED" else 35, y=30),
+                    end_location=Point(x=50 if defending == "RED" else 55, y=30),
+                    outcome="COMPLETE",
+                    qualifiers={
+                        "defending_team": defending,
+                        "defending_first_line_x": 65 if defending == "RED" else 40,
+                    },
+                )
+            )
     return engine, state
 
 
@@ -48,8 +64,10 @@ def test_large_counterattack_ratio_cannot_displace_corroborated_press_failure():
     assert all(event.team_id == "RED" for event in moment.evidence_detail)
     assert any(check.name == "red_press_corroboration" and not check.passed for check in pool.checks)
     assert not any(check.name.startswith("red_") for check in moment.checks)
-    assert "Liverpool are getting through Manchester City's press" in render_overlay(
-        moment, ViewerProfile(persona="broadcaster"), rich=True, provider="test").headline
+    assert (
+        "Liverpool are getting through Manchester City's press"
+        in render_overlay(moment, ViewerProfile(persona="broadcaster"), rich=True, provider="test").headline
+    )
 
 
 def test_rising_ratio_without_retreat_or_added_penetration_is_not_a_collapse():
@@ -73,7 +91,9 @@ def test_supported_city_attack_remains_eligible_without_any_team_bias():
 
 def test_default_lab_rejects_screenshot_story_but_keeps_liverpool_development():
     async def run():
-        session = MatchSession("press_collapse", 47129, 1, ViewerProfile(persona="broadcaster"), running=False)
+        session = MatchSession(
+            "press_collapse", 47129, 1, ViewerProfile(persona="broadcaster"), running=False
+        )
         try:
             await session.seek_to(61 * 60000 + 40000)
             engine = session.services.state_engine
@@ -92,4 +112,5 @@ def test_default_lab_rejects_screenshot_story_but_keeps_liverpool_development():
             assert moment.facts["defendingTeam"] == "Manchester City"
         finally:
             await session.close()
+
     asyncio.run(run())

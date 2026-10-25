@@ -5,9 +5,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DECISION_PROVIDER: local
       REASONING_PROVIDER: local
@@ -20,17 +24,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements-production.lock
+            requirements-dev.txt
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: python -m pip install --require-hashes -r requirements-production.lock
+      - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip check
-      - name: Verify critical release paths without cloud model calls
-        run: >-
-          python -m pytest -q tests/test_access.py tests/test_production_runtime.py tests/test_web_assets.py
-          tests/test_editorial_selection.py tests/test_perspectives.py tests/test_broadcaster_opening.py
-          tests/test_press_corroboration.py tests/test_speech.py tests/test_compact_tracing.py
+      - name: Lint and formatting
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Run the full backend suite without cloud credentials
+        run: python -m pytest
       - run: node --test tests/*.test.cjs
+      - name: Run the offline editorial regression baseline
+        run: python -m matchos.evaluation run --local --output /tmp/matchos-evaluation.json
+      - name: Build and verify the installable package
+        run: |
+          python -m build --wheel --outdir /tmp/matchos-dist
+          python -m pip install --force-reinstall --no-deps /tmp/matchos-dist/*.whl
+          cd /tmp
+          python -c 'from importlib.resources import files; from matchos.__main__ import main; assert callable(main); assert (files("matchos") / "web" / "demo.js").is_file(); assert (files("matchos") / "web" / "telemetry.js").is_file()'
       - name: Compile infrastructure
         run: |
           az bicep install --version v0.48.1

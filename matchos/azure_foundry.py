@@ -4,24 +4,39 @@ Decision-1 is a typed scoring model, not a chat model. Azure Core supplies its
 async authenticated REST transport; the generative deployment uses Microsoft's
 OpenAIChatClient (Responses API). Both remain inside the existing workflow.
 """
+
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack
 import logging
+from contextlib import AsyncExitStack
 
 from agent_framework import (
-    BaseChatClient, ChatResponse, ChatResponseUpdate, Content,
-    FunctionInvocationLayer, Message, ResponseStream,
+    BaseChatClient,
+    ChatResponse,
+    ChatResponseUpdate,
+    Content,
+    FunctionInvocationLayer,
+    Message,
+    ResponseStream,
 )
 from agent_framework.openai import OpenAIChatClient
 from azure.core import AsyncPipelineClient
 from azure.core.credentials import AzureKeyCredential
-from azure.core.pipeline.policies import AsyncBearerTokenCredentialPolicy, AsyncRetryPolicy, AzureKeyCredentialPolicy
+from azure.core.pipeline.policies import (
+    AsyncBearerTokenCredentialPolicy,
+    AsyncRetryPolicy,
+    AzureKeyCredentialPolicy,
+)
 from azure.core.rest import HttpRequest
 from azure.identity.aio import DefaultAzureCredential
 
-from matchos.decision_client import GatewayDecisionClient, _systemone_questions, _decision_state, _parse_systemone
+from matchos.decision_client import (
+    GatewayDecisionClient,
+    _decision_state,
+    _parse_systemone,
+    _systemone_questions,
+)
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
 from matchos.schemas import MatchState, MomentDecision
@@ -48,12 +63,14 @@ class FoundryDecisionClient(GatewayDecisionClient):
                     auth = AsyncBearerTokenCredentialPolicy(credential, TOKEN_SCOPE)
                 else:
                     auth = AzureKeyCredentialPolicy(AzureKeyCredential(self.api_key), "api-key")
-                client = await stack.enter_async_context(AsyncPipelineClient(
-                    self.config.azure_resource_endpoint("decision"),
-                    policies=[AsyncRetryPolicy(retry_total=0), auth],
-                    connection_timeout=self.config.decision_timeout_s,
-                    read_timeout=self.config.decision_timeout_s,
-                ))
+                client = await stack.enter_async_context(
+                    AsyncPipelineClient(
+                        self.config.azure_resource_endpoint("decision"),
+                        policies=[AsyncRetryPolicy(retry_total=0), auth],
+                        connection_timeout=self.config.decision_timeout_s,
+                        read_timeout=self.config.decision_timeout_s,
+                    )
+                )
                 async with client.send_request(HttpRequest("POST", self.endpoint, json=payload)) as response:
                     response.raise_for_status()
                     return response.json()
@@ -62,8 +79,11 @@ class FoundryDecisionClient(GatewayDecisionClient):
         return await asyncio.wait_for(send(), timeout=self.config.decision_timeout_s)
 
     def _payload(self, state: MatchState, reasons: list[str], focus_player_id: str | None) -> dict:
-        return {"model": self.model, "state": _decision_state(state, reasons, focus_player_id),
-                "questions": _systemone_questions()}
+        return {
+            "model": self.model,
+            "state": _decision_state(state, reasons, focus_player_id),
+            "questions": _systemone_questions(),
+        }
 
     def _parse_response(self, body: dict, latency_ms: float) -> MomentDecision:
         return _parse_systemone(body, self.provider, latency_ms)
@@ -85,10 +105,15 @@ class FoundryLanguageClient(FunctionInvocationLayer, BaseChatClient):
 
         config = self.config
         model = f"azure-foundry:{config.azure_reasoning_deployment}"
-        call = ModelCall("reasoning", model, {
-            "instructions": options.get("instructions"),
-            "messages": [{"role": str(message.role), "content": message.text} for message in messages],
-        }, secrets=(config.azure_key("reasoning"),))
+        call = ModelCall(
+            "reasoning",
+            model,
+            {
+                "instructions": options.get("instructions"),
+                "messages": [{"role": str(message.role), "content": message.text} for message in messages],
+            },
+            secrets=(config.azure_key("reasoning"),),
+        )
 
         async def generate():
             async with AsyncExitStack() as stack:
@@ -126,16 +151,23 @@ class FoundryLanguageClient(FunctionInvocationLayer, BaseChatClient):
 
     def _inner_get_response(self, *, messages, stream, options, **kwargs):
         if stream:
+
             async def chunks():
                 yield ChatResponseUpdate(
                     contents=[Content.from_text(await self._generate(messages, options))],
-                    role="assistant", author_name="matchos-language", finish_reason="stop",
+                    role="assistant",
+                    author_name="matchos-language",
+                    finish_reason="stop",
                 )
+
             return ResponseStream(chunks(), finalizer=ChatResponse.from_updates)
 
         async def once():
-            return ChatResponse(messages=[Message("assistant", [await self._generate(messages, options)])],
-                                model=self.config.azure_reasoning_deployment)
+            return ChatResponse(
+                messages=[Message("assistant", [await self._generate(messages, options)])],
+                model=self.config.azure_reasoning_deployment,
+            )
+
         return once()
 
 

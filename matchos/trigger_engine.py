@@ -31,11 +31,18 @@ class TriggerEngine:
             entries = deltas.get(f"{team}_entries_delta", 0.0)
             if entries >= 5 and sample_sizes.get(f"{team}_possession", 0.0) >= 0.62:
                 reasons.append(f"{team}_entries")
-        if deltas.get("focus_player_involvement_delta", 0.0) >= 0.8 and sample_sizes.get("focus_between", 0) >= 4:
+        if (
+            deltas.get("focus_player_involvement_delta", 0.0) >= 0.8
+            and sample_sizes.get("focus_between", 0) >= 4
+        ):
             reasons.append("player_involvement")
         if deltas.get("red_17_progressive", 0.0) >= 4:
             reasons.append("substitute_impact")
-        major = [event.type for event in tick.events if event.type in {"CARD", "SUBSTITUTION"} or (event.type == "SHOT" and event.outcome == "GOAL")]
+        major = [
+            event.type
+            for event in tick.events
+            if event.type in {"CARD", "SUBSTITUTION"} or (event.type == "SHOT" and event.outcome == "GOAL")
+        ]
         if any(event.qualifiers.get("card") == "red" for event in tick.events):
             reasons.append("red_card")
         if "SUBSTITUTION" in major:

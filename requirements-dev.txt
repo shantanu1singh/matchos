@@ -1,0 +1,4 @@
+# Development tools; install after requirements.txt (or the production lock in CI).
+pytest==9.1.1
+ruff==0.14.14
+build==1.3.0

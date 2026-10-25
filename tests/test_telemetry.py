@@ -1,18 +1,35 @@
 import asyncio
 import json
+
 import pytest
 from agent_framework import Message
-from matchos.language_agent import prompt_payload, faithful_text, render_from_messages
-from matchos.schemas import VerifiedMoment, ViewerProfile
-from matchos.telemetry import Telemetry, record, quiet
+
+from matchos.language_agent import faithful_text, prompt_payload, render_from_messages
 from matchos.model_logging import ModelCall
+from matchos.schemas import VerifiedMoment, ViewerProfile
+from matchos.telemetry import Telemetry, quiet, record
 
 
 def moment():
-    return VerifiedMoment(id="percent-test", type="TACTICAL_SHIFT", frame="MOMENTUM_SWING",
-        importance=.6, confidence=.44, team_id="RED", facts={"leadingTeam": "Red",
-        "possessionLast5": .639, "finalThirdEntriesBefore": 5, "finalThirdEntries": 17, "trailingTeam": "Blue"},
-        evidence=[], evidence_detail=[], valid_from_ms=3000000, expires_at_ms=3040000)
+    return VerifiedMoment(
+        id="percent-test",
+        type="TACTICAL_SHIFT",
+        frame="MOMENTUM_SWING",
+        importance=0.6,
+        confidence=0.44,
+        team_id="RED",
+        facts={
+            "leadingTeam": "Red",
+            "possessionLast5": 0.639,
+            "finalThirdEntriesBefore": 5,
+            "finalThirdEntries": 17,
+            "trailingTeam": "Blue",
+        },
+        evidence=[],
+        evidence_detail=[],
+        valid_from_ms=3000000,
+        expires_at_ms=3040000,
+    )
 
 
 def test_percent_prompt_preserves_canonical_facts_and_local_fallback():
@@ -20,7 +37,7 @@ def test_percent_prompt_preserves_canonical_facts_and_local_fallback():
     payload = prompt_payload(original, ViewerProfile(persona="analyst"))
     assert json.loads(payload)["moment"]["facts"]["possessionLast5"] == "64%"
     assert "0.639" not in payload
-    assert original.facts["possessionLast5"] == .639
+    assert original.facts["possessionLast5"] == 0.639
     assert "64%" in render_from_messages([Message("user", [payload])])
 
 
@@ -36,7 +53,7 @@ def test_fractional_possession_is_rejected(value):
 def test_quiet_ticks_do_not_evict_meaningful_history():
     store = Telemetry(capacity=2)
     with store.capture("important", {}):
-        record("verifier", {"raw": .639}, {"verified": True})
+        record("verifier", {"raw": 0.639}, {"verified": True})
     for _ in range(10):
         with store.capture("tick", {}):
             record("trigger", {}, {"fired": False})
@@ -51,13 +68,17 @@ def test_quiet_ticks_do_not_evict_meaningful_history():
 def test_concurrent_model_traces_are_isolated_and_redacted():
     async def run():
         first, second = Telemetry(), Telemetry()
+
         async def call(store, name):
             with store.capture(name, {}):
-                model = ModelCall("reasoning", name, {"api_key": "hidden", "prompt": name}, secrets=("private-secret",))
-                await asyncio.sleep(.01)
+                model = ModelCall(
+                    "reasoning", name, {"api_key": "hidden", "prompt": name}, secrets=("private-secret",)
+                )
+                await asyncio.sleep(0.01)
                 model.result({"text": "private-secret"}, phase="FALLBACK")
+
         await asyncio.gather(call(first, "fan"), call(second, "analyst"))
-        for store, name in [(first,"fan"),(second,"analyst")]:
+        for store, name in [(first, "fan"), (second, "analyst")]:
             payload = store.snapshot()
             assert len(payload["runs"]) == 1
             steps = payload["runs"][0]["steps"]
@@ -68,6 +89,7 @@ def test_concurrent_model_traces_are_isolated_and_redacted():
             assert steps[0]["responses"][0]["phase"] == "fallback"
             assert "private-secret" not in json.dumps(payload)
             assert "hidden" not in json.dumps(payload)
+
     asyncio.run(run())
 
 
@@ -83,18 +105,20 @@ def test_running_and_cancelled_calls_visible():
 
 def test_telemetry_websocket_on_paused_match(monkeypatch):
     from fastapi.testclient import TestClient
+
     from matchos.server import app
+
     monkeypatch.setenv("DECISION_PROVIDER", "local")
     monkeypatch.setenv("REASONING_MODEL", "local")
     with TestClient(app) as client, client.websocket_connect("/ws") as ws:
         ws.receive_json()
-        ws.send_json({"type":"start", "scenario":"balanced", "seed":7, "speed":1})
-        ws.send_json({"type":"control", "action":"pause"})
+        ws.send_json({"type": "start", "scenario": "balanced", "seed": 7, "speed": 1})
+        ws.send_json({"type": "control", "action": "pause"})
         while True:
             message = ws.receive_json()
             if message["type"] == "status" and message["running"] is False:
                 break
-        ws.send_json({"type":"telemetry", "since":0})
+        ws.send_json({"type": "telemetry", "since": 0})
         while True:
             message = ws.receive_json()
             if message["type"] == "telemetry":
@@ -104,17 +128,21 @@ def test_telemetry_websocket_on_paused_match(monkeypatch):
 
 
 def test_native_otel_export_is_opt_in_and_loads_env_first(monkeypatch):
-    from fastapi.testclient import TestClient
     import agent_framework.observability as observation
-    import matchos.server as server
+    from fastapi.testclient import TestClient
+
     import matchos.observability as observability
+    import matchos.server as server
+
     monkeypatch.setattr(observability, "_configured", False)
     monkeypatch.setenv("MATCHOS_TRACE_MODE", "full")
     calls = []
     monkeypatch.delenv("MATCHOS_OTEL_ENABLED", raising=False)
     monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
+
     def load():
         monkeypatch.setenv("MATCHOS_OTEL_ENABLED", "1")
+
     monkeypatch.setattr(server, "load_env_files", load)
     monkeypatch.setattr(observation, "configure_otel_providers", lambda **kwargs: calls.append(kwargs))
     with TestClient(server.app):

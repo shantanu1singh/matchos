@@ -1,4 +1,5 @@
 """Readable, correlated model diagnostics without transport credentials."""
+
 from __future__ import annotations
 
 import json
@@ -28,8 +29,21 @@ def configure_model_logging() -> None:
 
 configure_model_logging()
 
-_SENSITIVE = {"authorization", "api-key", "api_key", "apikey", "access_token", "refresh_token", "credentials",
-              "password", "token", "secret", "client_secret", "private_key", "connection_string"}
+_SENSITIVE = {
+    "authorization",
+    "api-key",
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+    "credentials",
+    "password",
+    "token",
+    "secret",
+    "client_secret",
+    "private_key",
+    "connection_string",
+}
 
 
 def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
@@ -37,16 +51,34 @@ def _safe_json(payload: object, secrets: tuple[str, ...] = ()) -> str:
         if hasattr(value, "model_dump"):
             return clean(value.model_dump(mode="json"))
         if isinstance(value, dict):
-            return {str(key): "[REDACTED]" if str(key).lower() in _SENSITIVE else clean(item)
-                    for key, item in value.items()}
+            return {
+                str(key): "[REDACTED]" if str(key).lower() in _SENSITIVE else clean(item)
+                for key, item in value.items()
+            }
         if isinstance(value, (list, tuple)):
             return [clean(item) for item in value]
         return value
 
     text = json.dumps(clean(payload), ensure_ascii=False, default=str)
-    native_secrets = tuple(value for key, value in os.environ.items()
-                           if key.endswith(("API_KEY", "API_TOKEN", "AUTH_TOKEN", "SECRET_ACCESS_KEY",
-                                            "ACCESS_KEY_ID", "SESSION_TOKEN", "CLIENT_SECRET", "CONNECTION_STRING", "SPEECH_KEY", "PASSWORD")) and value)
+    native_secrets = tuple(
+        value
+        for key, value in os.environ.items()
+        if key.endswith(
+            (
+                "API_KEY",
+                "API_TOKEN",
+                "AUTH_TOKEN",
+                "SECRET_ACCESS_KEY",
+                "ACCESS_KEY_ID",
+                "SESSION_TOKEN",
+                "CLIENT_SECRET",
+                "CONNECTION_STRING",
+                "SPEECH_KEY",
+                "PASSWORD",
+            )
+        )
+        and value
+    )
     for secret in sorted(set(secrets + native_secrets), key=len, reverse=True):
         if secret:
             text = text.replace(secret, "[REDACTED]")
@@ -63,19 +95,46 @@ class ModelCall:
         self.secrets = secrets
         self.model = model
         from matchos.telemetry import record
+
         record(f"{kind}: {model}", payload, None, status="request", call_id=self.id, secrets=secrets)
-        detail = _safe_json(payload, secrets) if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1" else "[content omitted]"
+        detail = (
+            _safe_json(payload, secrets)
+            if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1"
+            else "[content omitted]"
+        )
         logger.info("[%s] %s REQUEST %s %s", self.id, kind, model, detail)
 
     def result(self, payload: object, *, phase: str = "RESPONSE") -> None:
         configure_model_logging()
         from matchos.telemetry import record
-        record(self.model, None, payload, (time.perf_counter() - self.started) * 1000,
-               status=phase.lower(), call_id=self.id, secrets=self.secrets)
+
+        record(
+            self.model,
+            None,
+            payload,
+            (time.perf_counter() - self.started) * 1000,
+            status=phase.lower(),
+            call_id=self.id,
+            secrets=self.secrets,
+        )
         # Retain safe error categories/status for operations without logging prompts.
-        summary = ({key: payload[key] for key in ("error", "status") if key in payload}
-                   if isinstance(payload, dict) and phase == "ERROR" else {})
-        detail = (_safe_json(payload, self.secrets) if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1"
-                  else _safe_json(summary, self.secrets) if summary else "[content omitted]")
-        logger.info("[%s] %s %s %.0fms %s", self.id, phase, self.model,
-                    (time.perf_counter() - self.started) * 1000, detail)
+        summary = (
+            {key: payload[key] for key in ("error", "status") if key in payload}
+            if isinstance(payload, dict) and phase in {"ERROR", "FALLBACK"}
+            else {}
+        )
+        detail = (
+            _safe_json(payload, self.secrets)
+            if os.getenv("MATCHOS_MODEL_LOG_CONTENT", "1") == "1"
+            else _safe_json(summary, self.secrets)
+            if summary
+            else "[content omitted]"
+        )
+        logger.info(
+            "[%s] %s %s %.0fms %s",
+            self.id,
+            phase,
+            self.model,
+            (time.perf_counter() - self.started) * 1000,
+            detail,
+        )

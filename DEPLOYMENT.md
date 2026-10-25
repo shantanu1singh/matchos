@@ -21,7 +21,7 @@ Judge demo now plays at least 12 seconds at 1× while the independent Agent Fram
 | Health and recovery | Startup, readiness, and liveness probes hit `/api/health`; a failing model provider does not make the process unhealthy. |
 | Capacity | One warm replica, one worker, 1 vCPU / 2 GiB, at most eight open match WebSockets. Further connections are rejected until capacity is free. |
 | Observability | Compact OpenTelemetry traces to the existing Application Insights / Foundry integration; console and platform logs to a dedicated Log Analytics workspace. Prompt/response content export is disabled in production. |
-| Validation | GitHub Actions runs critical backend tests, all frontend tests, Bicep compilation, container build and HTTP/WebSocket smoke checks without paid inference. |
+| Validation | GitHub Actions runs lint/format checks, the full backend and frontend suites, the offline evaluation baseline, an installed-wheel check, Bicep compilation and container HTTP/WebSocket checks without paid inference. |
 | Rollback | Redeploy a previously tested image digest through the same Bicep template. |
 
 ## Deploy
@@ -123,4 +123,4 @@ This release passed 84 focused backend tests and all 26 frontend tests. ACR buil
 
 The press and dismissal checkpoints also passed deployed playback/provider checks, with 13.7 and 12 seconds of live frames respectively and three viewer traces containing the framework selection/publication stages. The analyst held the press story; the broadcaster and Spanish fan aired momentum updates. All three viewers aired the dismissal. A model hold remains a valid editorial outcome.
 
-The release checks are targeted, not an all-green full-suite claim. Earlier broader runs retained four failures in `tests/test_matchos.py`: `test_workflow_airs_press_breakdown`, `test_foul_creates_a_free_kick_and_can_show_a_yellow_card`, `test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot`, and `test_pass_out_creates_throw_in_and_restarts_with_opponent`.
+The release evidence above describes the deployed image. The current repository's validation workflow now runs the full offline backend suite, all browser tests, Ruff lint/format checks and an installed-wheel check before the infrastructure/container checks. The former failing tests have been updated to exercise the current viewer workflow and explicit simulator contact/onside conditions. Current checkout verification: 303 backend tests and 26 browser tests pass; the offline evaluation baseline passes all 24 rows.

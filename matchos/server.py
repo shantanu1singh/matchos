@@ -14,20 +14,21 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from matchos.teams import identity_context
 from matchos.access import AccessConfig, AccessMiddleware
-from matchos.editorial import explain
-from matchos.perspective import Perspective
+from matchos.demo import DEMO_STOPS, demo_viewers, play_checkpoint, review_checkpoint
 from matchos.llm_config import load_env_files
-from matchos.model_logging import configure_model_logging, logger as model_logger
+from matchos.model_logging import configure_model_logging
+from matchos.model_logging import logger as model_logger
 from matchos.observability import configure_observability, flush_observability
+from matchos.perspective import Perspective
 from matchos.scenarios import SCENARIOS
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
-from matchos.demo import DEMO_STOPS, demo_viewers, play_checkpoint, review_checkpoint
 from matchos.speech import SpeechConfig, SpeechService, SpeechUnavailable
+from matchos.teams import identity_context
 
 WEB = Path(__file__).resolve().parent / "web"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,10 +43,14 @@ async def lifespan(app: FastAPI):
     try:
         speech_config = SpeechConfig.from_env()
     except ValueError:
-        logging.getLogger(__name__).warning("Invalid Speech configuration; check .env.example. Audio is disabled.")
+        logging.getLogger(__name__).warning(
+            "Invalid Speech configuration; check .env.example. Audio is disabled."
+        )
         speech_config = SpeechConfig()
     app.state.speech = SpeechService(speech_config)
-    model_logger.info("Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable)
+    model_logger.info(
+        "Logging enabled → stdout; python=%s; model requests and responses will appear here", sys.executable
+    )
     try:
         yield
     finally:
@@ -84,15 +89,21 @@ async def speech_audio(speech_id: str):
         audio, cached = await service.audio(speech_id)
     except SpeechUnavailable as exc:
         raise HTTPException(exc.status, str(exc)) from None
-    return Response(audio, media_type="audio/mpeg", headers={
-        "Cache-Control": "private, max-age=3600", "X-MatchOS-Audio-Cache": "hit" if cached else "miss"})
+    return Response(
+        audio,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-MatchOS-Audio-Cache": "hit" if cached else "miss",
+        },
+    )
 
 
 @app.get("/")
 async def index() -> HTMLResponse:
     # Keep markup and assets in sync across edits, including previously cached CSS.
     html = (WEB / "index.html").read_text()
-    for filename in ("styles.css", "audio.js", "app.js"):
+    for filename in ("styles.css", "audio.js", "telemetry.js", "demo.js", "app.js"):
         path = f"/assets/{filename}"
         if path not in html:
             continue
@@ -125,23 +136,8 @@ async def _run(websocket: WebSocket, session: MatchSession, send, compare=None) 
             }
         )
         for result in outputs:
-            if result.kind == "candidates":
-                if compare is not None:
-                    await compare(session, result)
-            elif result.kind == "moment":
-                if session.take_air(result):
-                    await send({"type": "moment", "result": result.model_dump()})
-                else:
-                    await send({"type": "trace", "result": result.model_dump()})
-            elif result.kind == "enrichment" and session.active and session.active.moment and result.moment_id == session.active.moment.id:
-                session.active.overlay = result.overlay
-                session.active.enrichment_text = result.enrichment_text
-                await send({"type": "enrichment", "result": result.model_dump()})
-            elif result.kind == "trace":
-                await send({"type": "trace", "result": result.model_dump()})
-            if result.kind in {"moment", "trace"}:
-                await send({"type": "viewer_update", "index": 0, "profile": session.viewer.model_dump(),
-                            "phase": "decision", "result": result.model_dump(), "explanation": explain(result, session.viewer)})
+            if result.kind == "candidates" and compare is not None:
+                await compare(session, result)
         elapsed = asyncio.get_event_loop().time() - loop_started
         await asyncio.sleep(max(0.0, 0.1 - elapsed))
 
@@ -161,8 +157,15 @@ async def match_socket(websocket: WebSocket) -> None:
 
 async def _serve_match_socket(websocket: WebSocket) -> None:
     await websocket.accept()
-    await websocket.send_json({"type": "hello", "scenarios": _scenario_payload(), "roster": identity_context(),
-                               "demoStops": DEMO_STOPS, "speech": app.state.speech.capabilities()})
+    await websocket.send_json(
+        {
+            "type": "hello",
+            "scenarios": _scenario_payload(),
+            "roster": identity_context(),
+            "demoStops": DEMO_STOPS,
+            "speech": app.state.speech.capabilities(),
+        }
+    )
     session: MatchSession | None = None
     task: asyncio.Task | None = None
     paused_task: asyncio.Task | None = None
@@ -174,7 +177,9 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
 
     async def send(payload: dict) -> None:
         if payload.get("type") == "viewer_update" and session is not None:
-            payload["speech"] = app.state.speech.register(payload, session.telemetry, session.live_state_engine.state.timestamp_ms)
+            payload["speech"] = app.state.speech.register(
+                payload, session.telemetry, session.live_state_engine.state.timestamp_ms
+            )
         async with lock:
             await websocket.send_json(payload)
 
@@ -215,21 +220,24 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                 return
             if payload["index"] == 0:
                 result = PipelineResult.model_validate(payload["result"])
-                if payload["phase"] == "decision":
-                    current._remember(result)
-                    if result.kind == "moment" and result.producer.action == "AIR":
-                        current.active = result
-                        await send({"type": "moment", "result": result.model_dump()})
-                    else:
-                        await send({"type": "trace", "result": result.model_dump()})
-                elif current.active and current.active.moment.id == result.moment.id:
-                    current.active.overlay = result.overlay
+                current._remember(result)
+                if result.kind == "moment" and result.producer.action == "AIR":
+                    current.active = result
+                    await send({"type": "moment", "result": result.model_dump()})
+                else:
+                    await send({"type": "trace", "result": result.model_dump()})
             await send(payload)
             if current.demo_step is not None:
                 demo_results[payload["index"]] = payload
-                await send({"type": "demo_progress", "step": current.demo_step,
-                            "requestId": current.demo_request_id,
-                            "settled": len(demo_results), "total": len(perspectives)})
+                await send(
+                    {
+                        "type": "demo_progress",
+                        "step": current.demo_step,
+                        "requestId": current.demo_request_id,
+                        "settled": len(demo_results),
+                        "total": len(perspectives),
+                    }
+                )
 
         desired = [current.viewer, *comparison_viewers]
         previous = {perspective.index: perspective for perspective in perspectives}
@@ -246,16 +254,27 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
             await removed.close()
         perspectives[:] = updated
         previous_focuses = current.services.additional_focus_ids
-        current.services.additional_focus_ids = [current.viewer.player_id, *[viewer.player_id for viewer in comparison_viewers if viewer.persona == "player"]]
+        current.services.additional_focus_ids = [
+            current.viewer.player_id,
+            *[viewer.player_id for viewer in comparison_viewers if viewer.persona == "player"],
+        ]
         if current.latest_candidates and set(previous_focuses) != set(current.services.additional_focus_ids):
             batch = current.latest_candidates
-            refreshed = current.services.verifier.candidates(batch.state, [], current.viewer.player_id, current.services.additional_focus_ids)
+            refreshed = current.services.verifier.candidates(
+                batch.state, [], current.viewer.player_id, current.services.additional_focus_ids
+            )
             required_players = {current.viewer.player_id, *current.services.additional_focus_ids}
-            preserved = [candidate for candidate in batch.candidates.candidates
-                         if candidate.frame != "PLAYER_IMPACT" or candidate.player_id in required_players]
+            preserved = [
+                candidate
+                for candidate in batch.candidates.candidates
+                if candidate.frame != "PLAYER_IMPACT" or candidate.player_id in required_players
+            ]
             known = {candidate.player_id for candidate in preserved if candidate.frame == "PLAYER_IMPACT"}
-            preserved.extend(candidate for candidate in refreshed.candidates
-                             if candidate.frame == "PLAYER_IMPACT" and candidate.player_id not in known)
+            preserved.extend(
+                candidate
+                for candidate in refreshed.candidates
+                if candidate.frame == "PLAYER_IMPACT" and candidate.player_id not in known
+            )
             pool = batch.candidates.model_copy(update={"candidates": preserved})
             current.latest_candidates = batch.model_copy(update={"candidates": pool})
         if current.latest_candidates is not None:
@@ -271,7 +290,7 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
         worker = current._model_task
         while not current.running and (not worker.done() or not current._outputs.empty()):
             if current._outputs.empty():
-                await asyncio.sleep(.01)
+                await asyncio.sleep(0.01)
                 continue
             result, profile = current._outputs.get_nowait()
             if result.kind != "candidates" and profile != current.viewer:
@@ -279,37 +298,59 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
             current._remember(result)
             if result.kind == "candidates":
                 await compare(current, result)
-            elif result.kind in {"moment", "trace"}:
-                if result.kind == "moment":
-                    current.take_air(result)
-                await send({"type": "viewer_update", "index": 0, "profile": profile.model_dump(), "phase": "decision", "result": result.model_dump(), "explanation": explain(result, profile)})
-            elif result.kind == "enrichment":
-                await send({"type": "enrichment", "result": result.model_dump()})
 
     async def run_demo(current: MatchSession, step: int) -> None:
         try:
             checkpoint = DEMO_STOPS[step]
-            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "preparing"})
+            await send(
+                {
+                    "type": "demo_status",
+                    "step": step,
+                    "requestId": current.demo_request_id,
+                    "phase": "preparing",
+                }
+            )
             frame = await current.seek_to(checkpoint["timestamp_ms"])
-            await send({"type": "demo_snapshot", "step": step, "requestId": current.demo_request_id, "frame": frame.model_dump(),
-                        "state": current.live_state_engine.state.model_dump(),
-                        "events": [event.model_dump() for event in list(current.live_state_engine.events)[-5:]],
-                        "viewers": [viewer.model_dump() for viewer in demo_viewers()]})
+            await send(
+                {
+                    "type": "demo_snapshot",
+                    "step": step,
+                    "requestId": current.demo_request_id,
+                    "frame": frame.model_dump(),
+                    "state": current.live_state_engine.state.model_dump(),
+                    "events": [event.model_dump() for event in list(current.live_state_engine.events)[-5:]],
+                    "viewers": [viewer.model_dump() for viewer in demo_viewers()],
+                }
+            )
             batch = await review_checkpoint(current)
-            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "evaluating",
-                        "candidates": batch.candidates.model_dump(mode="json")})
+            await send(
+                {
+                    "type": "demo_status",
+                    "step": step,
+                    "requestId": current.demo_request_id,
+                    "phase": "evaluating",
+                    "candidates": batch.candidates.model_dump(mode="json"),
+                }
+            )
             await compare(current, batch)
-            decision_timeout = getattr(getattr(current.services.decisions, "config", None), "decision_timeout_s", 10)
+            decision_timeout = getattr(
+                getattr(current.services.decisions, "config", None), "decision_timeout_s", 10
+            )
             settled = asyncio.Event()
 
             async def finish_reviews():
-                await asyncio.wait_for(asyncio.gather(*[perspective.task for perspective in perspectives
-                                                       if perspective.task is not None]),
-                                       timeout=decision_timeout + current.services.reasoning_timeout_s + 5)
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        *[perspective.task for perspective in perspectives if perspective.task is not None]
+                    ),
+                    timeout=decision_timeout + current.services.reasoning_timeout_s + 5,
+                )
                 settled.set()
 
-            workers = [asyncio.create_task(finish_reviews()),
-                       asyncio.create_task(play_checkpoint(current, settled, send))]
+            workers = [
+                asyncio.create_task(finish_reviews()),
+                asyncio.create_task(play_checkpoint(current, settled, send)),
+            ]
             try:
                 await asyncio.gather(*workers)
             finally:
@@ -317,16 +358,30 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                     worker.cancel()
                 await asyncio.gather(*workers, return_exceptions=True)
                 current.running = False
-            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "ready",
-                        "running": False,
-                        "results": [demo_results[index] for index in sorted(demo_results)]})
+            await send(
+                {
+                    "type": "demo_status",
+                    "step": step,
+                    "requestId": current.demo_request_id,
+                    "phase": "ready",
+                    "running": False,
+                    "results": [demo_results[index] for index in sorted(demo_results)],
+                }
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logging.getLogger(__name__).warning("Guided demo checkpoint failed (%s)", type(exc).__name__)
-            await send({"type": "demo_status", "step": step, "requestId": current.demo_request_id, "phase": "error",
-                        "running": False,
-                        "message": "This checkpoint could not finish. Retry it or continue to the next one."})
+            await send(
+                {
+                    "type": "demo_status",
+                    "step": step,
+                    "requestId": current.demo_request_id,
+                    "phase": "error",
+                    "running": False,
+                    "message": "This checkpoint could not finish. Retry it or continue to the next one.",
+                }
+            )
 
     try:
         while True:
@@ -335,10 +390,14 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
             if kind == "demo":
                 step = message.get("step", 0)
                 if type(step) is not int or not 0 <= step < len(DEMO_STOPS):
-                    await send({"type": "demo_status", "phase": "error", "message": "Unknown demo checkpoint."})
+                    await send(
+                        {"type": "demo_status", "phase": "error", "message": "Unknown demo checkpoint."}
+                    )
                     continue
                 # Keep the demo's trace history across its three checkpoint clips.
-                previous_telemetry = session.telemetry if session is not None and session.demo_step is not None else None
+                previous_telemetry = (
+                    session.telemetry if session is not None and session.demo_step is not None else None
+                )
                 await stop()
                 viewers = demo_viewers()
                 session = MatchSession("press_collapse", 47129, 1, viewers[0], running=False, demo_step=step)
@@ -359,9 +418,15 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                     viewer=viewer,
                 )
                 configure_model_logging()
-                model_logger.info("SESSION scenario=%s decision=%s reasoning=%s; waiting for live match triggers (warmup and seeking skip historical calls)",
-                                  session.scenario_id, session.services.decisions.provider, session.services.language_provider)
-                comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
+                model_logger.info(
+                    "SESSION scenario=%s decision=%s reasoning=%s; waiting for live match triggers (warmup and seeking skip historical calls)",
+                    session.scenario_id,
+                    session.services.decisions.provider,
+                    session.services.language_provider,
+                )
+                comparison_viewers = [
+                    ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]
+                ]
                 await configure_views(session)
                 await session.warmup()
                 session.running = True
@@ -374,20 +439,31 @@ async def _serve_match_socket(websocket: WebSocket) -> None:
                 was_running = previous.running
                 await stop()
                 await send({"type": "seeking"})
-                session = MatchSession(scenario_id=previous.scenario_id, seed=previous.seed,
-                                       speed=previous.speed, viewer=previous.viewer)
+                session = MatchSession(
+                    scenario_id=previous.scenario_id,
+                    seed=previous.seed,
+                    speed=previous.speed,
+                    viewer=previous.viewer,
+                )
                 await configure_views(session)
                 session.running = was_running
                 frame = await session.seek_to(int(message.get("timestamp_ms", 0)))
-                await send({"type": "seeked", "frame": frame.model_dump(),
-                            "state": session.live_state_engine.state.model_dump(),
-                            "running": was_running})
+                await send(
+                    {
+                        "type": "seeked",
+                        "frame": frame.model_dump(),
+                        "state": session.live_state_engine.state.model_dump(),
+                        "running": was_running,
+                    }
+                )
                 if was_running:
                     task = asyncio.create_task(_run(websocket, session, send, compare))
             elif kind == "views" and session is not None:
                 if session.demo_step is not None:
                     continue
-                comparison_viewers = [ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]]
+                comparison_viewers = [
+                    ViewerProfile.model_validate(viewer) for viewer in message.get("views", [])[:2]
+                ]
                 await configure_views(session)
             elif kind == "viewer" and session is not None:
                 if session.demo_step is not None:

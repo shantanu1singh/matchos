@@ -1,4 +1,5 @@
 """Compact cloud topology and payload boundaries, using real SDK processors."""
+
 import asyncio
 import json
 
@@ -14,6 +15,7 @@ def compact_spans(monkeypatch):
     sdk = pytest.importorskip("opentelemetry.sdk.trace")
     from opentelemetry import trace
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
     monkeypatch.setenv("MATCHOS_TRACE_MODE", "compact")
     monkeypatch.setenv("MATCHOS_TRACE_CONTENT", "1")
     provider = sdk.TracerProvider()
@@ -50,10 +52,19 @@ def test_story_trace_is_small_connected_and_keeps_all_persona_outcomes(compact_s
     store = Telemetry()
     marker = "raw-tracking-only-in-local-inspector"
     state = {"score_red": 1, "score_blue": 1, "timestamp_ms": 3840000, "players": {"raw": marker}}
-    pool = {"candidates": [{"id": "press-1", "frame": "PRESS_BREAKDOWN", "team_id": "RED",
-                            "facts": {"bypassPercent": "88%"}, "evidence": ["pass-1"],
-                            "evidence_detail": [{"raw": marker}]}],
-            "checks": [{"name": "supported_bypass", "passed": True, "detail": "8/9 passes bypassed"}]}
+    pool = {
+        "candidates": [
+            {
+                "id": "press-1",
+                "frame": "PRESS_BREAKDOWN",
+                "team_id": "RED",
+                "facts": {"bypassPercent": "88%"},
+                "evidence": ["pass-1"],
+                "evidence_detail": [{"raw": marker}],
+            }
+        ],
+        "checks": [{"name": "supported_bypass", "passed": True, "detail": "8/9 passes bypassed"}],
+    }
     with store.capture("Match workflow", {"timestamp_ms": 3840000}) as workflow:
         with provider.get_tracer("agent_framework").start_as_current_span("executor.verifier"):
             record("state", {"frame": marker}, state)
@@ -65,22 +76,42 @@ def test_story_trace_is_small_connected_and_keeps_all_persona_outcomes(compact_s
     async def viewer(role):
         with store.capture("Viewer editorial selection", {"viewer": {"persona": role}}, parent=parent):
             with provider.get_tracer("agent_framework").start_as_current_span("SDK plumbing"):
-                record("viewer context", {"viewer": {"persona": role}, "state": state, "candidates": pool}, None)
-                call = ModelCall("editorial selection", "azure-foundry:Decision-1", {"candidateIds": ["press-1"]})
+                record(
+                    "viewer context", {"viewer": {"persona": role}, "state": state, "candidates": pool}, None
+                )
+                call = ModelCall(
+                    "editorial selection", "azure-foundry:Decision-1", {"candidateIds": ["press-1"]}
+                )
                 await asyncio.sleep(0)
                 selected = None if role == "analyst" else "press-1"
                 call.result({"selected_candidate_id": selected})
                 record("editorial selection", {}, {"selected_candidate_id": selected})
                 if selected:
-                    language = ModelCall("reasoning", "azure-foundry:gpt-6-luna", {"facts": {"bypassPercent": "88%"}})
+                    language = ModelCall(
+                        "reasoning", "azure-foundry:gpt-6-luna", {"facts": {"bypassPercent": "88%"}}
+                    )
                     language.result({"text": "Liverpool play through the press."})
-                record("viewer production", {}, {
-                    "selection": {"selected_candidate_id": selected},
-                    "producer": {"action": "AIR" if selected else "SUPPRESS", "reason": "Worth showing" if selected else "No interruption"},
-                    "moment": {"frame": "PRESS_BREAKDOWN", "evidence_detail": marker} if selected else None,
-                    "overlay": {"headline": "Liverpool play through", "body": "The press opens up."} if selected else None})
+                record(
+                    "viewer production",
+                    {},
+                    {
+                        "selection": {"selected_candidate_id": selected},
+                        "producer": {
+                            "action": "AIR" if selected else "SUPPRESS",
+                            "reason": "Worth showing" if selected else "No interruption",
+                        },
+                        "moment": {"frame": "PRESS_BREAKDOWN", "evidence_detail": marker}
+                        if selected
+                        else None,
+                        "overlay": {"headline": "Liverpool play through", "body": "The press opens up."}
+                        if selected
+                        else None,
+                    },
+                )
+
     async def run():
         await asyncio.gather(*(viewer(role) for role in ("broadcaster", "analyst", "fan")))
+
     asyncio.run(run())
     provider.force_flush()
     spans = exporter.get_finished_spans()
@@ -96,7 +127,10 @@ def test_story_trace_is_small_connected_and_keeps_all_persona_outcomes(compact_s
     assert root.name == "64:00 · Press Breakdown" and root.attributes["matchos.candidate_count"] == 1
     personas = [span for span in spans if span.attributes.get("gen_ai.operation.name") == "invoke_agent"]
     assert {span.attributes["gen_ai.agent.id"] for span in personas} == {
-        "matchos-broadcaster-v1", "matchos-analyst-v1", "matchos-fan-v1"}
+        "matchos-broadcaster-v1",
+        "matchos-analyst-v1",
+        "matchos-fan-v1",
+    }
     assert {span.attributes["matchos.publication"] for span in personas} == {"AIR", "SUPPRESS"}
     cloud = json.dumps([dict(span.attributes) for span in spans])
     assert marker not in cloud
@@ -127,11 +161,12 @@ def test_errors_and_cancellations_are_retained_with_model_phases(compact_spans, 
 
 
 def test_compact_setup_filters_both_azure_and_otlp_and_disables_sdk_content(monkeypatch):
+    import agent_framework.observability as framework
+    import opentelemetry.exporter.otlp.proto.http.trace_exporter as otlp
+    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
     from opentelemetry import trace
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
-    import opentelemetry.exporter.otlp.proto.http.trace_exporter as otlp
-    import agent_framework.observability as framework
+
     monkeypatch.setattr(observability, "_configured", False)
     monkeypatch.setenv("MATCHOS_OTEL_ENABLED", "1")
     monkeypatch.delenv("MATCHOS_TRACE_MODE", raising=False)  # compact is the default
@@ -162,26 +197,35 @@ def test_compact_without_destination_does_not_claim_export_is_enabled(monkeypatc
     monkeypatch.setattr(observability, "_configured", False)
     monkeypatch.setenv("MATCHOS_OTEL_ENABLED", "1")
     monkeypatch.setenv("MATCHOS_TRACE_MODE", "compact")
-    for name in ("APPLICATIONINSIGHTS_CONNECTION_STRING", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"):
+    for name in (
+        "APPLICATIONINSIGHTS_CONNECTION_STRING",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    ):
         monkeypatch.delenv(name, raising=False)
     assert observability.configure_observability() is False
 
 
 def test_real_checkpoint_and_three_workers_keep_one_trace_without_sdk_orphans(compact_spans, monkeypatch):
+    import agent_framework.observability as framework
+
     from matchos.demo import DEMO_STOPS, demo_viewers, review_checkpoint
     from matchos.perspective import Perspective
     from matchos.session import MatchSession
-    import agent_framework.observability as framework
+
     monkeypatch.setenv("DECISION_PROVIDER", "local")
     monkeypatch.setenv("REASONING_PROVIDER", "local")
     monkeypatch.setattr(framework.OBSERVABILITY_SETTINGS, "enable_instrumentation", True)
     provider, exporter = compact_spans
     results = []
+
     async def run():
         session = MatchSession("press_collapse", 47129, 1, demo_viewers()[0], running=False, demo_step=1)
         workers = []
+
         async def send(payload):
             results.append(payload)
+
         try:
             await session.seek_to(DEMO_STOPS[1]["timestamp_ms"])
             batch = await review_checkpoint(session)
@@ -197,6 +241,7 @@ def test_real_checkpoint_and_three_workers_keep_one_trace_without_sdk_orphans(co
             for worker in workers:
                 await worker.close()
             await session.close()
+
     asyncio.run(run())
     provider.force_flush()
     spans = exporter.get_finished_spans()
@@ -204,5 +249,10 @@ def test_real_checkpoint_and_three_workers_keep_one_trace_without_sdk_orphans(co
     ids = {span.context.span_id for span in spans}
     assert all(span.parent is None or span.parent.span_id in ids for span in spans)
     assert len([span for span in spans if span.name == "Evidence"]) == 1
-    assert len([span for span in spans if span.attributes.get("gen_ai.operation.name") == "invoke_agent"]) == 3
-    assert not any(span.name in {"state", "trigger", "verified candidates", "viewer context", "viewer production"} for span in spans)
+    assert (
+        len([span for span in spans if span.attributes.get("gen_ai.operation.name") == "invoke_agent"]) == 3
+    )
+    assert not any(
+        span.name in {"state", "trigger", "verified candidates", "viewer context", "viewer production"}
+        for span in spans
+    )

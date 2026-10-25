@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections import deque
 
-from matchos.pitch import between_the_lines, entered_final_third, in_box, pass_against_press, pass_bypassed, shirt
-from matchos.teams import shirt_number
+from matchos.pitch import between_the_lines, entered_final_third, pass_against_press, pass_bypassed, shirt
 from matchos.schemas import MatchEvent, MatchState, PlayerRollup, TeamId, TeamRollup, Tick
+from matchos.teams import shirt_number
 
 FIVE = 5 * 60_000
 EIGHT = 8 * 60_000
@@ -14,7 +14,13 @@ THIRTY = 30 * 60_000
 
 
 def _rate(events: list[MatchEvent], defending: TeamId) -> tuple[float | None, int]:
-    attempts = [event for event in events if event.type == "PASS" and event.qualifiers.get("defending_team") == defending and pass_against_press(event)]
+    attempts = [
+        event
+        for event in events
+        if event.type == "PASS"
+        and event.qualifiers.get("defending_team") == defending
+        and pass_against_press(event)
+    ]
     if not attempts:
         return None, 0
     bypasses = sum(1 for event in attempts if pass_bypassed(event))
@@ -26,8 +32,10 @@ def _entries(events: list[MatchEvent], team: TeamId) -> int:
     for event in events:
         if event.team_id != team:
             continue
-        if event.type in {"PASS", "CARRY"} and event.outcome == "COMPLETE" and (
-            event.qualifiers.get("entered_final_third") is True or entered_final_third(event)
+        if (
+            event.type in {"PASS", "CARRY"}
+            and event.outcome == "COMPLETE"
+            and (event.qualifiers.get("entered_final_third") is True or entered_final_third(event))
         ):
             count += 1
     return count
@@ -58,7 +66,13 @@ class StateEngine:
     def ingest(self, tick: Tick) -> MatchState:
         for sample in tick.samples:
             self.samples.append(
-                (sample.timestamp_ms, sample.red_line_m, sample.blue_line_m, sample.ball_x, sample.possession_team)
+                (
+                    sample.timestamp_ms,
+                    sample.red_line_m,
+                    sample.blue_line_m,
+                    sample.ball_x,
+                    sample.possession_team,
+                )
             )
         for event in tick.events:
             self.events.append(event)
@@ -69,7 +83,9 @@ class StateEngine:
         red = self._team("RED", now)
         blue = self._team("BLUE", now)
         for team_id, roll in (("RED", red), ("BLUE", blue)):
-            roll.players_on_pitch = sum(player.team_id == team_id and player.on_pitch for player in tick.frame.players)
+            roll.players_on_pitch = sum(
+                player.team_id == team_id and player.on_pitch for player in tick.frame.players
+            )
             roll.red_cards = len(self.dismissed[team_id])
         players = self._players(now)
         deltas = self._deltas(red, blue, players)
@@ -120,9 +136,7 @@ class StateEngine:
             turnovers_last5=sum(
                 1
                 for event in recent
-                if event.type == "PASS"
-                and event.outcome == "INCOMPLETE"
-                and event.team_id == team
+                if event.type == "PASS" and event.outcome == "INCOMPLETE" and event.team_id == team
             ),
         )
 
@@ -172,19 +186,32 @@ class StateEngine:
                 row.box_entries = sum(
                     1
                     for event in window
-                    if event.player_id == player_id and event.outcome == "COMPLETE" and event.qualifiers.get("box_entry") is True
+                    if event.player_id == player_id
+                    and event.outcome == "COMPLETE"
+                    and event.qualifiers.get("box_entry") is True
                 )
-                row.shots = sum(1 for event in window if event.type == "SHOT" and (event.player_id == player_id or event.qualifiers.get("assisted_by") == player_id))
+                row.shots = sum(
+                    1
+                    for event in window
+                    if event.type == "SHOT"
+                    and (event.player_id == player_id or event.qualifiers.get("assisted_by") == player_id)
+                )
         return found
 
-    def _deltas(self, red: TeamRollup, blue: TeamRollup, players: dict[str, PlayerRollup]) -> dict[str, float]:
+    def _deltas(
+        self, red: TeamRollup, blue: TeamRollup, players: dict[str, PlayerRollup]
+    ) -> dict[str, float]:
         deltas: dict[str, float] = {}
         for name, roll in (("red", red), ("blue", blue)):
             if roll.press_bypass_rate is not None and roll.press_bypass_prev is not None:
-                deltas[f"{name}_press_bypass_delta"] = round(roll.press_bypass_rate - roll.press_bypass_prev, 3)
+                deltas[f"{name}_press_bypass_delta"] = round(
+                    roll.press_bypass_rate - roll.press_bypass_prev, 3
+                )
             if roll.defensive_line_m is not None and roll.defensive_line_prev_m is not None:
                 deltas[f"{name}_line_delta_m"] = round(roll.defensive_line_m - roll.defensive_line_prev_m, 2)
-            deltas[f"{name}_entries_delta"] = float(roll.final_third_entries_last5 - roll.final_third_entries_prev5)
+            deltas[f"{name}_entries_delta"] = float(
+                roll.final_third_entries_last5 - roll.final_third_entries_prev5
+            )
             deltas[f"{name}_possession_last5"] = roll.possession_last5
         focus = players.get("red_7")
         if focus and focus.between_lines_prev30:
@@ -215,7 +242,9 @@ def _split(player_id: str) -> tuple[TeamId, str, int]:
     return team_id, team, shirt_number(player_id, parsed)
 
 
-def _receptions(events: list[MatchEvent], player_id: str, final_third: bool = False, between: bool = False) -> int:
+def _receptions(
+    events: list[MatchEvent], player_id: str, final_third: bool = False, between: bool = False
+) -> int:
     count = 0
     for event in events:
         if event.type != "PASS" or event.outcome != "COMPLETE" or event.target_player_id != player_id:

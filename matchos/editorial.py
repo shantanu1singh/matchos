@@ -1,4 +1,5 @@
 """Human-readable decision explanations derived from recorded selections and evidence."""
+
 from matchos.schemas import PipelineResult, ViewerProfile
 
 REASONS = {
@@ -33,22 +34,49 @@ def explain(result: PipelineResult, viewer: ViewerProfile) -> dict:
     if reason_code == "ALREADY_SHOWN":
         valid_reason = False
     from matchos.decision_client import selection_hold_reason
+
     model_held = bool(result.decision and selection_hold_reason(result.decision))
     fallback = bool(result.decision and result.decision.provider.startswith("local"))
     selector = "The local fallback" if fallback else "The model"
-    reason = REASONS[reason_code] if valid_reason else (
-        f"{selector} selected this story from {len(candidates)} verified options for the {viewer.persona} view."
-        if chosen else f"{selector} chose not to interrupt this viewer." if result.decision else
-        "No story passed the evidence checks.")
+    reason = (
+        REASONS[reason_code]
+        if valid_reason
+        else (
+            f"{selector} selected this story from {len(candidates)} verified options for the {viewer.persona} view."
+            if chosen
+            else f"{selector} chose not to interrupt this viewer."
+            if result.decision
+            else "No story passed the evidence checks."
+        )
+    )
     if not aired and result.producer and result.producer.reason != "Decision model chose no update.":
         reason = result.producer.reason
-    held = [{"id": candidate.id, "frame": candidate.frame, "team": candidate.team_id, "player": candidate.player_id,
-             "reason": result.producer.reason if candidate.id == chosen_id and not aired and result.producer
-                       else "Not selected in this update."}
-            for candidate in candidates if candidate.id != chosen_id or not aired]
-    return {"status": "update" if aired else "no_interruption", "chosen": chosen.frame if chosen else None,
-            "selectedId": chosen_id, "reason": reason,
-            "reasonSource": ("fallback" if fallback else "model") if aired or model_held else "policy" if result.decision else "evidence",
-            "evidence": [check.detail for check in chosen.checks if check.passed][:2] if chosen else [],
-            "sourceEventCount": len(chosen.evidence) if chosen else 0, "held": held,
-            "candidateCount": len(candidates), "timestamp_ms": result.state.timestamp_ms if result.state else None}
+    held = [
+        {
+            "id": candidate.id,
+            "frame": candidate.frame,
+            "team": candidate.team_id,
+            "player": candidate.player_id,
+            "reason": result.producer.reason
+            if candidate.id == chosen_id and not aired and result.producer
+            else "Not selected in this update.",
+        }
+        for candidate in candidates
+        if candidate.id != chosen_id or not aired
+    ]
+    return {
+        "status": "update" if aired else "no_interruption",
+        "chosen": chosen.frame if chosen else None,
+        "selectedId": chosen_id,
+        "reason": reason,
+        "reasonSource": ("fallback" if fallback else "model")
+        if aired or model_held
+        else "policy"
+        if result.decision
+        else "evidence",
+        "evidence": [check.detail for check in chosen.checks if check.passed][:2] if chosen else [],
+        "sourceEventCount": len(chosen.evidence) if chosen else 0,
+        "held": held,
+        "candidateCount": len(candidates),
+        "timestamp_ms": result.state.timestamp_ms if result.state else None,
+    }

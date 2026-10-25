@@ -46,6 +46,8 @@ For regular playback with cloud models, start at **1×**. At high speeds, a stor
 
 ## Run locally
 
+Use Python 3.13 or newer. Node.js 22 or newer is needed only for browser tests.
+
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
@@ -146,6 +148,8 @@ Foundry grading is a separate, explicit submission of saved outputs. It assesses
 [DEPLOYMENT.md](DEPLOYMENT.md) covers Azure Container Apps provisioning, managed identity, Key Vault, the shared password gate, smoke checks and rollback. Sessions currently live in one process; durable sessions and horizontal scaling require further work.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) explains the agents, Agent Framework workflows, data flow, services and implementation entry points.
+
+Install `requirements-dev.txt` before running tests. The full suite uses offline defaults and ignores local dotenv files. See [CONTRIBUTING.md](CONTRIBUTING.md) for lint, formatting, packaging and dependency workflows.
 
 Run the backend and browser logic tests with:
 

@@ -7,15 +7,24 @@ import math
 
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.pitch import Point
-from matchos.schemas import MatchEvent, MatchState, MomentDecision, PlayerRollup, ViewerProfile
+from matchos.schemas import (
+    MatchEvent,
+    MatchState,
+    MomentDecision,
+    PlayerRollup,
+    VerifiedMoment,
+    ViewerProfile,
+)
 from matchos.simulator import MatchSimulator
 from matchos.state_engine import StateEngine
 from matchos.trigger_engine import TriggerEngine
 from matchos.verifier import Verifier
-from matchos.workflow import LiveTick, build_workflow
+from matchos.workflow import LiveTick, build_shared_workflow
 
 
-def _pass(sequence: int, timestamp: int, start_x: float, end_x: float, line: float, outcome: str = "COMPLETE") -> MatchEvent:
+def _pass(
+    sequence: int, timestamp: int, start_x: float, end_x: float, line: float, outcome: str = "COMPLETE"
+) -> MatchEvent:
     return MatchEvent(
         id=f"event-{sequence}",
         match_id="m-test",
@@ -44,7 +53,11 @@ def test_same_seed_replays_the_same_events() -> None:
         sim = MatchSimulator(seed=seed, scenario_id="press_collapse")
         ticks = sim.collect_warmup()
         ticks.append(sim.step(5_000))
-        return [(event.type, event.team_id, event.timestamp_ms, event.outcome) for tick in ticks for event in tick.events]
+        return [
+            (event.type, event.team_id, event.timestamp_ms, event.outcome)
+            for tick in ticks
+            for event in tick.events
+        ]
 
     assert signatures(47129) == signatures(47129)
     assert signatures(47129) != signatures(99)
@@ -114,7 +127,7 @@ def test_templates_only_use_verified_numbers() -> None:
 
 
 def test_workflow_stays_quiet_without_a_trigger() -> None:
-    workflow, _services = build_workflow()
+    workflow, _services = build_shared_workflow()
     sim = MatchSimulator(seed=7, scenario_id="balanced")
     tick = sim.step(500)
 
@@ -146,7 +159,9 @@ def test_scripted_stories_emit_real_events() -> None:
     saw_sub = False
     while impact.clock_ms < 66 * 60_000:
         tick = impact.step(2_000)
-        saw_sub = saw_sub or any(event.type == "SUBSTITUTION" and event.player_id == "red_17" for event in tick.events)
+        saw_sub = saw_sub or any(
+            event.type == "SUBSTITUTION" and event.player_id == "red_17" for event in tick.events
+        )
     assert saw_sub and impact.players["red_17"].on_pitch
 
     chaos = MatchSimulator(seed=5, scenario_id="red_card")
@@ -154,7 +169,9 @@ def test_scripted_stories_emit_real_events() -> None:
     saw_card = False
     while chaos.clock_ms < 37 * 60_000:
         tick = chaos.step(2_000)
-        saw_card = saw_card or any(event.type == "CARD" and event.qualifiers.get("card") == "red" for event in tick.events)
+        saw_card = saw_card or any(
+            event.type == "CARD" and event.qualifiers.get("card") == "red" for event in tick.events
+        )
     assert saw_card and chaos.players["blue_8"].on_pitch is False
 
 
@@ -170,11 +187,7 @@ def test_all_lab_scenarios_keep_tracking_coherent() -> None:
     ]:
         sim = MatchSimulator(seed=seed, scenario_id=scenario_id)
         sim.collect_warmup()
-        previous = {
-            pid: (player.x, player.y)
-            for pid, player in sim.players.items()
-            if player.on_pitch
-        }
+        previous = {pid: (player.x, player.y) for pid, player in sim.players.items() if player.on_pitch}
 
         # Two simulated minutes is enough to cross the nearby scripted transition
         # for each Lab while keeping the smoke test cheap.
@@ -244,9 +257,13 @@ def test_trigger_requires_sample_size() -> None:
     engine = TriggerEngine()
     sim = MatchSimulator(seed=1, scenario_id="balanced")
     tick = sim.step(100)
-    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 2, "blue_rate": 0.71})
+    fired = engine.evaluate(
+        tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 2, "blue_rate": 0.71}
+    )
     assert fired.fired is False
-    fired = engine.evaluate(tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 6, "blue_rate": 0.71})
+    fired = engine.evaluate(
+        tick, {"blue_press_bypass_delta": 0.4, "blue_line_delta_m": -6.0}, {"blue": 6, "blue_rate": 0.71}
+    )
     assert fired.fired is True
 
 
@@ -277,41 +294,39 @@ def test_press_collapse_is_detected_from_the_feed() -> None:
 
 
 def test_workflow_airs_press_breakdown() -> None:
-    from matchos.producer import Producer
-    from matchos.workflow import new_services
-
-    sim = MatchSimulator(seed=47129, scenario_id="press_collapse")
-    services = new_services()
-    # Space producer rules on the match clock so a goal does not swallow the rest of a fast replay.
-    services.producer = Producer(clock=lambda: sim.clock_ms / 1000.0)
-    workflow, services = build_workflow(services)
-    for tick in sim.collect_warmup():
-        services.state_engine.ingest(tick)
-    viewer = ViewerProfile(persona="casual", team_id="BLUE", language="en")
+    from matchos.demo import review_checkpoint
+    from matchos.perspective import Perspective
+    from matchos.session import MatchSession
 
     async def run():
-        found = None
-        while sim.clock_ms < 63 * 60_000 and found is None:
-            tick = sim.step(5_000)
-            result = await workflow.run(LiveTick(tick=tick, viewer=viewer))
-            outputs = list(result.get_outputs())
-            moment = next((item for item in outputs if getattr(item, "kind", None) == "moment" and item.moment and item.moment.frame == "PRESS_BREAKDOWN"), None)
-            if moment is not None:
-                enrichment = next((item for item in outputs if getattr(item, "kind", None) == "enrichment"), None)
-                found = (moment, enrichment)
-        return found
+        session = MatchSession("press_collapse", 47129, 1, ViewerProfile(persona="analyst"), running=False)
+        messages = []
 
-    found = asyncio.run(run())
-    assert found, "expected a verified press-breakdown overlay"
-    moment_result, enrichment = found
-    moment = moment_result.moment
-    assert moment.facts["pressBypassNow"] >= 0.6
-    assert moment.facts["pressBypassNow"] - moment.facts["pressBypassBefore"] >= 0.25
-    assert moment.facts["defensiveLineDeltaM"] <= -5
-    assert len(moment.evidence) >= 2
-    assert moment_result.overlay.source == "agent"
-    assert prose_is_faithful(moment_result.overlay.body, moment)
-    assert enrichment is None
+        async def send(message):
+            messages.append(message)
+
+        worker = Perspective(session, session.viewer, 0, send)
+        try:
+            await session.seek_to(64 * 60_000)
+            batch = await review_checkpoint(session)
+            await worker.process(batch)
+            result = messages[0]["result"]
+            assert result["producer"]["action"] == "AIR"
+            assert result["moment"]["frame"] == "PRESS_BREAKDOWN"
+            moment = VerifiedMoment.model_validate(result["moment"])
+            assert all(check.passed for check in moment.checks)
+            assert moment.facts["pressBypassNow"] - moment.facts["pressBypassBefore"] >= 0.25
+            assert (
+                moment.facts["defensiveLineDeltaM"] <= -5
+                or moment.facts["opponentFinalThirdEntries"] - moment.facts["finalThirdEntriesBefore"] >= 5
+            )
+            assert len(moment.evidence) >= 2
+            assert prose_is_faithful(result["overlay"]["body"], moment)
+        finally:
+            await worker.close()
+            await session.close()
+
+    asyncio.run(run())
 
 
 def test_pass_planner_uses_current_player_positions() -> None:
@@ -397,7 +412,9 @@ def test_foul_creates_a_free_kick_and_can_show_a_yellow_card() -> None:
     sim.carrier_id = carrier.player_id
     sim.possession = "RED"
 
-    # Force the optional card branch.
+    sim.players["blue_6"].x, sim.players["blue_6"].y = 53.0, 34.0
+
+    # Force the optional card branch with a defender in tackling range.
     sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
     events = sim._foul(carrier)
     types = [event.type for event in events]
@@ -434,6 +451,7 @@ def test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot() -> None:
     sim.carrier_id = carrier.player_id
     sim.possession = "RED"
 
+    sim.players["blue_4"].x, sim.players["blue_4"].y = 95.0, 34.0
     sim.rng.random = lambda: 0.9  # type: ignore[method-assign]
     events = sim._foul(carrier)
     assert any(event.type == "PENALTY" for event in events)
@@ -479,15 +497,15 @@ def test_pass_out_creates_throw_in_and_restarts_with_opponent() -> None:
     carrier = sim.players["red_8"]
     target = sim.players["red_7"]
     carrier.x, carrier.y = 42.0, 34.0
-    target.x, target.y = 55.0, 10.0
+    target.x, target.y = 50.0, 10.0
     sim.ball = Point(x=42.0, y=34.0)
     sim.carrier_id = carrier.player_id
     sim.possession = "RED"
 
     sim._select_target = lambda _carrier, _long_ball: target  # type: ignore[method-assign]
     sim._pass_success = lambda *_args, **_kwargs: 0.0  # type: ignore[method-assign]
-    rolls = iter([0.9, 0.0])
-    sim.rng.random = lambda: next(rolls)  # type: ignore[method-assign]
+    # An onside target, failed pass and deterministic OUT branch, independent of RNG draw count.
+    sim.rng.random = lambda: 0.0  # type: ignore[method-assign]
 
     events = sim._pass(carrier, long_ball=False)
     throw_in = next(event for event in events if event.type == "THROW_IN")

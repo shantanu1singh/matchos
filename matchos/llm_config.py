@@ -10,7 +10,14 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
-ENV_DIR = Path(__file__).resolve().parent.parent
+
+def _env_directory() -> Path:
+    """Use the checkout root for source runs and the launch directory for installed wheels."""
+    source_root = Path(__file__).resolve().parent.parent
+    return source_root if (source_root / "pyproject.toml").is_file() else Path.cwd()
+
+
+ENV_DIR = _env_directory()
 
 
 def load_env_files(directory: Path | None = None) -> None:
@@ -119,14 +126,19 @@ class LLMConfig:
         return True
 
     def azure_resource_endpoint(self, kind: str) -> str:
-        return (self.azure_decision_endpoint if kind == "decision" else self.azure_reasoning_endpoint) or self.azure_endpoint
+        return (
+            self.azure_decision_endpoint if kind == "decision" else self.azure_reasoning_endpoint
+        ) or self.azure_endpoint
 
     def azure_configured(self, kind: str) -> bool:
-        return bool(self.azure_resource_endpoint(kind) and
-                    (self.azure_key(kind) or self.azure_auth_mode == "entra"))
+        return bool(
+            self.azure_resource_endpoint(kind) and (self.azure_key(kind) or self.azure_auth_mode == "entra")
+        )
 
     def azure_key(self, kind: str) -> str:
-        return (self.azure_decision_api_key if kind == "decision" else self.azure_reasoning_api_key) or self.azure_api_key
+        return (
+            self.azure_decision_api_key if kind == "decision" else self.azure_reasoning_api_key
+        ) or self.azure_api_key
 
     def completion_options(self) -> dict:
         options = {"model": self.reasoning_model, "timeout": self.reasoning_timeout_s, "num_retries": 0}
@@ -143,7 +155,14 @@ def _azure_endpoint(name: str) -> str:
     endpoint = _env(name).rstrip("/")
     if endpoint:
         parsed = urlsplit(endpoint)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-                or parsed.path or parsed.query or parsed.fragment):
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
             raise ValueError(f"{name} must be an HTTPS resource root, without a project or API path")
     return endpoint

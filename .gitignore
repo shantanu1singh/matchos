@@ -29,3 +29,14 @@ evals/results/
 
 /videos/**/.thumbnails/
 /videos/**/.render-cache/
+
+# Python tooling and distribution artifacts.
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Generated HyperFrames waveform indexes.
+/videos/**/.waveform-cache/

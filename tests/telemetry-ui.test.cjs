@@ -27,7 +27,7 @@ class Element {
 function inspector() {
   const elements = Object.fromEntries(['telemetry-detail','telemetry-runs','export-trace'].map(id => [id,new Element('div')]));
   const context = vm.createContext({ document: { getElementById: id => elements[id], createElement: tag => new Element(tag) }, setInterval() {}, clockOf: ms => String(ms), send() {} });
-  const source = fs.readFileSync('matchos/web/app.js','utf8');
+  const source = fs.readFileSync('matchos/web/telemetry.js','utf8');
   vm.runInContext(source.slice(source.indexOf('const telemetryState =')), context);
   return { elements, receive: context.receiveTelemetry, summarize: context.executionSummary };
 }

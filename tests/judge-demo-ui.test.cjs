@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 
 function demoController({ready=true, stops=[], open=true}={}) {
-  const source=fs.readFileSync('matchos/web/app.js','utf8');
+  const source=fs.readFileSync('matchos/web/app.js','utf8') + '\n' + fs.readFileSync('matchos/web/demo.js','utf8');
   const elements=new Map();
   const document={
     getElementById(id) {
@@ -80,7 +80,7 @@ test('losing the socket during review stops the waiting state and shows a recove
 });
 
 test('finished viewer results do not enable the next checkpoint until playback pauses',()=>{
-  const source=fs.readFileSync('matchos/web/app.js','utf8');
+  const source=fs.readFileSync('matchos/web/app.js','utf8') + '\n' + fs.readFileSync('matchos/web/demo.js','utf8');
   const elements=new Map();
   const document={getElementById(id) {
     if (!elements.has(id)) elements.set(id,{textContent:'',querySelectorAll:()=>[]});
@@ -103,7 +103,7 @@ test('finished viewer results do not enable the next checkpoint until playback p
 });
 
 function evidenceRenderer() {
-  const source=fs.readFileSync('matchos/web/app.js','utf8');
+  const source=fs.readFileSync('matchos/web/app.js','utf8') + '\n' + fs.readFileSync('matchos/web/demo.js','utf8');
   const paths=[];
   const ctx={save(){},restore(){},beginPath(){},stroke(){},fill(){},closePath(){},arc(){},fillText(){},
              moveTo:(x,y)=>paths.push(['start',x,y]),lineTo:(x,y)=>paths.push(['end',x,y])};
@@ -140,7 +140,7 @@ test('event map draws recorded source locations and ignores current player posit
 });
 
 test('demo ignores late results from a previous retry and records held outcomes without inventing a story',()=>{
-  const source=fs.readFileSync('matchos/web/app.js','utf8');
+  const source=fs.readFileSync('matchos/web/app.js','utf8') + '\n' + fs.readFileSync('matchos/web/demo.js','utf8');
   const state={demo:{active:true,step:0,requestId:2,phase:'evaluating',settled:0,outcomes:{}}};
   const context=vm.createContext({state,renderDemoGuide(){}});
   vm.runInContext(source.slice(source.indexOf('function receiveDemo('),source.indexOf('function renderDemoGuide(')),context);

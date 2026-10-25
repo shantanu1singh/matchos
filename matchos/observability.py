@@ -1,4 +1,5 @@
 """Opt-in Foundry/Application Insights export; no network work on the frame loop."""
+
 from __future__ import annotations
 
 import json
@@ -36,8 +37,9 @@ def compact_processor(exporter):
             pass
 
         def on_end(self, span):
-            if (span.instrumentation_scope.name == "matchos"
-                    and not span.attributes.get("matchos.quiet", False)):
+            if span.instrumentation_scope.name == "matchos" and not span.attributes.get(
+                "matchos.quiet", False
+            ):
                 self.batch.on_end(span)
 
         def shutdown(self):
@@ -53,11 +55,14 @@ def _configure_compact(exporters):
     from agent_framework.observability import create_resource, enable_instrumentation
     from opentelemetry.sdk.trace import TracerProvider
 
-    endpoint = (os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-                or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")).strip()
+    endpoint = (
+        os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    ).strip()
     if endpoint:
-        protocol = (os.getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
-                    or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")).strip()
+        protocol = (
+            os.getenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL")
+            or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+        ).strip()
         if protocol == "http/protobuf":
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         elif protocol == "grpc":
@@ -67,7 +72,9 @@ def _configure_compact(exporters):
         # The exporter reads standard base/signal endpoint, header and TLS envs.
         exporters.append(OTLPSpanExporter())
     if not exporters:
-        logger.warning("Cloud tracing has no destination. Set APPLICATIONINSIGHTS_CONNECTION_STRING or an OTLP endpoint.")
+        logger.warning(
+            "Cloud tracing has no destination. Set APPLICATIONINSIGHTS_CONNECTION_STRING or an OTLP endpoint."
+        )
         return False
     provider = TracerProvider(resource=create_resource(service_name="matchos"))
     for exporter in exporters:
@@ -95,11 +102,14 @@ def configure_observability() -> bool:
         if os.getenv("MATCHOS_TRACE_MODE", "compact").strip().lower() not in {"compact", "full"}:
             raise ValueError("MATCHOS_TRACE_MODE must be compact or full")
         from agent_framework.observability import configure_otel_providers
+
         connection = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
         if connection:
             from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
-            exporters.append(AzureMonitorTraceExporter.from_connection_string(
-                connection, disable_offline_storage=True))
+
+            exporters.append(
+                AzureMonitorTraceExporter.from_connection_string(connection, disable_offline_storage=True)
+            )
         compact = compact_tracing()
         if compact:
             if not _configure_compact(exporters):
@@ -113,13 +123,18 @@ def configure_observability() -> bool:
         for exporter in exporters:
             exporter.shutdown()
         # Do not log exception text: connection strings can be included in it.
-        logger.warning("Cloud tracing unavailable (%s). Install requirements-observability.txt and check tracing settings; local telemetry remains available.", type(exc).__name__)
+        logger.warning(
+            "Cloud tracing unavailable (%s). Install requirements-observability.txt and check tracing settings; local telemetry remains available.",
+            type(exc).__name__,
+        )
         return False
     _configured = True
-    logger.info("MatchOS tracing enabled: %s; mode=%s; redacted content=%s",
-                "Application Insights / Foundry" if connection else "configured OpenTelemetry exporters",
-                "compact" if compact else "full",
-                enabled("MATCHOS_TRACE_CONTENT"))
+    logger.info(
+        "MatchOS tracing enabled: %s; mode=%s; redacted content=%s",
+        "Application Insights / Foundry" if connection else "configured OpenTelemetry exporters",
+        "compact" if compact else "full",
+        enabled("MATCHOS_TRACE_CONTENT"),
+    )
     return True
 
 
@@ -146,6 +161,7 @@ def content_attribute(span, name: str, payload, secrets=()) -> None:
     if not span.is_recording() or not enabled("MATCHOS_TRACE_CONTENT"):
         return
     from matchos.model_logging import _safe_json
+
     # Bound each cloud field; the local telemetry export retains the full data.
     text = _safe_json(payload, secrets)
     span.set_attribute(name, text[:12000] + ("… [truncated]" if len(text) > 12000 else ""))
@@ -155,8 +171,23 @@ def message_attribute(span, name: str, payload, role: str) -> None:
     if not span.is_recording() or not enabled("MATCHOS_TRACE_CONTENT"):
         return
     from matchos.model_logging import _safe_json
+
     text = _safe_json(payload)
     # Keep the message envelope valid JSON even when its text needs truncation.
-    span.set_attribute(name, json.dumps([{"role": role, "parts": [
-        {"type": "text", "content": text[:12000] + ("… [truncated]" if len(text) > 12000 else "")}
-    ]}], ensure_ascii=False))
+    span.set_attribute(
+        name,
+        json.dumps(
+            [
+                {
+                    "role": role,
+                    "parts": [
+                        {
+                            "type": "text",
+                            "content": text[:12000] + ("… [truncated]" if len(text) > 12000 else ""),
+                        }
+                    ],
+                }
+            ],
+            ensure_ascii=False,
+        ),
+    )

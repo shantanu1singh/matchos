@@ -8,7 +8,12 @@ from dataclasses import replace
 import httpx
 import pytest
 
-from matchos.decision_client import CloudflareDecisionClient, GatewayDecisionClient, LocalDecisionClient, build_decision_client
+from matchos.decision_client import (
+    CloudflareDecisionClient,
+    GatewayDecisionClient,
+    LocalDecisionClient,
+    build_decision_client,
+)
 from matchos.llm_config import LLMConfig
 from matchos.schemas import PlayerRollup
 from matchos.state_engine import StateEngine
@@ -18,16 +23,34 @@ def _result():
     return {
         "model": "clef-flash",
         "answers": {
-            **{name: {"type": "noul", "noul": value} for name, value in {
-                "tacticalShift": .2, "momentumShift": .3, "playerStory": .9, "shouldSurface": .85,
-            }.items()},
-            "importance": {"type": "score", "score": 4.2, "confidence": .8,
-                           "legend": {str(n): str(n) for n in range(6)},
-                           "probabilities": {"4": .8, "5": .2}},
-            "primaryFrame": {"type": "choice", "choice": "PLAYER_IMPACT", "confidence": .9,
-                             "probabilities": {"PLAYER_IMPACT": .9, "GOAL": .1}},
-            "team": {"type": "choice", "choice": "RED", "confidence": .9,
-                     "probabilities": {"RED": .9, "BLUE": .1, "NONE": 0}},
+            **{
+                name: {"type": "noul", "noul": value}
+                for name, value in {
+                    "tacticalShift": 0.2,
+                    "momentumShift": 0.3,
+                    "playerStory": 0.9,
+                    "shouldSurface": 0.85,
+                }.items()
+            },
+            "importance": {
+                "type": "score",
+                "score": 4.2,
+                "confidence": 0.8,
+                "legend": {str(n): str(n) for n in range(6)},
+                "probabilities": {"4": 0.8, "5": 0.2},
+            },
+            "primaryFrame": {
+                "type": "choice",
+                "choice": "PLAYER_IMPACT",
+                "confidence": 0.9,
+                "probabilities": {"PLAYER_IMPACT": 0.9, "GOAL": 0.1},
+            },
+            "team": {
+                "type": "choice",
+                "choice": "RED",
+                "confidence": 0.9,
+                "probabilities": {"RED": 0.9, "BLUE": 0.1, "NONE": 0},
+            },
         },
         "usage": {"input_tokens": 500, "output_tokens": 0},
     }
@@ -35,7 +58,10 @@ def _result():
 
 def _mock_client(monkeypatch, respond):
     actual_client = httpx.AsyncClient
-    monkeypatch.setattr("matchos.decision_client.httpx.AsyncClient", lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(
+        "matchos.decision_client.httpx.AsyncClient",
+        lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
+    )
 
 
 @pytest.mark.parametrize("model", ["@cf/cloudflare/clef-flash", "@cf/cloudflare/clef"])
@@ -46,10 +72,17 @@ def test_cloudflare_native_contract(monkeypatch, model, wrapped):
     def respond(request):
         requests.append(request)
         result = _result()
-        return httpx.Response(200, json={"success": True, "result": result, "errors": []} if wrapped else result)
+        return httpx.Response(
+            200, json={"success": True, "result": result, "errors": []} if wrapped else result
+        )
 
     _mock_client(monkeypatch, respond)
-    config = LLMConfig(decision_provider="cloudflare", cloudflare_model=model, cloudflare_account_id="test-account", cloudflare_api_token="test-token")
+    config = LLMConfig(
+        decision_provider="cloudflare",
+        cloudflare_model=model,
+        cloudflare_account_id="test-account",
+        cloudflare_api_token="test-token",
+    )
     state = StateEngine().state
     state.players["blue_9"] = PlayerRollup(team_id="BLUE", number=9)
     decision = asyncio.run(build_decision_client(config).decide(state, ["player_involvement"], "blue_9"))
@@ -63,12 +96,25 @@ def test_cloudflare_native_contract(monkeypatch, model, wrapped):
     assert payload["questions"]["importance"]["criteria"] == ["0", "1", "2", "3", "4", "5"]
     assert "PLAYER_IMPACT" in payload["questions"]["primaryFrame"]["criteria"]
     assert decision.provider == f"cloudflare:{model}"
-    assert decision.frame_scores == {"PLAYER_IMPACT": .9, "GOAL": .1}
-    assert decision.importance == 4.2 and decision.should_surface == .85
+    assert decision.frame_scores == {"PLAYER_IMPACT": 0.9, "GOAL": 0.1}
+    assert decision.importance == 4.2 and decision.should_surface == 0.85
     assert decision.player_id == "blue_9" and decision.team_id == "BLUE"
 
 
-@pytest.mark.parametrize("failure", ["timeout", "http", "api_error", "missing", "refusal", "nan", "bad_score", "bad_probabilities", "bad_result"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "timeout",
+        "http",
+        "api_error",
+        "missing",
+        "refusal",
+        "nan",
+        "bad_score",
+        "bad_probabilities",
+        "bad_result",
+    ],
+)
 def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failure):
     token = "private-cloudflare-token"
 
@@ -76,7 +122,9 @@ def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failu
         if failure == "timeout":
             raise httpx.ReadTimeout(token, request=request)
         if failure == "http":
-            return httpx.Response(403, json={"success": False, "errors": [{"message": f"Rejected token {token}"}]})
+            return httpx.Response(
+                403, json={"success": False, "errors": [{"message": f"Rejected token {token}"}]}
+            )
         if failure == "api_error":
             return httpx.Response(200, json={"success": False, "errors": [{"message": token}]})
         result = _result()
@@ -95,7 +143,9 @@ def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failu
         return httpx.Response(200, json={"success": True, "result": result})
 
     _mock_client(monkeypatch, respond)
-    config = LLMConfig(decision_provider="cloudflare", cloudflare_account_id="test-account", cloudflare_api_token=token)
+    config = LLMConfig(
+        decision_provider="cloudflare", cloudflare_account_id="test-account", cloudflare_api_token=token
+    )
     decision = asyncio.run(build_decision_client(config).decide(StateEngine().state, ["goal"]))
     assert decision.primary_frame == "GOAL"
     assert decision.provider == "local-decision-fallback:cloudflare:@cf/cloudflare/clef-flash"
@@ -108,7 +158,12 @@ def test_cloudflare_fallback_and_redacted_diagnostics(monkeypatch, caplog, failu
 
 
 def test_switching_providers_preserves_both_credentials():
-    config = LLMConfig(decision_provider="cloudflare", cloudflare_account_id="test-account", cloudflare_api_token="cf-token", gateway_api_key="vercel-token")
+    config = LLMConfig(
+        decision_provider="cloudflare",
+        cloudflare_account_id="test-account",
+        cloudflare_api_token="cf-token",
+        gateway_api_key="vercel-token",
+    )
     assert isinstance(build_decision_client(config), CloudflareDecisionClient)
     vercel = build_decision_client(replace(config, decision_provider="vercel"))
     assert type(vercel) is GatewayDecisionClient

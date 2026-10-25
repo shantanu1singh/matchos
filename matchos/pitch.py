@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from collections.abc import Iterable
 
-from matchos.teams import player_label, team_name
 from matchos.schemas import MatchEvent, Point, TeamId, TrackingPlayer
+from matchos.teams import player_label, team_name
 
 PITCH_X = 105.0
 PITCH_Y = 68.0

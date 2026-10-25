@@ -1,4 +1,5 @@
 """Guided reviews keep evidence fixed while live clips and independent models run."""
+
 import asyncio
 import threading
 
@@ -20,9 +21,12 @@ def offline(monkeypatch):
 
 def test_checkpoints_have_the_promised_real_evidence_and_do_not_advance_time(monkeypatch):
     offline(monkeypatch)
+
     async def run():
         for index, expected in enumerate(("PRESS_BREAKDOWN", "GOAL", "RED_CARD")):
-            session = MatchSession("press_collapse", 47129, 1, demo_viewers()[0], running=False, demo_step=index)
+            session = MatchSession(
+                "press_collapse", 47129, 1, demo_viewers()[0], running=False, demo_step=index
+            )
             try:
                 await session.seek_to(DEMO_STOPS[index]["timestamp_ms"])
                 stamp = session.simulator.clock_ms
@@ -44,6 +48,7 @@ def test_checkpoints_have_the_promised_real_evidence_and_do_not_advance_time(mon
                 assert {step["name"] for step in run["steps"]} >= {"state", "trigger"}
             finally:
                 await session.close()
+
     asyncio.run(run())
 
 
@@ -74,38 +79,60 @@ def test_websocket_demo_settles_all_viewers_and_retains_trace_history_across_ste
                     break
             assert message["phase"] == "ready"
             assert message["requestId"] == step + 10
-            review = next(item for item in messages if item["type"] == "demo_status" and item["phase"] == "evaluating")
-            assert review["candidates"]["candidates"]  # Evidence remains inspectable even when every viewer holds.
+            review = next(
+                item for item in messages if item["type"] == "demo_status" and item["phase"] == "evaluating"
+            )
+            assert review["candidates"][
+                "candidates"
+            ]  # Evidence remains inspectable even when every viewer holds.
             snapshot = next(item for item in messages if item["type"] == "demo_snapshot")
             assert snapshot["frame"]["timestamp_ms"] == DEMO_STOPS[step]["timestamp_ms"]
             results = message["results"]
             assert [item["index"] for item in results] == [0, 1, 2]
             assert [item["profile"]["persona"] for item in results] == ["broadcaster", "fan", "analyst"]
-            ids = [tuple(candidate["id"] for candidate in item["result"]["candidates"]["candidates"]) for item in results]
+            ids = [
+                tuple(candidate["id"] for candidate in item["result"]["candidates"]["candidates"])
+                for item in results
+            ]
             assert ids[0] == ids[1] == ids[2]
-            assert all(item["result"]["state"]["timestamp_ms"] == snapshot["frame"]["timestamp_ms"] for item in results)
+            assert all(
+                item["result"]["state"]["timestamp_ms"] == snapshot["frame"]["timestamp_ms"]
+                for item in results
+            )
             frames = [item for item in messages if item["type"] == "frame"]
             assert len(frames) >= 3
             stamps = [item["frame"]["timestamp_ms"] for item in frames]
             assert stamps == sorted(set(stamps))
             assert stamps[-1] >= snapshot["frame"]["timestamp_ms"] + demo.DEMO_PLAYBACK_MS
             assert all(item["state"]["timestamp_ms"] == item["frame"]["timestamp_ms"] for item in frames)
-            playing = next(item for item in messages if item["type"] == "demo_status" and item["phase"] == "playing")
+            playing = next(
+                item for item in messages if item["type"] == "demo_status" and item["phase"] == "playing"
+            )
             assert playing["running"] is True
             assert message["running"] is False
-            assert any(item["type"] in {"moment", "trace"} for item in messages)  # Producer receives primary decisions.
+            assert any(
+                item["type"] in {"moment", "trace"} for item in messages
+            )  # Producer receives primary decisions.
             ws.send_json({"type": "telemetry", "since": 0})
             traces, paused_messages = receive_until(ws, "telemetry")
             assert not any(item["type"] == "frame" for item in paused_messages)
             if trace_session is None:
                 trace_session = traces["session"]
             assert traces["session"] == trace_session
-            assert len([run for run in traces["runs"] if run["label"] == "Guided checkpoint evidence"]) == step + 1
-            assert {run["metadata"].get("viewIndex") for run in traces["runs"] if run["label"] == "Viewer editorial selection"} == {0, 1, 2}
+            assert (
+                len([run for run in traces["runs"] if run["label"] == "Guided checkpoint evidence"])
+                == step + 1
+            )
+            assert {
+                run["metadata"].get("viewIndex")
+                for run in traces["runs"]
+                if run["label"] == "Viewer editorial selection"
+            } == {0, 1, 2}
 
 
 def test_clip_continues_until_slow_viewer_finishes_then_pauses_without_extra_reviews(monkeypatch):
     from matchos.decision_client import LocalDecisionClient
+
     offline(monkeypatch)
     select = LocalDecisionClient.select
     calls = []
@@ -113,7 +140,7 @@ def test_clip_continues_until_slow_viewer_finishes_then_pauses_without_extra_rev
     async def delayed(self, state, candidates, viewer, context):
         calls.append(viewer.persona)
         if viewer.persona == "fan":
-            await asyncio.sleep(.65)
+            await asyncio.sleep(0.65)
         return await select(self, state, candidates, viewer, context)
 
     monkeypatch.setattr(LocalDecisionClient, "select", delayed)
@@ -125,16 +152,20 @@ def test_clip_continues_until_slow_viewer_finishes_then_pauses_without_extra_rev
             message = ws.receive_json()
             messages.append(message)
             if message["type"] == "demo_snapshot":
-                ws.send_json({"type": "speed", "speed": 20})  # Lab controls must not speed up the guided clip.
+                ws.send_json(
+                    {"type": "speed", "speed": 20}
+                )  # Lab controls must not speed up the guided clip.
             if message["type"] == "demo_status" and message["phase"] in {"ready", "error"}:
                 break
         assert message["phase"] == "ready"
-        fan_index = next(i for i, item in enumerate(messages) if item["type"] == "viewer_update" and item["index"] == 1)
+        fan_index = next(
+            i for i, item in enumerate(messages) if item["type"] == "viewer_update" and item["index"] == 1
+        )
         assert any(item["type"] == "frame" for item in messages[:fan_index])
-        assert any(item["type"] == "frame" for item in messages[fan_index + 1:])
+        assert any(item["type"] == "frame" for item in messages[fan_index + 1 :])
         frames = [item for item in messages if item["type"] == "frame"]
         stamps = [item["frame"]["timestamp_ms"] for item in frames]
-        assert all(after - before == 100 for before, after in zip(stamps, stamps[1:]))
+        assert all(after - before == 100 for before, after in zip(stamps, stamps[1:], strict=False))
         assert frames[-1]["frame"]["timestamp_ms"] > DEMO_STOPS[1]["timestamp_ms"] + demo.DEMO_PLAYBACK_MS
         assert sorted(calls) == ["analyst", "broadcaster", "fan"]
         assert {item["result"]["moment"]["frame"] for item in message["results"]} == {"GOAL"}
@@ -155,14 +186,17 @@ def test_invalid_demo_checkpoint_is_recoverable(monkeypatch):
 
 def test_demo_wait_is_responsive_and_new_match_cancels_pending_viewers(monkeypatch):
     from matchos.decision_client import LocalDecisionClient
+
     offline(monkeypatch)
     started, cancelled = threading.Event(), threading.Event()
+
     async def slow_selection(*args, **kwargs):
         started.set()
         try:
             await asyncio.sleep(30)
         finally:
             cancelled.set()
+
     monkeypatch.setattr(LocalDecisionClient, "select", slow_selection)
     with TestClient(server.app) as client, client.websocket_connect("/ws") as ws:
         ws.receive_json()
@@ -172,8 +206,12 @@ def test_demo_wait_is_responsive_and_new_match_cancels_pending_viewers(monkeypat
         ws.send_json({"type": "telemetry", "since": 0})
         traces, _ = receive_until(ws, "telemetry")
         assert any(run["status"] == "running" for run in traces["runs"])
-        ws.send_json({"type": "start", "scenario": "balanced", "seed": 7, "viewer": {"persona": "broadcaster"}})
+        ws.send_json(
+            {"type": "start", "scenario": "balanced", "seed": 7, "viewer": {"persona": "broadcaster"}}
+        )
         status, messages = receive_until(ws, "status")
         assert status["running"] is True
         assert cancelled.wait(2)
-        assert not any(message["type"] == "demo_status" and message.get("phase") == "ready" for message in messages)
+        assert not any(
+            message["type"] == "demo_status" and message.get("phase") == "ready" for message in messages
+        )

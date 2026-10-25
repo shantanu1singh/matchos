@@ -17,7 +17,6 @@ from collections.abc import AsyncIterable, Awaitable, Mapping, Sequence
 
 from agent_framework import (
     Agent,
-    AgentExecutor,
     BaseChatClient,
     ChatResponse,
     ChatResponseUpdate,
@@ -27,11 +26,11 @@ from agent_framework import (
     ResponseStream,
 )
 
-from matchos.teams import identity_context
 from matchos.copy import prose_is_faithful, render_overlay
 from matchos.llm_config import LLMConfig
 from matchos.model_logging import ModelCall
 from matchos.schemas import Overlay, VerifiedMoment, ViewerProfile
+from matchos.teams import identity_context
 
 INSTRUCTIONS = """You are the MatchOS language renderer.
 You receive one verified football moment as JSON plus a viewer profile.
@@ -62,7 +61,11 @@ class LocalFactsChatClient(FunctionInvocationLayer, BaseChatClient):
         options: Mapping[str, object],
         **kwargs: object,
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
-        call = ModelCall("reasoning", "local-renderer", [{"role": str(message.role), "content": message.text} for message in messages])
+        call = ModelCall(
+            "reasoning",
+            "local-renderer",
+            [{"role": str(message.role), "content": message.text} for message in messages],
+        )
         text = render_from_messages(messages)
         call.result({"text": text})
 
@@ -100,10 +103,21 @@ class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
         **kwargs: object,
     ) -> Awaitable[ChatResponse] | ResponseStream[ChatResponseUpdate, ChatResponse]:
         async def generate() -> str:
-            call = ModelCall("reasoning", self.config.reasoning_model,
-                             {"instructions": options.get("instructions"),
-                              "messages": [{"role": str(message.role), "content": message.text} for message in messages]},
-                             secrets=(self.config.reasoning_api_key, self.config.gateway_api_key, self.config.cloudflare_api_token))
+            call = ModelCall(
+                "reasoning",
+                self.config.reasoning_model,
+                {
+                    "instructions": options.get("instructions"),
+                    "messages": [
+                        {"role": str(message.role), "content": message.text} for message in messages
+                    ],
+                },
+                secrets=(
+                    self.config.reasoning_api_key,
+                    self.config.gateway_api_key,
+                    self.config.cloudflare_api_token,
+                ),
+            )
             try:
                 litellm = await asyncio.to_thread(importlib.import_module, "litellm")
 
@@ -121,7 +135,11 @@ class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
                     ),
                     timeout=self.config.reasoning_timeout_s,
                 )
-                call.result(response.model_dump() if hasattr(response, "model_dump") else {"text": response.choices[0].message.content})
+                call.result(
+                    response.model_dump()
+                    if hasattr(response, "model_dump")
+                    else {"text": response.choices[0].message.content}
+                )
                 text = response.choices[0].message.content
                 if not isinstance(text, str) or not text.strip():
                     raise ValueError("Empty reasoning response")
@@ -133,10 +151,13 @@ class LiteLLMChatClient(FunctionInvocationLayer, BaseChatClient):
                 logging.getLogger(__name__).warning(
                     "Reasoning dependency %s is missing from %s; install the project requirements. "
                     "Using the fact renderer",
-                    exc.name, sys.executable,
+                    exc.name,
+                    sys.executable,
                 )
                 text = render_from_messages(messages)
-                call.result({"error": "missing dependency", "dependency": exc.name, "text": text}, phase="FALLBACK")
+                call.result(
+                    {"error": "missing dependency", "dependency": exc.name, "text": text}, phase="FALLBACK"
+                )
                 return text
             except Exception as exc:
                 # Provider errors must not remove an already verified overlay.
@@ -185,27 +206,48 @@ PERCENT_FACTS = {"possessionLast5", "pressBypassBefore", "pressBypassNow"}
 
 def prompt_payload(moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     # Keep canonical facts untouched for arithmetic and evidence inspection.
-    facts = {key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
-             for key, value in moment.facts.items()}
+    facts = {
+        key: f"{round(float(value) * 100)}%" if key in PERCENT_FACTS else value
+        for key, value in moment.facts.items()
+    }
     fallback = render_overlay(moment, viewer, rich=True, provider="template")
     presentation = {}
     if viewer.persona == "broadcaster":
-        facts = {key: round(value) if key.endswith("M") and isinstance(value, (int, float)) else value
-                 for key, value in facts.items()}
-        presentation = {"presentation": {"headline": fallback.headline,
-                                         "purpose": "What should the audience notice right now?",
-                                         "output": "Supporting copy only; one key statistic or comparison.",
-                                         "distancePrecision": "Rounded metres; canonical values stay in evidence."}}
-    return json.dumps({
-        "roster": identity_context(),
-        "viewer": viewer.model_profile(),
-        "moment": {"id": moment.id, "type": moment.type, "frame": moment.frame,
-                   "team_id": moment.team_id, "player_id": moment.player_id, "facts": facts},
-        "units": {"possessionLast5": "percent", "pressBypassBefore": "percent",
-                  "pressBypassNow": "percent", "distances": "metres"},
-        "fallbackText": fallback.body,
-        **presentation,
-    }, default=str)
+        facts = {
+            key: round(value) if key.endswith("M") and isinstance(value, (int, float)) else value
+            for key, value in facts.items()
+        }
+        presentation = {
+            "presentation": {
+                "headline": fallback.headline,
+                "purpose": "What should the audience notice right now?",
+                "output": "Supporting copy only; one key statistic or comparison.",
+                "distancePrecision": "Rounded metres; canonical values stay in evidence.",
+            }
+        }
+    return json.dumps(
+        {
+            "roster": identity_context(),
+            "viewer": viewer.model_profile(),
+            "moment": {
+                "id": moment.id,
+                "type": moment.type,
+                "frame": moment.frame,
+                "team_id": moment.team_id,
+                "player_id": moment.player_id,
+                "facts": facts,
+            },
+            "units": {
+                "possessionLast5": "percent",
+                "pressBypassBefore": "percent",
+                "pressBypassNow": "percent",
+                "distances": "metres",
+            },
+            "fallbackText": fallback.body,
+            **presentation,
+        },
+        default=str,
+    )
 
 
 def _latest_payload(messages: Sequence[Message]) -> dict | None:
@@ -221,32 +263,51 @@ def _latest_payload(messages: Sequence[Message]) -> dict | None:
 
 def faithful_text(text: str, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
     cleaned = " ".join(text.strip().split())
-    ratios = {ratio for key, value in moment.facts.items() if key in PERCENT_FACTS
-              for ratio in (float(value), round(float(value), 2))}
-    fractional = any(float(number.replace(",", ".")) in ratios and 0 < float(number.replace(",", ".")) < 1
-                     for number in re.findall(r"(?<![\d.,])\d+[.,]\d+(?!\d)", cleaned))
+    ratios = {
+        ratio
+        for key, value in moment.facts.items()
+        if key in PERCENT_FACTS
+        for ratio in (float(value), round(float(value), 2))
+    }
+    fractional = any(
+        float(number.replace(",", ".")) in ratios and 0 < float(number.replace(",", ".")) < 1
+        for number in re.findall(r"(?<![\d.,])\d+[.,]\d+(?!\d)", cleaned)
+    )
     fallback = render_overlay(moment, viewer, rich=True, provider="template")
     broadcast_ok = True
     if viewer.persona == "broadcaster":
         headline = fallback.headline.casefold().rstrip(".!।")
         repeated_headline = cleaned.casefold().startswith(headline)
-        decimal_distance = bool(re.search(r"\d+[.,]\d+\s*(?:m\b|m[eè]t(?:re|er|ro)s?\b|मीटर)", cleaned, re.IGNORECASE))
+        decimal_distance = bool(
+            re.search(r"\d+[.,]\d+\s*(?:m\b|m[eè]t(?:re|er|ro)s?\b|मीटर)", cleaned, re.IGNORECASE)
+        )
         sentences = [part for part in re.split(r"[.!?।]+(?:\s|$)", cleaned) if part.strip()]
-        broadcast_ok = not repeated_headline and not decimal_distance and len(cleaned.split()) <= 45 and len(sentences) <= 2
+        broadcast_ok = (
+            not repeated_headline
+            and not decimal_distance
+            and len(cleaned.split()) <= 45
+            and len(sentences) <= 2
+        )
     accepted = bool(cleaned and not fractional and broadcast_ok and prose_is_faithful(cleaned, moment))
     result = cleaned if accepted else fallback.body
     from matchos.telemetry import record
-    record("language fact guard", {"text": cleaned, "canonicalFacts": moment.facts},
-           {"accepted": accepted, "text": result}, status="complete" if accepted else "fallback")
+
+    record(
+        "language fact guard",
+        {"text": cleaned, "canonicalFacts": moment.facts},
+        {"accepted": accepted, "text": result},
+        status="complete" if accepted else "fallback",
+    )
     return result
 
 
-def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecutor, Agent, str]:
+def build_language_agent(config: LLMConfig | None = None) -> tuple[Agent, str]:
     config = config or LLMConfig.from_env()
     provider = "local-renderer"
     if config.reasoning_enabled:
         if config.reasoning_provider == "azure":
             from matchos.azure_foundry import FoundryLanguageClient
+
             client = FoundryLanguageClient(config)
             provider = f"azure-foundry:{config.azure_reasoning_deployment}"
         else:
@@ -255,15 +316,16 @@ def build_language_executor(config: LLMConfig | None = None) -> tuple[AgentExecu
     else:
         client = LocalFactsChatClient()
         if config.reasoning_provider == "azure" and config.reasoning_model != "local":
-            logging.getLogger(__name__).warning("Azure reasoning is not configured; set AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_API_KEY (or AZURE_AUTH_MODE=entra). Using the fact renderer")
+            logging.getLogger(__name__).warning(
+                "Azure reasoning is not configured; set AZURE_FOUNDRY_ENDPOINT and AZURE_FOUNDRY_API_KEY (or AZURE_AUTH_MODE=entra). Using the fact renderer"
+            )
     agent = Agent(
         client=client,
         name="matchos-language",
         instructions=INSTRUCTIONS,
         description="Renders a verified moment for one viewer without adding facts.",
     )
-    executor = AgentExecutor(agent, id="language_agent")
-    return executor, agent, provider
+    return agent, provider
 
 
 async def generate_text(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfile) -> str:
@@ -276,12 +338,18 @@ async def personalize(agent: Agent, moment: VerifiedMoment, viewer: ViewerProfil
     text = await generate_text(agent, moment, viewer)
     checked = faithful_text(text, moment, viewer)
     if checked != " ".join(text.strip().split()):
-        logging.getLogger("matchos.model_calls").info("Reasoning text rejected by fact check for moment %s persona=%s; template=%s", moment.id, viewer.persona, checked)
+        logging.getLogger("matchos.model_calls").info(
+            "Reasoning text rejected by fact check for moment %s persona=%s; template=%s",
+            moment.id,
+            viewer.persona,
+            checked,
+        )
     return checked
 
 
-async def draft_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
-                        provider: str, timeout_s: float = 15) -> Overlay:
+async def draft_overlay(
+    agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile, provider: str, timeout_s: float = 15
+) -> Overlay:
     """Prepare unpublished copy; CopyValidationExecutor must validate it."""
     fallback = render_overlay(moment, viewer, rich=True, provider="template")
     if agent is None:
@@ -293,10 +361,17 @@ async def draft_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: Vie
         raise
     except Exception as exc:
         # Framework errors and the overall deadline also need a usable final card.
-        logging.getLogger(__name__).warning("Viewer language failed (%s); using persona fallback", type(exc).__name__)
+        logging.getLogger(__name__).warning(
+            "Viewer language failed (%s); using persona fallback", type(exc).__name__
+        )
         from matchos.telemetry import record
-        record("viewer language fallback", {"momentId": moment.id, "viewer": viewer.model_profile()},
-               {"error": type(exc).__name__}, status="fallback")
+
+        record(
+            "viewer language fallback",
+            {"momentId": moment.id, "viewer": viewer.model_profile()},
+            {"error": type(exc).__name__},
+            status="fallback",
+        )
         fallback.source = "template"
         return fallback
     overlay = render_overlay(moment, viewer, rich=True, provider=provider)
@@ -312,7 +387,8 @@ def validate_overlay(overlay: Overlay, moment: VerifiedMoment, viewer: ViewerPro
     return overlay
 
 
-async def final_overlay(agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile,
-                        provider: str, timeout_s: float = 15) -> Overlay:
+async def final_overlay(
+    agent: Agent | None, moment: VerifiedMoment, viewer: ViewerProfile, provider: str, timeout_s: float = 15
+) -> Overlay:
     """Compatibility composition for integrations outside the viewer workflow."""
     return validate_overlay(await draft_overlay(agent, moment, viewer, provider, timeout_s), moment, viewer)

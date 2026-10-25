@@ -7,25 +7,47 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from agent_framework import Message
 
 from matchos.decision_client import GatewayDecisionClient, LocalDecisionClient, build_decision_client
-from matchos.language_agent import INSTRUCTIONS, build_language_executor, personalize, prompt_payload, render_from_messages
+from matchos.language_agent import (
+    INSTRUCTIONS,
+    build_language_agent,
+    personalize,
+    prompt_payload,
+    render_from_messages,
+)
 from matchos.llm_config import LLMConfig
 from matchos.schemas import PlayerRollup, VerifiedMoment, ViewerProfile
 from matchos.state_engine import StateEngine
-from agent_framework import Message
 
 
 def _answers(frame="PLAYER_IMPACT"):
-    return {"answers": [
-        {"name": name, "type": "predicate", "probability": probability}
-        for name, probability in [("tacticalShift", .2), ("momentumShift", .3), ("playerStory", .9), ("shouldSurface", .85)]
-    ] + [
-        {"name": "importance", "type": "score", "score": 4.2},
-        {"name": "primaryFrame", "type": "choice", "choice": frame, "confidence": .9,
-         "probabilities": [{"value": frame, "probability": .9}, {"value": "GOAL", "probability": .1}]},
-        {"name": "team", "type": "choice", "choice": "RED"},
-    ]}
+    return {
+        "answers": [
+            {"name": name, "type": "predicate", "probability": probability}
+            for name, probability in [
+                ("tacticalShift", 0.2),
+                ("momentumShift", 0.3),
+                ("playerStory", 0.9),
+                ("shouldSurface", 0.85),
+            ]
+        ]
+        + [
+            {"name": "importance", "type": "score", "score": 4.2},
+            {
+                "name": "primaryFrame",
+                "type": "choice",
+                "choice": frame,
+                "confidence": 0.9,
+                "probabilities": [
+                    {"value": frame, "probability": 0.9},
+                    {"value": "GOAL", "probability": 0.1},
+                ],
+            },
+            {"name": "team", "type": "choice", "choice": "RED"},
+        ]
+    }
 
 
 @pytest.mark.parametrize("model", ["convaiinnovations/laya", "convaiinnovations/laya-free"])
@@ -37,7 +59,10 @@ def test_gateway_decision_contract_and_focused_player(monkeypatch, model):
         return httpx.Response(200, json=_answers())
 
     actual_client = httpx.AsyncClient
-    monkeypatch.setattr("matchos.decision_client.httpx.AsyncClient", lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw))
+    monkeypatch.setattr(
+        "matchos.decision_client.httpx.AsyncClient",
+        lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
+    )
     state = StateEngine().state
     state.players["blue_9"] = PlayerRollup(number=9, team_id="BLUE")
     config = LLMConfig(decision_provider="vercel", gateway_api_key="test-key", decision_model=model)
@@ -52,10 +77,13 @@ def test_gateway_decision_contract_and_focused_player(monkeypatch, model):
     assert len(payload["questions"]) == 7
     assert decision.provider == f"vercel:{model}"
     assert decision.player_id == "blue_9" and decision.team_id == "BLUE"
-    assert decision.importance == 4.2 and decision.frame_scores["GOAL"] == .1
+    assert decision.importance == 4.2 and decision.frame_scores["GOAL"] == 0.1
 
 
-@pytest.mark.parametrize("failure", ["timeout", "unauthorized", "refusal", "missing", "nan", "out_of_range", "unknown_frame", "zero"])
+@pytest.mark.parametrize(
+    "failure",
+    ["timeout", "unauthorized", "refusal", "missing", "nan", "out_of_range", "unknown_frame", "zero"],
+)
 def test_gateway_handles_failed_or_invalid_answers(monkeypatch, failure):
     def respond(request):
         if failure == "timeout":
@@ -74,8 +102,13 @@ def test_gateway_handles_failed_or_invalid_answers(monkeypatch, failure):
         return httpx.Response(200, json=body)
 
     actual_client = httpx.AsyncClient
-    monkeypatch.setattr("matchos.decision_client.httpx.AsyncClient", lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw))
-    decision = asyncio.run(GatewayDecisionClient(LLMConfig(gateway_api_key="test-key")).decide(StateEngine().state, ["goal"]))
+    monkeypatch.setattr(
+        "matchos.decision_client.httpx.AsyncClient",
+        lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
+    )
+    decision = asyncio.run(
+        GatewayDecisionClient(LLMConfig(gateway_api_key="test-key")).decide(StateEngine().state, ["goal"])
+    )
     if failure == "zero":
         assert decision.tactical_shift == 0
         assert decision.provider == "vercel:convaiinnovations/laya-free"
@@ -86,17 +119,35 @@ def test_gateway_handles_failed_or_invalid_answers(monkeypatch, failure):
 
 def _moment():
     return VerifiedMoment(
-        id="test-moment", type="TACTICAL_SHIFT", team_id="BLUE", frame="PRESS_BREAKDOWN",
-        importance=.9, confidence=.94, facts={"defendingTeam": "Blue", "attackingTeam": "Red",
-        "pressBypassBefore": .29, "pressBypassNow": .71, "pressBypassSample": 8,
-        "defensiveLineBeforeM": 45, "defensiveLineNowM": 38.2, "defensiveLineDeltaM": -6.8,
-        "opponentFinalThirdEntries": 7, "finalThirdEntriesBefore": 2},
-        evidence=[], evidence_detail=[], valid_from_ms=0, expires_at_ms=40000,
+        id="test-moment",
+        type="TACTICAL_SHIFT",
+        team_id="BLUE",
+        frame="PRESS_BREAKDOWN",
+        importance=0.9,
+        confidence=0.94,
+        facts={
+            "defendingTeam": "Blue",
+            "attackingTeam": "Red",
+            "pressBypassBefore": 0.29,
+            "pressBypassNow": 0.71,
+            "pressBypassSample": 8,
+            "defensiveLineBeforeM": 45,
+            "defensiveLineNowM": 38.2,
+            "defensiveLineDeltaM": -6.8,
+            "opponentFinalThirdEntries": 7,
+            "finalThirdEntriesBefore": 2,
+        },
+        evidence=[],
+        evidence_detail=[],
+        valid_from_ms=0,
+        expires_at_ms=40000,
     )
 
 
-@pytest.mark.parametrize("reply", ["Red are playing through Blue's press.", "They made 999 passes.", "error", "empty", "timeout"])
-def test_reasoning_through_agent_executor_and_fact_guard(monkeypatch, reply):
+@pytest.mark.parametrize(
+    "reply", ["Red are playing through Blue's press.", "They made 999 passes.", "error", "empty", "timeout"]
+)
+def test_reasoning_through_framework_agent_and_fact_guard(monkeypatch, reply):
     import litellm
 
     calls = []
@@ -107,14 +158,16 @@ def test_reasoning_through_agent_executor_and_fact_guard(monkeypatch, reply):
             raise RuntimeError("provider failure")
         if reply == "timeout":
             await asyncio.sleep(1)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="" if reply == "empty" else reply))])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="" if reply == "empty" else reply))]
+        )
 
     monkeypatch.setattr(litellm, "acompletion", complete)
-    config = LLMConfig(reasoning_provider="litellm", vertex_project="test-project", reasoning_timeout_s=.02)
-    executor, agent, provider = build_language_executor(config)
+    config = LLMConfig(reasoning_provider="litellm", vertex_project="test-project", reasoning_timeout_s=0.02)
+    agent, provider = build_language_agent(config)
     moment, viewer = _moment(), ViewerProfile()
     text = asyncio.run(personalize(agent, moment, viewer))
-    assert executor.id == "language_agent"
+    assert agent.name == "matchos-language"
     assert provider == "litellm:vertex_ai/gemini-3.8-flash"
     call = calls[0]
     assert call["model"] == "vertex_ai/gemini-3.8-flash"
@@ -136,11 +189,18 @@ def test_reasoning_stream_with_replacement_provider(monkeypatch):
 
     async def complete(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="Blue's press has dropped."))])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Blue's press has dropped."))]
+        )
 
     monkeypatch.setattr(litellm, "acompletion", complete)
-    config = LLMConfig(reasoning_provider="litellm", reasoning_model="openai/example", reasoning_api_key="test-key", reasoning_base_url="https://example.test/v1")
-    _, agent, _ = build_language_executor(config)
+    config = LLMConfig(
+        reasoning_provider="litellm",
+        reasoning_model="openai/example",
+        reasoning_api_key="test-key",
+        reasoning_base_url="https://example.test/v1",
+    )
+    agent, _ = build_language_agent(config)
 
     async def run():
         stream = agent.run(prompt_payload(_moment(), ViewerProfile()), stream=True)
@@ -165,7 +225,7 @@ def test_missing_litellm_preserves_streaming_response(monkeypatch, caplog):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib, "import_module", without_litellm)
-    _, agent, _ = build_language_executor(LLMConfig(reasoning_provider="litellm", vertex_project="test-project"))
+    agent, _ = build_language_agent(LLMConfig(reasoning_provider="litellm", vertex_project="test-project"))
     moment, viewer = _moment(), ViewerProfile()
 
     async def run():
@@ -183,7 +243,25 @@ def test_missing_litellm_preserves_streaming_response(monkeypatch, caplog):
 def test_config_defaults_and_provider_swap(monkeypatch, tmp_path):
     # User secret files must not affect an offline defaults test.
     monkeypatch.setattr("matchos.llm_config.ENV_DIR", tmp_path)
-    for name in ["DECISION_PROVIDER", "REASONING_PROVIDER", "AZURE_FOUNDRY_ENDPOINT", "AZURE_DECISION_ENDPOINT", "AZURE_REASONING_ENDPOINT", "CLOUDFLARE_MODEL", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_AUTH_TOKEN", "AI_GATEWAY_API_KEY", "DECISION_MODEL", "REASONING_MODEL", "REASONING_API_KEY", "REASONING_BASE_URL", "VERTEXAI_PROJECT", "GOOGLE_CLOUD_PROJECT", "VERTEXAI_LOCATION"]:
+    for name in [
+        "DECISION_PROVIDER",
+        "REASONING_PROVIDER",
+        "AZURE_FOUNDRY_ENDPOINT",
+        "AZURE_DECISION_ENDPOINT",
+        "AZURE_REASONING_ENDPOINT",
+        "CLOUDFLARE_MODEL",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_AUTH_TOKEN",
+        "AI_GATEWAY_API_KEY",
+        "DECISION_MODEL",
+        "REASONING_MODEL",
+        "REASONING_API_KEY",
+        "REASONING_BASE_URL",
+        "VERTEXAI_PROJECT",
+        "GOOGLE_CLOUD_PROJECT",
+        "VERTEXAI_LOCATION",
+    ]:
         monkeypatch.delenv(name, raising=False)
     config = LLMConfig.from_env()
     assert config.decision_model == "convaiinnovations/laya-free"
@@ -210,31 +288,46 @@ def test_gateway_logs_actionable_error_without_api_key(monkeypatch, caplog):
     key = "private-test-key"
 
     def respond(request):
-        return httpx.Response(403, json={"error": {
-            "type": "customer_verification_required",
-            "message": f"Add a credit card. Rejected credential: {key}",
-        }})
+        return httpx.Response(
+            403,
+            json={
+                "error": {
+                    "type": "customer_verification_required",
+                    "message": f"Add a credit card. Rejected credential: {key}",
+                }
+            },
+        )
 
     actual_client = httpx.AsyncClient
-    monkeypatch.setattr("matchos.decision_client.httpx.AsyncClient", lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw))
-    decision = asyncio.run(GatewayDecisionClient(LLMConfig(gateway_api_key=key)).decide(StateEngine().state, ["goal"]))
+    monkeypatch.setattr(
+        "matchos.decision_client.httpx.AsyncClient",
+        lambda **kw: actual_client(transport=httpx.MockTransport(respond), **kw),
+    )
+    decision = asyncio.run(
+        GatewayDecisionClient(LLMConfig(gateway_api_key=key)).decide(StateEngine().state, ["goal"])
+    )
     assert decision.provider.startswith("local-decision-fallback:")
     assert "HTTP 403" in caplog.text and "Add a credit card" in caplog.text
     assert key not in caplog.text
     assert "[REDACTED]" in caplog.text
 
 
-@pytest.mark.parametrize("config", [LLMConfig(), LLMConfig(reasoning_provider="litellm", vertex_project="test-project")])
+@pytest.mark.parametrize(
+    "config", [LLMConfig(), LLMConfig(reasoning_provider="litellm", vertex_project="test-project")]
+)
 def test_chat_client_uses_framework_invocation_layer(config, caplog):
-    _, agent, _ = build_language_executor(config)
+    agent, _ = build_language_agent(config)
     assert "does not support function invoking" not in caplog.text
     if not config.reasoning_enabled:
+
         async def run():
             stream = agent.run(prompt_payload(_moment(), ViewerProfile()), stream=True)
             return await stream.get_final_response()
 
         response = asyncio.run(run())
-        assert response.text == render_from_messages([Message("user", [prompt_payload(_moment(), ViewerProfile())])])
+        assert response.text == render_from_messages(
+            [Message("user", [prompt_payload(_moment(), ViewerProfile())])]
+        )
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "NaN", "inf"])

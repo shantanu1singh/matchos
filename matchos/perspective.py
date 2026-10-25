@@ -1,13 +1,15 @@
 """Bounded scheduling and delivery for one viewer's Agent Framework workflow."""
+
 from __future__ import annotations
+
 import asyncio
 import logging
 import time
 
 from matchos.editorial import explain
 from matchos.publication import PublicationPolicy
-from matchos.viewer_workflow import build_viewer_workflow
 from matchos.schemas import PipelineResult, ProducerDecision
+from matchos.viewer_workflow import build_viewer_workflow
 
 
 class Perspective:
@@ -23,11 +25,6 @@ class Perspective:
         self.last_batch = None
         self.started_at = time.monotonic()
         self.workflow = build_viewer_workflow(self)
-
-    @property
-    def producer(self):
-        """Compatibility alias; this object is a deterministic PublicationPolicy."""
-        return self.publication
 
     def offer(self, batch):
         if self.closed or batch.candidates is None or batch.state is None:
@@ -54,25 +51,48 @@ class Perspective:
 
     async def emit(self, result, phase="decision"):
         if not self.closed:
-            await self.send({"type": "viewer_update", "index": self.index, "profile": self.viewer.model_dump(),
-                             "phase": phase, "result": result.model_dump(mode="json"),
-                             "explanation": explain(result, self.viewer)})
+            await self.send(
+                {
+                    "type": "viewer_update",
+                    "index": self.index,
+                    "profile": self.viewer.model_dump(),
+                    "phase": phase,
+                    "result": result.model_dump(mode="json"),
+                    "explanation": explain(result, self.viewer),
+                }
+            )
 
     async def run(self):
         while self.pending is not None and not self.closed:
             batch, self.pending = self.pending, None
             try:
-                with self.session.telemetry.capture("Viewer editorial selection", {
-                    "timestamp_ms": batch.state.timestamp_ms, "viewer": self.viewer.model_dump(), "viewIndex": self.index,
-                    "demoCheckpoint": getattr(self.session, "demo_step", None)}, parent=batch.trace_context):
+                with self.session.telemetry.capture(
+                    "Viewer editorial selection",
+                    {
+                        "timestamp_ms": batch.state.timestamp_ms,
+                        "viewer": self.viewer.model_dump(),
+                        "viewIndex": self.index,
+                        "demoCheckpoint": getattr(self.session, "demo_step", None),
+                    },
+                    parent=batch.trace_context,
+                ):
                     await self.process(batch)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logging.getLogger(__name__).warning("Viewer selection failed (%s); frames continue", type(exc).__name__)
+                logging.getLogger(__name__).warning(
+                    "Viewer selection failed (%s); frames continue", type(exc).__name__
+                )
                 self.workflow = build_viewer_workflow(self)
-                result = PipelineResult(kind="trace", candidates=batch.candidates, state=batch.state,
-                                        producer=ProducerDecision(action="SUPPRESS", reason="This perspective could not update. Watching for the next moment."))
+                result = PipelineResult(
+                    kind="trace",
+                    candidates=batch.candidates,
+                    state=batch.state,
+                    producer=ProducerDecision(
+                        action="SUPPRESS",
+                        reason="This perspective could not update. Watching for the next moment.",
+                    ),
+                )
                 await self.emit(result)
 
     async def process(self, batch):

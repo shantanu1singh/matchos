@@ -1,31 +1,34 @@
 """Exercise Microsoft clients through their HTTP boundaries, without Azure credentials."""
+
 import asyncio
-from dataclasses import replace
 import json
 import os
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from agent_framework import Message
 from azure.core import AsyncPipelineClient
+from azure.core.credentials import AccessToken
 from azure.core.exceptions import HttpResponseError
 from azure.core.pipeline.transport import AsyncHttpTransport
 from azure.core.rest import AsyncHttpResponse
-from azure.core.credentials import AccessToken
 
-from matchos.azure_foundry import FoundryDecisionClient, TOKEN_SCOPE
-from matchos.decision_client import build_decision_client, LocalDecisionClient
-from matchos.language_agent import build_language_executor, personalize, prompt_payload, render_from_messages
+from matchos.azure_foundry import TOKEN_SCOPE, FoundryDecisionClient
+from matchos.decision_client import LocalDecisionClient, build_decision_client
+from matchos.language_agent import build_language_agent, personalize, prompt_payload, render_from_messages
 from matchos.llm_config import LLMConfig
 from matchos.schemas import ViewerProfile
 from matchos.state_engine import StateEngine
 from matchos.telemetry import Telemetry
 from matchos.verifier import Verifier
-from agent_framework import Message
 
 
 def configured(**kwargs):
-    return LLMConfig(azure_endpoint="https://matchos.services.ai.azure.com", azure_api_key="secret-azure-key", **kwargs)
+    return LLMConfig(
+        azure_endpoint="https://matchos.services.ai.azure.com", azure_api_key="secret-azure-key", **kwargs
+    )
 
 
 def candidate():
@@ -33,7 +36,7 @@ def candidate():
     state = engine.state
     state.timestamp_ms = 3_001_000
     state.minute = 50
-    state.red.possession_last5 = .7
+    state.red.possession_last5 = 0.7
     state.red.final_third_entries_last5 = 10
     state.red.final_third_entries_prev5 = 2
     state.deltas.update(red_entries_delta=8)
@@ -44,9 +47,14 @@ def decision_transport(monkeypatch, respond):
     requests = []
 
     class Transport(AsyncHttpTransport):
-        async def open(self): pass
-        async def close(self): pass
-        async def __aexit__(self, *args): await self.close()
+        async def open(self):
+            pass
+
+        async def close(self):
+            pass
+
+        async def __aexit__(self, *args):
+            await self.close()
 
         async def send(self, request, **kwargs):
             requests.append(request)
@@ -64,8 +72,10 @@ def decision_transport(monkeypatch, respond):
                 response.raise_for_status.side_effect = HttpResponseError(response=response)
             return response
 
-    monkeypatch.setattr("matchos.azure_foundry.AsyncPipelineClient",
-                        lambda *a, **kw: AsyncPipelineClient(*a, transport=Transport(), **kw))
+    monkeypatch.setattr(
+        "matchos.azure_foundry.AsyncPipelineClient",
+        lambda *a, **kw: AsyncPipelineClient(*a, transport=Transport(), **kw),
+    )
     return requests
 
 
@@ -77,22 +87,30 @@ def test_decision_sdk_contract_and_fallback(monkeypatch, caplog, mode):
         if mode == "timeout":
             await asyncio.sleep(1)
         choice = moment.id if mode == "select" else mode
-        return (401 if mode == "401" else 200), {"answers": {
-            "candidate": {"type": "choice", "choice": choice, "probabilities": {moment.id: .9, "NONE": .1},
-                          "confidence": "NaN" if mode == "nan" else .9},
-            "importance": {"type": "score", "score": 4.2},
-            "shouldSurface": {"type": "noul", "noul": .95},
-        }}
+        return (401 if mode == "401" else 200), {
+            "answers": {
+                "candidate": {
+                    "type": "choice",
+                    "choice": choice,
+                    "probabilities": {moment.id: 0.9, "NONE": 0.1},
+                    "confidence": "NaN" if mode == "nan" else 0.9,
+                },
+                "importance": {"type": "score", "score": 4.2},
+                "shouldSurface": {"type": "noul", "noul": 0.95},
+            }
+        }
 
     requests = decision_transport(monkeypatch, respond)
-    config = configured(decision_timeout_s=.04)
+    config = configured(decision_timeout_s=0.04)
     client = build_decision_client(config)
     assert isinstance(client, FoundryDecisionClient)
     telemetry = Telemetry()
 
     async def run():
         with telemetry.capture("Azure editorial", {}):
-            return await client.select(state, [moment], ViewerProfile(persona="analyst"), {"recentUpdates": []})
+            return await client.select(
+                state, [moment], ViewerProfile(persona="analyst"), {"recentUpdates": []}
+            )
 
     decision = asyncio.run(run())
     request = requests[0]
@@ -124,11 +142,25 @@ def reasoning_http(monkeypatch, reply, *, status=200):
         requests.append(request)
         if reply == "timeout":
             await asyncio.sleep(1)
-        body = {"id": "resp_test", "object": "response", "created_at": 1,
-                "model": "gpt-6-luna", "status": "completed", "parallel_tool_calls": False,
-                "tool_choice": "auto", "tools": [], "output": [{"id": "msg_test", "type": "message",
-                    "role": "assistant", "status": "completed", "content": [
-                        {"type": "output_text", "text": reply, "annotations": []}]}]}
+        body = {
+            "id": "resp_test",
+            "object": "response",
+            "created_at": 1,
+            "model": "gpt-6-luna",
+            "status": "completed",
+            "parallel_tool_calls": False,
+            "tool_choice": "auto",
+            "tools": [],
+            "output": [
+                {
+                    "id": "msg_test",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{"type": "output_text", "text": reply, "annotations": []}],
+                }
+            ],
+        }
         if status >= 400:
             body = {"error": {"message": "secret-azure-key", "type": "authentication_error"}}
         return httpx.Response(status, json=body, request=request)
@@ -137,15 +169,23 @@ def reasoning_http(monkeypatch, reply, *, status=200):
     return requests
 
 
-@pytest.mark.parametrize("reply,status", [("Liverpool have the momentum.", 200), ("999 passes", 200),
-                                           ("", 200), ("ignored", 401), ("timeout", 200)])
+@pytest.mark.parametrize(
+    "reply,status",
+    [
+        ("Liverpool have the momentum.", 200),
+        ("999 passes", 200),
+        ("", 200),
+        ("ignored", 401),
+        ("timeout", 200),
+    ],
+)
 def test_native_framework_reasoning_and_fact_guard(monkeypatch, caplog, reply, status):
     requests = reasoning_http(monkeypatch, reply, status=status)
     _, moment = candidate()
     viewer = ViewerProfile(persona="analyst")
-    executor, agent, provider = build_language_executor(configured(reasoning_timeout_s=.1))
+    agent, provider = build_language_agent(configured(reasoning_timeout_s=0.1))
     text = asyncio.run(personalize(agent, moment, viewer))
-    assert executor.id == "language_agent" and provider == "azure-foundry:gpt-6-luna"
+    assert agent.name == "matchos-language" and provider == "azure-foundry:gpt-6-luna"
     assert len(requests) == 1
     request = requests[0]
     assert request.url.path == "/openai/v1/responses"
@@ -169,9 +209,15 @@ def test_entra_for_both_clients_and_streaming(monkeypatch):
     credentials = []
 
     class Credential:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): await self.close()
-        async def close(self): self.closed = True
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            await self.close()
+
+        async def close(self):
+            self.closed = True
+
         async def get_token(self, *scopes, **kwargs):
             assert scopes == (TOKEN_SCOPE,)
             return AccessToken("entra-secret-token", 4_000_000_000)
@@ -182,6 +228,7 @@ def test_entra_for_both_clients_and_streaming(monkeypatch):
         return credential
 
     monkeypatch.setattr("matchos.azure_foundry.DefaultAzureCredential", create)
+
     async def respond(request):
         assert request.headers["Authorization"] == "Bearer entra-secret-token"
         assert "api-key" not in request.headers
@@ -191,7 +238,7 @@ def test_entra_for_both_clients_and_streaming(monkeypatch):
     requests = reasoning_http(monkeypatch, "Liverpool have the momentum.")
     config = replace(configured(), azure_api_key="", azure_auth_mode="entra")
     _, moment = candidate()
-    _, agent, _ = build_language_executor(config)
+    agent, _ = build_language_agent(config)
 
     async def run():
         await FoundryDecisionClient(config)._request({"model": "Decision-1"})
@@ -208,10 +255,13 @@ def test_entra_for_both_clients_and_streaming(monkeypatch):
 def test_cancellation_does_not_turn_into_a_fallback(monkeypatch):
     async def respond(request):
         raise asyncio.CancelledError()
+
     decision_transport(monkeypatch, respond)
     state, moment = candidate()
+
     async def run():
         await FoundryDecisionClient(configured()).select(state, [moment], ViewerProfile(), {})
+
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(run())
 
@@ -219,24 +269,39 @@ def test_cancellation_does_not_turn_into_a_fallback(monkeypatch):
 def test_azure_env_loading_and_separate_resources(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "environ", {"AZURE_REASONING_DEPLOYMENT": "shell-deployment"})
     monkeypatch.setattr("matchos.llm_config.ENV_DIR", tmp_path)
-    (tmp_path / ".env").write_text("AZURE_FOUNDRY_ENDPOINT=https://base.services.ai.azure.com/\nAZURE_FOUNDRY_API_KEY=base-key\n")
-    (tmp_path / ".env.local").write_text("AZURE_FOUNDRY_API_KEY=local-secret\nAZURE_REASONING_DEPLOYMENT=local-deployment\nAZURE_DECISION_ENDPOINT=https://decisions.services.ai.azure.com\nAZURE_DECISION_API_KEY=decision-secret\n")
+    (tmp_path / ".env").write_text(
+        "AZURE_FOUNDRY_ENDPOINT=https://base.services.ai.azure.com/\nAZURE_FOUNDRY_API_KEY=base-key\n"
+    )
+    (tmp_path / ".env.local").write_text(
+        "AZURE_FOUNDRY_API_KEY=local-secret\nAZURE_REASONING_DEPLOYMENT=local-deployment\nAZURE_DECISION_ENDPOINT=https://decisions.services.ai.azure.com\nAZURE_DECISION_API_KEY=decision-secret\n"
+    )
     config = LLMConfig.from_env()
     assert config.decision_provider == config.reasoning_provider == "azure"
     assert config.azure_reasoning_deployment == "shell-deployment"
     assert config.azure_resource_endpoint("decision") == "https://decisions.services.ai.azure.com"
     assert config.azure_resource_endpoint("reasoning") == "https://base.services.ai.azure.com"
-    assert config.azure_key("decision") == "decision-secret" and config.azure_key("reasoning") == "local-secret"
+    assert (
+        config.azure_key("decision") == "decision-secret" and config.azure_key("reasoning") == "local-secret"
+    )
     assert "secret" not in repr(config)
     assert config.reasoning_enabled
     assert not replace(config, reasoning_provider="local").reasoning_enabled
-    assert isinstance(build_decision_client(replace(config, azure_api_key="", azure_decision_api_key="")), LocalDecisionClient)
+    assert isinstance(
+        build_decision_client(replace(config, azure_api_key="", azure_decision_api_key="")),
+        LocalDecisionClient,
+    )
 
 
-@pytest.mark.parametrize("name,value", [("REASONING_PROVIDER", "typo"), ("AZURE_AUTH_MODE", "typo"),
-    ("AZURE_FOUNDRY_ENDPOINT", "https://example.test/api/projects/project"),
-    ("AZURE_REASONING_ENDPOINT", "https://example.test/openai/v1"),
-    ("AZURE_DECISION_ENDPOINT", "http://example.test")])
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("REASONING_PROVIDER", "typo"),
+        ("AZURE_AUTH_MODE", "typo"),
+        ("AZURE_FOUNDRY_ENDPOINT", "https://example.test/api/projects/project"),
+        ("AZURE_REASONING_ENDPOINT", "https://example.test/openai/v1"),
+        ("AZURE_DECISION_ENDPOINT", "http://example.test"),
+    ],
+)
 def test_bad_azure_configuration_fails_early(monkeypatch, tmp_path, name, value):
     monkeypatch.setattr(os, "environ", {name: value})
     monkeypatch.setattr("matchos.llm_config.ENV_DIR", tmp_path)

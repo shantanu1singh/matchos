@@ -315,7 +315,7 @@ class ViewerProfile(BaseModel):
 
 class PipelineResult(BaseModel):
     trace_context: dict[str, str] = Field(default_factory=dict, exclude=True)
-    kind: Literal["candidates", "moment", "trace", "enrichment"]
+    kind: Literal["candidates", "moment", "trace"]
     trigger: TriggerResult | None = None
     candidates: VerifiedCandidates | None = None
     decision: MomentDecision | None = None
@@ -325,5 +325,4 @@ class PipelineResult(BaseModel):
     overlay: Overlay | None = None
     state: MatchState | None = None
     timings_ms: dict[str, float] = Field(default_factory=dict)
-    enrichment_text: str | None = None
     moment_id: str | None = None

@@ -1,4 +1,5 @@
 """Exercise cloud spans without Azure credentials, exporters or network access."""
+
 import asyncio
 import json
 
@@ -17,9 +18,10 @@ def full_mode_for_legacy_contracts(monkeypatch):
 @pytest.fixture
 def spans(monkeypatch):
     sdk = pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from opentelemetry import trace
+
     provider = sdk.TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -40,12 +42,21 @@ def test_evidence_and_concurrent_viewers_share_trace_without_mixing_calls(spans,
         with store.capture("Viewer editorial selection", {"viewer": {"persona": role}}, parent=parent):
             record("viewer context", {"prompt": role, "text": "credential-never-export"}, None)
             call = ModelCall("editorial selection", "azure-foundry:Decision-1", {"role": role})
-            await asyncio.sleep(.001)
+            await asyncio.sleep(0.001)
             call.result({"selected": "press-1"})
-            record("viewer production", {}, {"selection": {"selected_candidate_id": "press-1"},
-                "producer": {"action": "AIR"}, "overlay": {"body": role}})
+            record(
+                "viewer production",
+                {},
+                {
+                    "selection": {"selected_candidate_id": "press-1"},
+                    "producer": {"action": "AIR"},
+                    "overlay": {"body": role},
+                },
+            )
+
     async def run():
         await asyncio.gather(viewer("fan"), viewer("analyst"))
+
     asyncio.run(run())
     finished = spans.get_finished_spans()
     assert len({span.context.trace_id for span in finished}) == 1
@@ -55,7 +66,13 @@ def test_evidence_and_concurrent_viewers_share_trace_without_mixing_calls(spans,
         role = span.attributes["matchos.persona"]
         message = json.loads(span.attributes["gen_ai.output.messages"])[0]
         assert json.loads(message["parts"][0]["content"])["overlay"]["body"] == role
-        call = next(item for item in finished if item.parent and item.parent.span_id == span.context.span_id and item.name.startswith("editorial selection:"))
+        call = next(
+            item
+            for item in finished
+            if item.parent
+            and item.parent.span_id == span.context.span_id
+            and item.name.startswith("editorial selection:")
+        )
         assert json.loads(call.attributes["matchos.input"])["role"] == role
     exported = json.dumps([dict(span.attributes) for span in finished])
     assert "credential-never-export" not in exported and '"hidden"' not in exported
@@ -70,7 +87,8 @@ def test_model_span_includes_fallback_phases_usage_and_precise_end_time(spans):
         call.result({"error": "invalid response"}, phase="ERROR")
         call.result({"text": "local copy"}, phase="FALLBACK")
         import time
-        time.sleep(.01)
+
+        time.sleep(0.01)
         record("viewer production", {}, {"producer": {"action": "AIR"}, "selection": None})
     finished = spans.get_finished_spans()
     model = next(span for span in finished if span.name.startswith("reasoning:"))
@@ -94,14 +112,21 @@ def test_content_is_opt_in_and_cancellation_closes_pending_calls(spans, monkeypa
             ModelCall("reasoning", "test-model", {"prompt": "private-input"})
             raise asyncio.CancelledError()
     finished = spans.get_finished_spans()
-    assert all("matchos.input" not in span.attributes and "gen_ai.input.messages" not in span.attributes for span in finished)
+    assert all(
+        "matchos.input" not in span.attributes and "gen_ai.input.messages" not in span.attributes
+        for span in finished
+    )
     assert "private-input" not in json.dumps([dict(span.attributes) for span in finished])
-    assert next(span for span in finished if span.name == "reasoning: test-model").attributes["matchos.status"] == "cancelled"
+    assert (
+        next(span for span in finished if span.name == "reasoning: test-model").attributes["matchos.status"]
+        == "cancelled"
+    )
     assert store._cloud_calls == {}
 
 
 def test_export_configuration_is_opt_in_idempotent_and_does_not_enable_sdk_content(monkeypatch):
     import agent_framework.observability as framework
+
     monkeypatch.setattr(observability, "_configured", False)
     monkeypatch.delenv("MATCHOS_OTEL_ENABLED", raising=False)
     calls = []
@@ -119,6 +144,7 @@ def test_azure_exporter_is_added_and_configuration_errors_do_not_leak_secrets(mo
     pytest.importorskip("azure.monitor.opentelemetry.exporter")
     import agent_framework.observability as framework
     from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+
     monkeypatch.setattr(observability, "_configured", False)
     monkeypatch.setenv("MATCHOS_OTEL_ENABLED", "1")
     monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "secret-connection-string")
@@ -130,8 +156,10 @@ def test_azure_exporter_is_added_and_configuration_errors_do_not_leak_secrets(mo
     assert received[0]["exporters"] == [exporter]
     assert received[0]["enable_sensitive_data"] is False
     monkeypatch.setattr(observability, "_configured", False)
+
     def fail(*args, **kwargs):
         raise ValueError("secret-connection-string")
+
     monkeypatch.setattr(AzureMonitorTraceExporter, "from_connection_string", fail)
     assert not observability.configure_observability()
     assert "secret-connection-string" not in caplog.text
@@ -140,8 +168,14 @@ def test_azure_exporter_is_added_and_configuration_errors_do_not_leak_secrets(mo
 def test_nested_models_and_connection_strings_are_redacted(monkeypatch):
     from matchos.schemas import ViewerProfile
     from matchos.telemetry import safe
+
     monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "hidden-connection")
-    result = safe({"viewer": ViewerProfile(persona="broadcaster"), "text": "hidden-connection",
-                   "connection_string": "also-secret"})
+    result = safe(
+        {
+            "viewer": ViewerProfile(persona="broadcaster"),
+            "text": "hidden-connection",
+            "connection_string": "also-secret",
+        }
+    )
     assert result["viewer"]["persona"] == "broadcaster"
     assert result["text"] == "[REDACTED]" and result["connection_string"] == "[REDACTED]"

@@ -6,12 +6,10 @@ const state = {
   revision: 0,
   seeking: false,
   scrubbing: false,
-  comparisonMoment: null,
   comparisonViewers: [{ persona: "fan", team_id: "RED", language: "es", player_id: "red_9" }, { persona: "analyst", team_id: null, language: "en", player_id: "red_9" }],
   viewerDisplays: {},
   primaryEditorial: null,
   comparisonEditorial: [],
-  comparisonOverlays: [],
   scenarios: [],
   roster: { teams: {}, players: {} },
   scenario: "press_collapse",
@@ -81,24 +79,16 @@ function onMessage(message) {
       state.primaryEditorial = message;
       state.moment = message.explanation.status === "update" ? message.result.moment : null;
       state.overlay = message.explanation.status === "update" ? message.result.overlay : null;
-      renderInsight(message.phase !== "enrichment");
+      renderInsight(true);
     } else {
       state.comparisonEditorial[message.index - 1] = message;
-      renderComparison(message.index - 1, message.phase !== "enrichment");
+      renderComparison(message.index - 1, true);
     }
     state.audioPlayer.offer(message.index === 0 ? "primary" : `view-${message.index - 1}`, message.explanation.status === "update");
     if (state.demo.active) {
       state.demo.outcomes[message.index] = message;
       renderDemoGuide();
     }
-    return;
-  }
-  if (message.type === "enrichment") {
-    if (state.seeking) return;
-    if (state.primaryEditorial?.result.moment?.id !== message.result.moment_id || !state.moment) return;
-    state.primaryEditorial.result.overlay = message.result.overlay;
-    state.overlay = message.result.overlay;
-    renderInsight(false);
     return;
   }
   if (message.type === "telemetry") { receiveTelemetry(message); return; }
@@ -115,19 +105,7 @@ function onMessage(message) {
     onMessage({ type: "frame", frame: message.frame, state: message.state, events: [] });
     return;
   }
-  if (state.seeking && ["frame", "moment", "enrichment", "reframe", "comparison", "comparison_enrichment", "trace"].includes(message.type)) return;
-  if (message.type === "comparison") {
-    state.comparisonMoment = message.moment;
-    state.comparisonOverlays = message.overlays;
-    renderComparison();
-    return;
-  }
-  if (message.type === "comparison_enrichment") {
-    if (state.comparisonMoment?.id !== message.momentId) return;
-    state.comparisonOverlays[message.index] = message.overlay;
-    renderComparison();
-    return;
-  }
+  if (state.seeking && ["frame", "moment", "trace"].includes(message.type)) return;
   if (message.type === "hello") {
     state.speech = message.speech || {available: false, message: "Restart the backend and refresh to enable commentary."};
     state.serverReady = true;
@@ -187,12 +165,6 @@ function onMessage(message) {
     renderCandidates();
     return;
   }
-  if (message.type === "reframe") {
-    state.overlay = message.overlay;
-    if (message.moment) state.moment = message.moment;
-    renderInsight(true);
-    return;
-  }
   if (message.type === "trace") {
     pushCandidate(message.result);
     renderCandidates();
@@ -243,8 +215,6 @@ function resetUiState() {
   state.primaryEditorial = null;
   state.viewerDisplays = {};
   state.comparisonEditorial = [];
-  state.comparisonMoment = null;
-  state.comparisonOverlays = [];
   state.pulse = null;
   state.expandedProof.clear();
   document.getElementById("seek-preview").hidden = true;
@@ -1157,7 +1127,6 @@ function buildComparisonCards() {
       teamSelect.value = viewer.team_id || "RED";
       panel.querySelector('[data-field="player_id"]').disabled = viewer.persona !== "player";
       state.comparisonEditorial[index] = null; delete state.viewerDisplays[`view-${index}`];
-      state.comparisonOverlays = [];
       renderComparison();
       send({ type: "views", views: comparisonViews() });
     }));
@@ -1166,7 +1135,6 @@ function buildComparisonCards() {
       state.comparisonViewers.splice(index, 1);
       state.comparisonEditorial = [];
       state.viewerDisplays = state.viewerDisplays.primary ? {primary: state.viewerDisplays.primary} : {};
-      state.comparisonOverlays = [];
       buildComparisonCards();
       send({ type: "views", views: comparisonViews() });
     });
@@ -1181,7 +1149,6 @@ document.getElementById("add-view").addEventListener("click", () => {
   if (state.comparisonViewers.length >= 2) return;
   state.comparisonEditorial = [];
   state.comparisonViewers.push(normalizeViewer({ ...state.viewer, persona: state.comparisonViewers.length ? "fan" : "analyst" }));
-  state.comparisonOverlays = [];
   buildComparisonCards();
   send({ type: "views", views: comparisonViews() });
 });
@@ -1215,123 +1182,6 @@ timeline.addEventListener("change", () => {
 });
 renderComparison();
 
-function requestDemo(step = 0) {
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-    showDemoNotice("Judge demo needs a live connection. Start the backend, then refresh this page to reconnect.");
-    return;
-  }
-  if (!state.serverReady) {
-    showDemoNotice("Still connecting to the match server. Try Judge demo again once the connection is ready.");
-    return;
-  }
-  if (!state.demo.stops[step]) {
-    showDemoNotice("This backend is running an older version without Judge demo. Stop it with Ctrl+C, restart with .venv/bin/python -m matchos, then refresh this page.");
-    return;
-  }
-  showDemoNotice("");
-  state.audioPlayer?.reset();
-  if (!state.demo.active) state.candidates = [];
-  state.demo = { ...state.demo, active: true, step, requestId: (state.demo.requestId || 0) + 1,
-                 phase: "preparing", settled: 0, outcomes: {}, candidates: [] };
-  state.scenario = "press_collapse"; state.seed = 47129; state.speed = 1;
-  document.getElementById("seed").value = state.seed;
-  document.getElementById("lab-speed").value = state.speed;
-  markSpeed(1); renderScenarios();
-  state.seeking = false;
-  clearEvidence();
-  document.querySelectorAll(".settings-popover").forEach(popover => {
-    if (popover.matches(":popover-open")) popover.hidePopover();
-  });
-  document.querySelector('[data-tab="watch"]').click();
-  renderDemoGuide();
-  send({ type: "demo", step, requestId: state.demo.requestId });
-}
-
-function showDemoNotice(message) {
-  const notice = document.getElementById("demo-notice");
-  notice.textContent = message;
-  notice.hidden = !message;
-}
-
-function receiveDemo(message) {
-  if (!state.demo.active || message.step !== state.demo.step || message.requestId !== state.demo.requestId) return;
-  if (message.type === "demo_snapshot") {
-    const history = state.candidates;
-    state.viewer = message.viewers[0]; state.comparisonViewers = message.viewers.slice(1);
-    resetUiState();
-    state.candidates = history; renderCandidates();
-    state.running = false; state.demo.phase = "evaluating";
-    document.getElementById("persona").value = state.viewer.persona;
-    document.getElementById("language").value = state.viewer.language;
-    document.getElementById("team").value = state.viewer.team_id || "RED";
-    updatePrimaryLabel(); buildComparisonCards(); updateViewerHelp();
-    onMessage({ type: "frame", frame: message.frame, state: message.state, events: message.events });
-  } else if (message.type === "demo_progress") {
-    state.demo.settled = message.settled;
-  } else {
-    state.demo.phase = message.phase;
-    if (typeof message.running === "boolean") state.running = message.running;
-    if (message.candidates) state.demo.candidates = message.candidates.candidates;
-    state.demo.message = message.message || "";
-    if (message.results) {
-      message.results.forEach(result => { state.demo.outcomes[result.index] = result; });
-      state.demo.settled = message.results.length;
-    }
-  }
-  renderDemoGuide();
-}
-
-function renderDemoGuide() {
-  const demo = state.demo;
-  document.getElementById("demo-guide").hidden = !demo.active;
-  document.getElementById("judge-demo").textContent = demo.active ? "Exit demo" : "Judge demo";
-  document.querySelectorAll(".settings-button, #speeds button").forEach(button => { button.disabled = demo.active; });
-  document.getElementById("add-view").disabled = demo.active || state.comparisonViewers.length >= 2;
-  document.getElementById("timeline").disabled = demo.active;
-  document.getElementById("pause").disabled = demo.active;
-  document.getElementById("pause").textContent = demo.active ? (demo.phase === "playing" ? "Demo playing" : "Held for demo") : state.running ? "Pause" : "Resume";
-  renderAudioControls();
-  if (!demo.active) return;
-  const checkpoint = demo.stops[demo.step];
-  const busy = ["preparing", "evaluating", "playing"].includes(demo.phase);
-  document.getElementById("demo-title").textContent = checkpoint.title;
-  document.getElementById("demo-description").textContent = checkpoint.description;
-  document.getElementById("demo-stops").innerHTML = demo.stops.map((stop, index) =>
-    `<button class="demo-stop ${index === demo.step ? "active" : ""}" type="button" data-demo-step="${index}" ${busy ? "disabled" : ""} ${index === demo.step ? 'aria-current="step"' : ""}>${index + 1}. ${escapeHtml(stop.title)} <span>${clockOf(stop.timestamp_ms)}</span></button>`).join("");
-  document.getElementById("demo-stops").querySelectorAll("button").forEach(button => {
-    button.addEventListener("click", () => requestDemo(Number(button.dataset.demoStep)));
-  });
-  document.getElementById("demo-status").textContent = demo.phase === "preparing" ? "Replaying the match to this checkpoint…" :
-    demo.phase === "playing" ? `Playing at 1× · ${demo.settled}/3 viewers finished · the match will pause for comparison.` :
-    demo.phase === "evaluating" ? `Match held · ${demo.settled}/3 viewers finished · waiting for model decisions and copy…` :
-    demo.phase === "error" ? demo.message : "Match held · 3/3 viewers finished · compare their stories or inspect evidence.";
-  document.getElementById("demo-retry").hidden = demo.phase !== "error";
-  document.getElementById("demo-evidence").disabled = !demo.candidates?.length;
-  const next = document.getElementById("demo-next");
-  next.disabled = busy;
-  next.textContent = demo.step === demo.stops.length - 1 ? "Finish demo" : "Next checkpoint →";
-  const roles = ["broadcaster", "fan", "analyst"];
-  const purposes = ["Turning point", "Liverpool's perspective", "Tactics & evidence"];
-  document.getElementById("demo-outcomes").innerHTML = roles.map((role, index) => {
-    const result = demo.outcomes[index];
-    const aired = result?.explanation.status === "update";
-    const status = result ? (aired ? `Aired · ${storyName(result.result.moment?.frame)}` : "Held · no interruption") : demo.phase === "error" ? "Did not finish" : "Evaluating…";
-    return `<span title="${escapeHtml(result?.result.overlay?.headline || result?.explanation.reason || purposes[index])}"><b>${personaNames[role]}</b><small>${purposes[index]}</small>${escapeHtml(status)}</span>`;
-  }).join("");
-  setLive(demo.phase === "playing" ? "Judge demo · 1×" : "Judge demo · held");
-}
-
-document.getElementById("judge-demo").addEventListener("click", () => state.demo.active ? startMatch() : requestDemo());
-document.getElementById("close-evidence").addEventListener("click", clearEvidence);
-document.getElementById("demo-next").addEventListener("click", () => {
-  if (state.demo.step === state.demo.stops.length - 1) startMatch();
-  else requestDemo(state.demo.step + 1);
-});
-document.getElementById("demo-retry").addEventListener("click", () => requestDemo(state.demo.step));
-document.getElementById("demo-evidence").addEventListener("click", () => {
-  if (state.demo.candidates?.length) showEvidence(state.demo.candidates[0]);
-});
-
 document.addEventListener("click", event => {
   const button = event.target.closest("[data-listen-view]");
   if (!button || button.disabled) return;
@@ -1348,162 +1198,3 @@ updateViewerHelp();
 resize();
 requestAnimationFrame(draw);
 connect();
-
-
-const telemetryState = { session: null, revision: 0, runs: [], selected: null, pinnedRun: null };
-function pollTelemetry() {
-  if (!document.getElementById("panel-telemetry").classList.contains("hidden")) {
-    send({ type: "telemetry", session: telemetryState.session, since: telemetryState.revision });
-  }
-}
-setInterval(pollTelemetry, 1000);
-function receiveTelemetry(message) {
-  if (message.session !== telemetryState.session) {
-    telemetryState.runs = []; telemetryState.selected = null; telemetryState.pinnedRun = null;
-  }
-  if (message.retainedIds) telemetryState.runs = telemetryState.runs.filter(run => message.retainedIds.includes(run.id));
-  telemetryState.session = message.session;
-  telemetryState.revision = message.revision;
-  for (const run of message.runs) {
-    const index = telemetryState.runs.findIndex(item => item.id === run.id);
-    if (index >= 0) telemetryState.runs[index] = run;
-    else telemetryState.runs.push(run);
-    if (telemetryState.pinnedRun?.id === run.id) telemetryState.pinnedRun = run;
-  }
-  const quietRuns = telemetryState.runs.filter(run => run.quiet).sort((a,b) => b.revision-a.revision);
-  telemetryState.runs = telemetryState.runs.filter(run => !run.quiet).slice(-40).concat(quietRuns.slice(0,1));
-  const runs = [...telemetryState.runs];
-  // Retain one explicitly selected snapshot even after server history rotates.
-  if (telemetryState.pinnedRun && !runs.some(run => run.id === telemetryState.pinnedRun.id)) runs.push(telemetryState.pinnedRun);
-  runs.sort((a,b) => b.revision-a.revision);
-  if (!telemetryState.selected || !runs.some(run => run.id === telemetryState.selected)) telemetryState.selected = runs.find(run => !run.quiet)?.id || runs[0]?.id;
-  const list = document.getElementById("telemetry-runs");
-  const scrollTop = list.scrollTop;
-  const existing = new Map([...list.children].map(button => [button.dataset.run, button]));
-  runs.forEach((run, index) => {
-    let button = existing.get(run.id);
-    if (!button) {
-      button = document.createElement("button"); button.dataset.run = run.id;
-      button.append(document.createElement("strong"), document.createElement("span"));
-      button.addEventListener("click", () => {
-        telemetryState.selected = run.id;
-        telemetryState.pinnedRun = telemetryState.runs.find(item => item.id === run.id) || telemetryState.pinnedRun;
-        receiveTelemetry({ session: telemetryState.session, revision: telemetryState.revision, runs: [] });
-      });
-    }
-    button.className = `trace-run ${run.id === telemetryState.selected ? "selected" : ""}`;
-    button.setAttribute("aria-pressed", String(run.id === telemetryState.selected));
-    const label = `${clockOf(run.metadata.timestamp_ms || 0)} · ${run.quiet ? "Quiet tick" : run.label}`;
-    const detail = `${run.metadata.viewer?.persona || ""} · ${run.status} · ${run.duration_ms ?? "…"} ms`;
-    if (button.children[0].textContent !== label) button.children[0].textContent = label;
-    if (button.children[1].textContent !== detail) button.children[1].textContent = detail;
-    if (list.children[index] !== button) list.insertBefore(button, list.children[index] || null);
-    existing.delete(run.id);
-  });
-  for (const button of existing.values()) button.remove();
-  list.scrollTop = scrollTop;
-  renderTelemetryRun(runs.find(run => run.id === telemetryState.selected));
-  document.getElementById("export-trace").disabled = !runs.length;
-}
-function readableTrace(value) {
-  if (Array.isArray(value)) return value.map(readableTrace);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key,item]) => {
-    if (key === "content" && typeof item === "string" && /^[{[]/.test(item)) {
-      try { return [key, readableTrace(JSON.parse(item))]; } catch (_) { /* Keep non-JSON text. */ }
-    }
-    return [key, readableTrace(item)];
-  }));
-  return value;
-}
-function executionSummary(run) {
-  const steps = run.steps || [];
-  if (run.label === "Spoken commentary") {
-    const speech = steps.find(step => step.name.startsWith("speech:"));
-    const cached = steps.some(step => step.name === "speech cache");
-    const shared = steps.some(step => step.name === "speech shared synthesis");
-    return [["Speech", speech ? speech.name.substring(speech.name.indexOf(":") + 1).trim() : cached ? "Cached audio" : shared ? "Shared synthesis" : "Waiting"],
-            ["Delivery", speech?.input?.delivery || (cached ? "Previously synthesized" : "—")],
-            ["Audio", run.status === "running" ? "Preparing" : run.status === "complete" ? "Ready" : run.status],
-            ["Total", `${Math.round(run.duration_ms || 0)} ms`]];
-  }
-  const decisions = steps.filter(step => step.name.startsWith("editorial selection:") || step.name.startsWith("decision:"));
-  const language = steps.find(step => step.name.startsWith("reasoning:"));
-  const production = [...steps].reverse().find(step => step.name === "viewer production" || step.name === "producer");
-  const output = production?.output || {};
-  const parsedDecision = [...steps].reverse().find(step => step.name === "editorial selection")?.output;
-  const candidateSelection = output.selection || parsedDecision || decisions[decisions.length - 1]?.output;
-  const selection = candidateSelection && Object.hasOwn(candidateSelection, "selected_candidate_id") ? candidateSelection : null;
-  const producer = output.producer || (output.action ? output : null);
-  const decision = decisions[0];
-  const describe = step => step ? `${step.name.substring(step.name.indexOf(":") + 1).trim()} · ${Math.round(step.duration_ms || 0)} ms${step.status === "fallback" ? " · fallback" : ""}` : "Not called";
-  const selected = selection?.selected_candidate_id ? selection.primary_frame?.replaceAll("_", " ") || selection.selected_candidate_id : selection ? "No update selected" :
-    run.quiet ? "No evaluation" : run.status === "running" ? "Awaiting selection" : decisions.length ? "No selection available" : "Candidate pool only";
-  const outcomes = { AIR: "Aired", SUPPRESS: "Held", REJECT: "Rejected" };
-  const outcome = producer ? outcomes[producer.action] || producer.action : run.quiet ? "No evaluation needed" :
-    run.status === "running" ? "In progress" : run.status === "cancelled" ? "Cancelled" :
-    run.status === "error" ? "Failed" : decisions.length ? "Evaluation complete" : "Evidence prepared";
-  return [["Decision", describe(decision)], ["Language", describe(language)],
-          ["Story", selected], ["Publication", outcome], ["Total", `${Math.round(run.duration_ms || 0)} ms${run.status === "running" ? " · running" : ""}`]];
-}
-function renderTelemetryRun(run) {
-  const host = document.getElementById("telemetry-detail");
-  if (!run) {
-    if (host.dataset.run) host.replaceChildren();
-    host.dataset.run = ""; host.dataset.revision = "";
-    host.textContent = "Waiting for execution traces…"; return;
-  }
-  const sameRun = host.dataset.run === run.id;
-  if (sameRun && host.dataset.revision === String(run.revision)) return;
-  if (!sameRun) {
-    host.replaceChildren(document.createElement("h2"), document.createElement("p"), document.createElement("dl"));
-    host.children[1].className = "note";
-    host.children[2].className = "execution-summary";
-  }
-  host.dataset.run = run.id; host.dataset.revision = String(run.revision);
-  host.children[0].textContent = run.label;
-  host.children[1].textContent = `${run.id} · ${run.status}${run.error ? " · " + run.error : ""}${run.quiet ? " · Trigger did not fire; no model call" : ""}${run.trace_id ? " · Trace ID " + run.trace_id : ""}`;
-  const summary = host.children[2];
-  summary.replaceChildren(...executionSummary(run).map(([label, value]) => {
-    const item = document.createElement("div"), title = document.createElement("dt"), detail = document.createElement("dd");
-    title.textContent = label; detail.textContent = value; item.append(title, detail); return item;
-  }));
-  const max = Math.max(run.duration_ms || 0, ...run.steps.map(step => step.offset_ms + step.duration_ms), 1);
-  const existing = new Map([...host.querySelectorAll("details")].map(item => [item.dataset.step, item]));
-  run.steps.forEach((step, index) => {
-    const key = `${run.id}:${step.call_id || index}`;
-    let details = existing.get(key);
-    if (!details) {
-      details = document.createElement("details"); details.className = "trace-step"; details.dataset.step = key;
-      const summary = document.createElement("summary");
-      const track = document.createElement("div"); track.className = "trace-track"; track.append(document.createElement("span"));
-      const content = document.createElement("div"); content.className = "trace-payload";
-      for (const label of ["Input", "Output"]) {
-        const section = document.createElement("div"), title = document.createElement("p"), pre = document.createElement("pre");
-        title.textContent = label; pre.tabIndex = 0; pre.setAttribute("aria-label", `${step.name} ${label.toLowerCase()}`);
-        section.append(title, pre); content.append(section);
-      }
-      details.append(summary, track, content); host.append(details);
-    }
-    details.querySelector("summary").textContent = `${step.name} · ${step.status} · ${step.duration_ms} ms${step.call_id ? " · call " + step.call_id : ""}`;
-    const bar = details.querySelector(".trace-track span");
-    bar.style.marginLeft = `${Math.max(0,step.offset_ms)/max*100}%`; bar.style.width = `${Math.max(0.6,step.duration_ms/max*100)}%`;
-    const payloads = [step.input, step.responses?.length > 1 ? step.responses : step.output];
-    details.querySelectorAll("pre").forEach((pre, column) => {
-      const value = payloads[column];
-      const text = value === null ? "—" : JSON.stringify(readableTrace(value),null,2);
-      if (pre.textContent !== text) {
-        const top = pre.scrollTop, left = pre.scrollLeft;
-        pre.textContent = text;
-        pre.scrollTop = top; pre.scrollLeft = left;
-      }
-    });
-    existing.delete(key);
-  });
-  for (const details of existing.values()) details.remove();
-}
-
-document.getElementById("export-trace").addEventListener("click", () => {
-  const blob = new Blob([JSON.stringify(telemetryState, null, 2)], {type:"application/json"});
-  const url = URL.createObjectURL(blob), link = document.createElement("a");
-  link.href = url; link.download = "matchos-traces.json"; link.click(); URL.revokeObjectURL(url);
-});

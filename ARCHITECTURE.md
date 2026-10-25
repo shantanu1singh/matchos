@@ -189,8 +189,8 @@ Start with the two graph builders, then follow how the application schedules the
 | Model adapters and copy | [`decision_client.py`](matchos/decision_client.py), [`azure_foundry.py`](matchos/azure_foundry.py), [`language_agent.py`](matchos/language_agent.py) and [`copy.py`](matchos/copy.py). |
 | Publication and explanations | [`publication.py`](matchos/publication.py) owns delivery rules; [`editorial.py`](matchos/editorial.py) explains selection and holds. |
 | Contracts and configuration | [`schemas.py`](matchos/schemas.py), [`llm_config.py`](matchos/llm_config.py) and [`.env.example`](.env.example). |
-| Browser and speech | [`web/`](matchos/web/) and [`speech.py`](matchos/speech.py). |
+| Browser and speech | [`web/`](matchos/web/): main match UI, separate demo/telemetry controllers and audio player; [`speech.py`](matchos/speech.py) handles synthesis. |
 | Observability and evaluation | [`telemetry.py`](matchos/telemetry.py), [`observability.py`](matchos/observability.py), [`model_logging.py`](matchos/model_logging.py) and [`evaluation.py`](matchos/evaluation.py). |
 | Infrastructure | [`infra/`](infra/) and [deployment instructions](DEPLOYMENT.md). |
 
-The live app uses the shared evidence graph plus separate viewer graphs. The older complete single-viewer `build_workflow()` and `Producer` import remain for compatibility; they are not an additional live supervisor or editorial model.
+The live app, Judge demo and evaluation runner all use this shared-evidence and per-viewer workflow architecture. Publication policy has one implementation; the `producer` wire field is retained for the UI contract.

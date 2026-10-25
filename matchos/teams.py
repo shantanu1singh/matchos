@@ -66,5 +66,8 @@ def player_label(player_id: str | None) -> str:
 
 
 def identity_context() -> dict:
-    return {"teams": TEAMS, "players": PLAYERS,
-            "note": "Synthetic match. Player IDs are opaque simulation slots; use the roster names and shirt numbers."}
+    return {
+        "teams": TEAMS,
+        "players": PLAYERS,
+        "note": "Synthetic match. Player IDs are opaque simulation slots; use the roster names and shirt numbers.",
+    }
