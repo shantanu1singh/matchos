@@ -4,9 +4,9 @@ MatchOS deploys to Azure Container Apps Consumption in East US 2. This is a prod
 
 Current deployment: [Open MatchOS](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io). Resource group: `rg-matchos-prod`, Container App: `matchos-prod`, region: `eastus2`.
 
-The initial production release passed HTTPS/assets/WebSocket checks, a real three-persona goal checkpoint using managed-identity Decision-1 and gpt-6-luna calls, and one MAI speech synthesis request. The current password-protected release is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:d1169185c5b124b0632c440901a26ace8f44498aa3651bfbd5b9fbe8b112f66a`.
+The current password-protected release is revision `matchos-prod--0000003`, deployed on 25 October 2026 from application commit `fc162e1f8460b85dd40777aa435c6d854e34fb97`. Its immutable image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:a5f9b735f1eb342c1e892c710801123ceb73542f1ff0462182c09f25077f086a`.
 
-The current release adds English/French/Spanish/Hindi story and speech support; Judge demo defaults the Liverpool fan to Spanish. This release passed 124 focused backend tests and all 25 frontend tests.
+Judge demo now plays at least 12 seconds at 1× while the independent Agent Framework viewer workflows produce stories, then pauses for comparison. The default viewers are an English broadcaster, a Spanish Liverpool fan and an English analyst. English/French/Spanish/Hindi story and speech support remains available. The image-only rollout preserved the existing password gate, managed identity, Key Vault references, probes and service configuration.
 
 ## What is implemented
 
@@ -73,7 +73,7 @@ The final output contains the public URL and deployed digest. Verify without gen
 
 Then run Judge demo in the deployed UI. Check all three personas, evidence inspection, a goal, a dismissal, and Listen. Confirm model logs name `azure-foundry:Decision-1` and `azure-foundry:gpt-6-luna`, rather than a local fallback. This last check uses paid inference; the health smoke test alone does not prove provider access.
 
-The same goal/provider check and one speech request can be run from the terminal (billable):
+The same goal/provider check and one speech request can be run from the terminal (billable). It also checks that playback advances at least 12 seconds, viewer results arrive before the clip ends, and the demo pauses afterward:
 
 ```sh
 .venv/bin/python scripts/smoke_deployment.py 'https://<app-fqdn>' --auth-env-file .env.production.local --judge-demo --speech
@@ -119,4 +119,8 @@ Other next steps: sign-in or invitation controls for non-demo access, per-user q
 
 ## Test baseline
 
-Deployment-focused validation passed 54 backend tests and all 24 frontend tests; Bicep compiled and ACR built the production image with dependency consistency checks. The broader backend run passed 215 tests and retained four existing failures in `tests/test_matchos.py`: the older casual-view workflow expectation (`test_workflow_airs_press_breakdown`) and three simulator branch tests (`test_foul_creates_a_free_kick_and_can_show_a_yellow_card`, `test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot`, `test_pass_out_creates_throw_in_and_restarts_with_opponent`). The critical CI workflow is deliberately scoped and does not represent an all-green full suite. Resolve those failures before claiming a fully validated general-purpose simulator release.
+This release passed 84 focused backend tests and all 26 frontend tests. ACR built the production image with dependency consistency checks. Deployed checks confirmed the password gate, HTTPS/assets/WebSocket access, a goal checkpoint with three actual Decision-1/gpt-6-luna outcomes, 120 live frames advancing 12 seconds before pausing, and one Azure Speech synthesis request.
+
+The press and dismissal checkpoints also passed deployed playback/provider checks, with 13.7 and 12 seconds of live frames respectively and three viewer traces containing the framework selection/publication stages. The analyst held the press story; the broadcaster and Spanish fan aired momentum updates. All three viewers aired the dismissal. A model hold remains a valid editorial outcome.
+
+The release checks are targeted, not an all-green full-suite claim. Earlier broader runs retained four failures in `tests/test_matchos.py`: `test_workflow_airs_press_breakdown`, `test_foul_creates_a_free_kick_and_can_show_a_yellow_card`, `test_foul_in_the_box_creates_a_penalty_then_a_penalty_shot`, and `test_pass_out_creates_throw_in_and_restarts_with_opponent`.

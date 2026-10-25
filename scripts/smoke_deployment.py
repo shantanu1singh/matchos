@@ -41,11 +41,27 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
         assert hello['type'] == 'hello' and hello['scenarios']
         if judge_demo:
             await socket.send(json.dumps({'type': 'demo', 'step': 1, 'requestId': 'deployment-smoke'}))
+            checkpoint_ms, frames, updates = None, [], []
+            playing = False
             async with asyncio.timeout(120):
                 while True:
                     message = json.loads(await socket.recv())
+                    if message['type'] == 'demo_snapshot':
+                        checkpoint_ms = message['frame']['timestamp_ms']
+                    elif message['type'] == 'frame':
+                        frames.append(message['frame']['timestamp_ms'])
+                    elif message['type'] == 'viewer_update':
+                        updates.append((message['index'], len(frames)))
+                    elif message['type'] == 'demo_status' and message['phase'] == 'playing':
+                        playing = message.get('running') is True
                     if message['type'] == 'demo_status' and message['phase'] in {'ready', 'error'}:
                         assert message['phase'] == 'ready', 'Judge demo failed'
+                        assert playing and checkpoint_ms is not None and frames, 'Judge demo did not play live frames'
+                        assert frames[-1] - checkpoint_ms >= 12_000, 'Judge demo clip ended too early'
+                        assert all(after > before for before, after in zip(frames, frames[1:])), 'Playback time did not advance'
+                        assert {index for index, _ in updates} == {0, 1, 2}, 'Viewer updates did not arrive beside playback'
+                        assert all(count < len(frames) for _, count in updates), 'Playback stopped before viewer results arrived'
+                        assert message.get('running') is False, 'Judge demo did not pause after playback'
                         results = message['results']
                         assert len(results) == 3
                         for item in results:
@@ -54,6 +70,7 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
                             assert result['producer']['action'] == 'AIR', 'Goal did not air'
                             assert result['overlay']['provider'] == 'azure-foundry:gpt-6-luna', 'Reasoning provider fell back'
                         print('PASS: goal checkpoint settled all three personas using Azure Decision-1 and gpt-6-luna.')
+                        print(f'PASS: live playback advanced {(frames[-1] - checkpoint_ms) / 1000:.1f}s across {len(frames)} frames, then paused after viewer updates.')
                         if speech:
                             available = [item['speech'] for item in results if (item.get('speech') or {}).get('id')]
                             assert available, 'No speech registered for aired stories'
