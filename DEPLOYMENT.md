@@ -1,55 +1,80 @@
-# Azure deployment and operations
+# Run MatchOS on Azure
 
-MatchOS deploys to Azure Container Apps Consumption in East US 2. This is a production deployment of the current demo application, with explicit limits on session durability and scale. Its internet-facing endpoint requires a shared username/password for judges and uses the existing Foundry deployments and linked Application Insights resource.
+MatchOS runs as one Python application in Azure Container Apps. The same container serves the Watch, Broadcast, Evaluations, Telemetry and Lab pages, WebSocket match playback, the standalone graphics window and speech requests. No separate frontend host is required.
 
-Current deployment: [Open MatchOS](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io). Resource group: `rg-matchos-prod`, Container App: `matchos-prod`, region: `eastus2`.
+The demo environment uses `rg-matchos-prod` in East US 2. Its shared-password endpoint is [Open MatchOS](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io). This guide describes the resources and operating requirements; deployment history belongs in Azure deployment/revision records.
 
-The current password-protected release is revision `matchos-prod--0000004`, deployed on 25 October 2026 from application commit `38b76357f3878ff3542848d266048b93dda2b844`. Its immutable image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:e5d03f072f339e9d231fd7707777b17de2c0c0fcc22831c9f9467a1725cbd26e`. The revision is healthy and serves 100% of traffic. The image-only rollout preserved the existing authentication, managed identity, Key Vault references, model settings, probes and capacity.
+## Azure resources
 
-Judge demo plays at least 12 seconds at 1× while the independent Agent Framework viewer workflows produce stories, then pauses for comparison. The default viewers are an English broadcaster, a Spanish Liverpool fan and an English analyst. English/French/Spanish/Hindi story and speech support remains available.
+| Resource | Purpose | Provisioning |
+|---|---|---|
+| Resource group | Holds the application infrastructure. | Deployment script creates or reuses the requested group. |
+| Container Apps environment and Container App | Runs the application with HTTPS ingress, WebSockets and health probes. | `infra/foundation.bicep` and `infra/app.bicep`. |
+| Azure Container Registry, Basic tier | Builds and stores the Linux application image. Registry admin credentials are disabled. | `infra/foundation.bicep`. |
+| User-assigned managed identity | Pulls images, calls Foundry, reads secrets and reads evaluation reports. | `infra/foundation.bicep` and scoped role assignments. |
+| Key Vault | Holds the shared access password, Application Insights connection string and optional Speech key. | `infra/foundation.bicep`; the deployment script uploads the allowlisted values. |
+| Log Analytics workspace | Stores Container Apps platform and console logs. | `infra/foundation.bicep`. |
+| StorageV2 account and private Blob container named `evaluations` | Persists saved evaluation scorecards across app deployments and restarts. | `infra/reports.bicep`, called by the foundation template. |
+| Foundry resource with `Decision-1` and `gpt-6-luna` deployments | Performs story selection and audience-specific writing through Microsoft Agent Framework. | Supply an existing resource and model deployments. The templates grant the app identity inference access. |
+| Application Insights linked to a Foundry project | Receives application traces and makes them available in Foundry. | Supply an existing resource, link it to the project and configure its connection string. |
+| Azure Speech-capable resource | Generates spoken commentary when enabled. | Supply an existing resource key and region; it can be the existing Foundry resource if Speech is supported there. |
 
-## What is implemented
+A Foundry project and a compatible judge deployment are needed for optional cloud grading. Grading is a separate operator action, not part of serving the app. See [evaluation setup](evals/README.md).
 
-| Capability | Implementation |
+## Broadcast output and durable storage
+
+The Broadcast page and `/broadcast` graphics window consume the stories already published by the application. They do not run another simulation or make additional model calls. The graphics window must be opened from the source MatchOS tab in the same browser/profile; cross-window updates use the browser's BroadcastChannel API.
+
+The storage account serves a different purpose: keeping evaluation results available after a rollout.
+
+| Data | Where it lives |
 |---|---|
-| Repeatable infrastructure | Bicep provisions Container Apps environment, private ACR, managed identity, Key Vault, Log Analytics, and resource-scoped roles. |
-| Container release | Non-root Python 3.13 image; Linux dependency lock with hashes; deploy by immutable image digest. Only application files enter the build context. |
-| Model authentication | User-assigned managed identity, with Cognitive Services User on the existing Foundry account. Inference keys are not copied to Azure. |
-| Speech and trace secrets | Azure Key Vault references resolved by the app identity. Local values are transferred through temporary files with restricted permissions, never CLI arguments. |
-| Traffic | Managed HTTPS endpoint, WebSockets, single-revision routing and sticky sessions. |
-| Access gate | HTTP Basic browser prompt, constant-time credential checks, and a signed 12-hour HttpOnly/Secure/SameSite cookie for browser WebSocket/audio requests. All app routes require authentication except `/api/health`. |
-| Health and recovery | Startup, readiness, and liveness probes hit `/api/health`; a failing model provider does not make the process unhealthy. |
-| Capacity | One warm replica, one worker, 1 vCPU / 2 GiB, at most eight open match WebSockets. Further connections are rejected until capacity is free. |
-| Observability | Compact OpenTelemetry traces to the existing Application Insights / Foundry integration; console and platform logs to a dedicated Log Analytics workspace. Prompt/response content export is disabled in production. |
-| Validation | GitHub Actions runs lint/format checks, the full backend and frontend suites, the offline evaluation baseline, an installed-wheel check, Bicep compilation and container HTTP/WebSocket checks without paid inference. |
-| Rollback | Redeploy a previously tested image digest through the same Bicep template. |
+| Match simulation, audience decisions, developing-story timeline and personalized recaps | Connection-local application memory. A disconnect or reset can clear them. |
+| Local execution telemetry and speech registration/cache | Application memory. Cloud traces are exported separately to Application Insights. |
+| Published evaluation scorecards | Private `evaluations` Blob container, under `reports/`. The app reads them through authenticated API routes. |
+| Full evaluation inputs, outputs and local JSON/Markdown/JSONL reports | The operator's Git-ignored `evals/results/` directory. These full reports are not automatically uploaded. |
 
-## Deploy
+`infra/reports.bicep` configures Standard LRS storage, HTTPS only, TLS 1.2 minimum, disabled public Blob access, disabled shared-key access, Blob versioning and seven-day soft delete. Access uses Microsoft Entra identities:
 
-Prerequisites: Azure CLI login, Bicep (`az bicep install`), an existing Foundry account with both model deployments, and permissions to create resources and assign roles in the target scopes. The initial operator needs Key Vault secret-write access; the template assigns Secrets Officer at the new vault only.
+- The application identity receives **Storage Blob Data Reader** on the container.
+- The deployment operator receives **Storage Blob Data Contributor** on the container to publish scorecards.
+- The browser receives reports through the authenticated app, with no storage key or SAS URL.
 
-Keep `APPLICATIONINSIGHTS_CONNECTION_STRING` in `.env.local`. If speech is enabled, retain `MATCHOS_SPEECH_ENABLED=1`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, and optionally `AZURE_SPEECH_MODEL`. The deployment script copies only the trace connection string, enabled speech key, and enabled app access password. The Foundry resource name determines its public `services.ai.azure.com` endpoint; this release expects both models in that account.
+The foundation output `reportsContainerUrl` becomes the app setting `MATCHOS_REPORTS_CONTAINER_URL`. It is an address, not a secret. The existing environment uses `https://matchosf272ydyn24aus.blob.core.windows.net/evaluations`.
 
-Production access credentials are in the ignored, mode-0600 `.env.production.local` file:
-
-```dotenv
-MATCHOS_BASIC_AUTH_ENABLED=1
-MATCHOS_BASIC_AUTH_USERNAME=judges
-MATCHOS_BASIC_AUTH_PASSWORD=<strong-random-password-at-least-16-characters>
-```
-
-The deployment script reads `.env`, `.env.local`, then `.env.production.local`; process variables win. It stores the password in Key Vault secret `matchos-basic-auth-password`, referenced by the running app. Share the login privately with judges. The application does not automatically load `.env.production.local` for local development, so your existing localhost flow remains unchanged. To enable local HTTP testing, put the same auth settings in `.env.local` and set `MATCHOS_BASIC_AUTH_SECURE_COOKIE=0`. Azure always sets secure cookies.
-
-To rotate access, replace the password in `.env.production.local` and redeploy. Old signed cookies then fail validation. Basic-auth credentials can remain in the browser's cache; use a private window to test a fresh login. This is a shared demo gate, not individual user accounts or SSO. Do not roll back to the initial ungated image: authentication requires an auth-capable release.
-
-Register the required providers once:
+Provisioning storage does not generate test results. Run the evaluation suite and publish a saved report explicitly:
 
 ```sh
-az provider register --subscription '<subscription-id>' --namespace Microsoft.App
-az provider register --subscription '<subscription-id>' --namespace Microsoft.OperationalInsights
+# In .env.local, set MATCHOS_REPORTS_CONTAINER_URL to the foundation output.
+# Use az login with the identity granted Blob Data Contributor.
+.venv/bin/python -m matchos.evaluation run --local
+.venv/bin/python -m matchos.evaluation publish evals/results/latest.json
 ```
 
-Run from the repository root; no Docker daemon is required because ACR builds the image:
+Remove `--local` to evaluate the configured cloud models; that incurs inference charges. Publishing a saved report does not rerun inference. The Evaluations tab shows the latest archived version of each execution. It never launches tests or paid grading from the browser.
+
+## Deployment prerequisites
+
+Use the project virtual environment, Azure CLI login and Bicep (`az bicep install`). The operator needs permission to create resources and assign roles in the application resource group and at the existing Foundry resource scope. Infrastructure grants the operator Key Vault Secrets Officer on the application vault and Blob Data Contributor on the evaluation container.
+
+Ensure the subscription has the resource providers registered for Container Apps, Container Registry, Managed Identity, Key Vault, Log Analytics and Storage: `Microsoft.App`, `Microsoft.ContainerRegistry`, `Microsoft.ManagedIdentity`, `Microsoft.KeyVault`, `Microsoft.OperationalInsights` and `Microsoft.Storage`.
+
+Configure local files without committing credentials:
+
+| File / setting | Required configuration |
+|---|---|
+| `.env.local`: `APPLICATIONINSIGHTS_CONNECTION_STRING` | Connection string of the Application Insights resource linked to the Foundry project. |
+| `.env.local`: `AZURE_DECISION_DEPLOYMENT`, `AZURE_REASONING_DEPLOYMENT` | Deployment names; defaults are `Decision-1` and `gpt-6-luna` in the supplied Foundry resource. |
+| `.env.local`: optional speech | `MATCHOS_SPEECH_ENABLED=1`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`, and optionally `AZURE_SPEECH_MODEL`. |
+| `.env.production.local`: app access | `MATCHOS_BASIC_AUTH_ENABLED=1`, `MATCHOS_BASIC_AUTH_USERNAME=judges`, and `MATCHOS_BASIC_AUTH_PASSWORD` with a strong random password of at least 16 characters. Keep this ignored file mode 0600. |
+
+The deployment script loads `.env`, `.env.local`, then `.env.production.local`; process variables take precedence. It uploads only the Application Insights connection string, enabled Speech key and enabled access password to Key Vault, using restricted temporary files rather than secret values in command-line arguments. Production model calls use managed identity; inference API keys are not uploaded.
+
+The app itself does not load `.env.production.local` for local development. To test the access gate on local HTTP, set the auth values in `.env.local` and `MATCHOS_BASIC_AUTH_SECURE_COOKIE=0`. Azure uses secure cookies.
+
+## Provision and deploy
+
+Run from the repository root. A local Docker daemon is not required; ACR performs the build.
 
 ```sh
 .venv/bin/python scripts/deploy_azure.py \
@@ -58,74 +83,47 @@ Run from the repository root; no Docker daemon is required because ACR builds th
   --location eastus2 \
   --foundry-resource-group '<existing-foundry-resource-group>' \
   --foundry-account '<existing-foundry-resource-name>' \
-  --operator-object-id '<signed-in-user-or-CI-service-principal-object-id>'
+  --operator-object-id '<signed-in-user-or-CI-principal-object-id>'
 ```
 
-For your signed-in user, obtain the object ID with `az ad signed-in-user show --query id -o tsv`. A CI service principal needs its own object ID, not its application/client ID. All commands target the supplied subscription explicitly and do not change your CLI default.
+For a signed-in user, obtain the object ID with `az ad signed-in-user show --query id -o tsv`. A CI principal needs its object ID, not its application/client ID. Commands target the supplied subscription explicitly.
 
-For subsequent releases, add `--skip-foundation` to reuse the `matchos-foundation` deployment outputs. Secret synchronization happens again before the build. Key Vault RBAC can take time to propagate on the initial deployment; the script retries that step. A failed deployment exits without printing arbitrary Azure response bodies that might contain secret data. Use the resource group's Deployments blade and ACR Tasks run logs to inspect a failure.
+This command creates or updates the foundation, including the storage account, private container and roles; uploads allowlisted secrets; builds the application; then deploys it with model, tracing, speech, authentication and storage settings. The foundation reuses its deterministically named resources. Reapplying it preserves existing Blob reports.
 
-The final output contains the public URL and deployed digest. Verify without generating model calls:
+For app-only releases, add `--skip-foundation` once the foundation is complete. When infrastructure changes, run without that flag so resources and deployment outputs are updated first. In particular, an older foundation without `reportsContainerUrl` must be updated before the app can read the durable archive.
+
+The container image uses Python 3.13, a non-root user and a dependency lock with package hashes. The build context contains allowlisted runtime files and excludes local credentials, virtual environments, Git history and videos. Image references are pinned for repeatability; use Azure's deployment/revision history to track individual releases.
+
+## Verify the running app
 
 ```sh
-.venv/bin/python scripts/smoke_deployment.py 'https://<app-fqdn>' --auth-env-file .env.production.local
+# Health, authenticated assets, evaluation archive and WebSocket handshake;
+# does not start paid model work.
+.venv/bin/python scripts/smoke_deployment.py \
+  'https://<app-fqdn>' --auth-env-file .env.production.local
+
+# Optional: real Azure model calls, published graphics/recaps and speech.
+# This check incurs model and Speech charges.
+.venv/bin/python scripts/smoke_deployment.py \
+  'https://<app-fqdn>' --auth-env-file .env.production.local --judge-demo --speech
 ```
 
-Then run Judge demo in the deployed UI. Check all three personas, evidence inspection, a goal, a dismissal, and Listen. Confirm model logs name `azure-foundry:Decision-1` and `azure-foundry:gpt-6-luna`, rather than a local fallback. This last check uses paid inference; the health smoke test alone does not prove provider access.
+In the browser, check automatic playback, the three Judge demo checkpoints, audience stories and evidence, Broadcast graphics/recaps, saved evaluations and Listen. Model logs should identify the Azure deployments rather than a local fallback. An empty evaluation archive is valid until an operator publishes a scorecard; an archive error indicates a storage configuration or access issue.
 
-The same goal/provider check and one speech request can be run from the terminal (billable). It also checks that playback advances at least 12 seconds, viewer results arrive before the clip ends, and the demo pauses afterward:
+## Access, monitoring and rollback
 
-```sh
-.venv/bin/python scripts/smoke_deployment.py 'https://<app-fqdn>' --auth-env-file .env.production.local --judge-demo --speech
-```
+The access gate uses an HTTP Basic browser prompt plus a signed 12-hour HttpOnly/Secure/SameSite cookie for WebSocket and audio requests. All routes require authentication except `/api/health`. Share the login privately with judges. Rotate access by changing the password in `.env.production.local` and redeploying; old signed cookies become invalid. This is shared demo access, not individual accounts or SSO.
 
-## Observe and roll back
+Container Apps **Log stream** shows model call IDs, names, durations and safe error categories. **Revisions and replicas** shows health and restarts. Compact OpenTelemetry traces go to the existing Application Insights / Foundry integration. Production disables prompt/response content logging and trace-content export.
 
-Container Apps → **Monitoring → Log stream** shows call IDs, model names, timings, safe error category/status, and server errors. **Revisions and replicas** shows health and restarts. Foundry traces remain in the existing project's linked Application Insights resource. Locally, full model console content remains enabled by default; production sets `MATCHOS_MODEL_LOG_CONTENT=0` and `MATCHOS_TRACE_CONTENT=0`.
+Startup, readiness and liveness probes use `/api/health`. Provider failures do not by themselves make the process unhealthy. Log Analytics retains 30 days with a 1 GB/day ingestion cap. This is an ingestion limit, not an application spending cap. Use Azure Cost Management budgets and owner notifications for ongoing operation.
 
-The dedicated workspace retains logs for 30 days and has a 1 GB/day ingestion cap. That cap can interrupt ingestion; it is not a spending cap for the whole application. A warm replica, registry, logging, secret operations and inference incur charges. Create a subscription/resource-group budget with an owner email in Cost Management before leaving the demo running long term. Budget notifications do not stop spending.
+To roll back, use the same deployment command with `--skip-foundation --image '<previous-tested-image-reference>'`. This reuses the existing infrastructure and secrets, skips the build and secret upload, and creates a new app revision. Preserve the matching speech/model/access configuration and use an image that supports the access gate. Deployments and rollbacks can disconnect active matches; routing uses a single active revision.
 
-List releases using Azure CLI (install the `containerapp` extension if needed):
+## Runtime limits and scaling
 
-```sh
-az containerapp revision list --subscription '<subscription-id>' \
-  --resource-group rg-matchos-prod --name matchos-prod -o table
-```
+Keep **one worker and one replica** until session and task state are externalized. The deployment uses one warm replica, 1 vCPU / 2 GiB and admission control for at most eight open match WebSockets. This is not a load-tested throughput guarantee. Sticky routing does not preserve sessions across restarts, rollouts or failures.
 
-Record each verified digest with its Git commit and test result. To roll back, run the deployment command with `--skip-foundation --image '<registry>.azurecr.io/matchos@sha256:<previous-digest>'`. It skips image building and secret upload; use the same speech/model environment configuration as the original release. Rollback still creates a deployment/revision and can disconnect active matches. The first implementation uses single-revision routing, not a canary rollout.
+Blob-backed evaluation reports survive restarts; live matches, recaps and speech caches do not. For a larger audience, add shared match snapshots, durable event processing, resumable session IDs, external audio storage, shared concurrency limits and per-user quotas before increasing replicas. A licensed live feed can then justify Event Hubs and shared evidence workers. Those services are future architecture, not prerequisites for the current app.
 
-## Current limits and the next production stage
-
-**Keep one worker and one replica.** WebSocket sessions, pending agent tasks, telemetry history and speech registration/cache live in process memory. Sticky routing does not make them durable. A restart, rollout, disconnect or replica failure loses the current session; reconnecting starts a fresh session. The eight-session limit is admission control, not a load-tested throughput claim or a per-user model budget.
-
-For a real live match feed and a larger audience, split shared evidence computation from per-viewer delivery:
-
-```mermaid
-flowchart LR
-    Feed[Licensed match feed] --> Hub[Event Hubs: durable partitioned ingest]
-    Hub --> Evidence[Shared state and evidence worker per match]
-    Evidence --> Store[Shared state / snapshots / candidate stream]
-    Store --> Editorial[Persona decision and language workers]
-    Editorial --> Delivery[WebSocket delivery replicas]
-    Delivery --> Fans[Viewer browsers]
-    Editorial --> Audio[Blob storage: approved speech audio]
-    Delivery --> Audio
-    Editorial --> Foundry[Foundry models and traces]
-```
-
-That is a proposed target, **not infrastructure deployed by these templates**. Before enabling horizontal scale, implement stable session IDs, reconnect/resume, external state/audio, shared concurrency limits and idempotent event processing. A real source feed then justifies Event Hubs; Functions are optional consumers, not required for this long-running WebSocket application.
-
-Other next steps: sign-in or invitation controls for non-demo access, per-user quotas and abuse protection, synthetic uptime alerts with a named on-call recipient, billing alerts, autoscale based on measured load, staged rollout, and an evaluation gate before changing models or prompts. CI validation is configured now; automatic CD/OIDC, alert delivery and these larger-scale features are not configured by this deployment. For a hackathon, show the working deployed URL, traces and evaluation results, and explain these concrete limits and the target diagram.
-
-## Verified release
-
-Before deployment, this application commit passed 304 backend tests, 26 browser tests, all 24 offline evaluation cases, Ruff lint/format checks and an installed-wheel smoke test. Seeded warmup plus ten minutes of replay produced identical output across all six scenarios before and after the refactor. ACR built the non-root Python 3.13 production image using the hashed dependency lock and dependency consistency checks.
-
-Live checks confirmed:
-
-- Public health responds; unauthenticated page, audio and WebSocket requests are blocked. The existing judge credentials and signed cookie work for page, assets, WebSocket and audio access.
-- All three Judge demo checkpoints use real Azure Decision-1 selection and gpt-6-luna writing, with an English broadcaster, Spanish Liverpool fan and English analyst. Each checkpoint delivered 120 live frames over 12 match seconds, then paused after all viewer outcomes arrived.
-- At the press checkpoint, the broadcaster selected momentum while the fan and analyst selected press breakdown. All three viewers aired the goal and dismissal. Agreement and model holds remain valid editorial outcomes; the app does not force disagreement.
-- The telemetry inspector returned the three viewer workflows and their editorial stages/outcomes for the press and dismissal checkpoints. One Azure Speech request returned playable MP3 audio.
-
-The previous tested password-protected rollback image is `matchosf272ydyn24aus.azurecr.io/matchos@sha256:a5f9b735f1eb342c1e892c710801123ceb73542f1ff0462182c09f25077f086a` (previous revision `matchos-prod--0000003`). Use an immutable image digest when rolling back; preserve the current access and service configuration.
+CI validates code, tests, the offline evaluation baseline, packaging, Bicep and container HTTP/WebSocket behavior. Automatic CD/OIDC, canary routing, uptime alert delivery and horizontal scaling are not configured by these templates. See [ARCHITECTURE.md](ARCHITECTURE.md) for the system design and [evaluation operations](evals/README.md) for tracing, grading and report publishing.

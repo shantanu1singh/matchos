@@ -229,6 +229,7 @@ def main():
             f"environmentId={outputs['environmentId']}",
             f"identityId={outputs['identityId']}",
             f"identityClientId={outputs['identityClientId']}",
+            f"reportsContainerUrl={outputs.get('reportsContainerUrl', '')}",
             f"registryServer={outputs['registryServer']}",
             f"vaultUri={outputs['vaultUri']}",
             f"foundryEndpoint=https://{args.foundry_account}.services.ai.azure.com",

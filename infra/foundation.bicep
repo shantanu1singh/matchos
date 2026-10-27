@@ -104,3 +104,13 @@ output vaultName string = vault.name
 output vaultUri string = vault.properties.vaultUri
 output environmentId string = environment.id
 output workspaceId string = logs.id
+
+module reports 'reports.bicep' = {
+  name: '${appName}-reports'
+  params: {
+    location: location
+    appPrincipalId: identity.properties.principalId
+    operatorPrincipalId: operatorPrincipalId
+  }
+}
+output reportsContainerUrl string = reports.outputs.containerUrl

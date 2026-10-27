@@ -106,7 +106,7 @@ function renderDemoGuide() {
 }
 
 document.getElementById("judge-demo").addEventListener("click", () => state.demo.active ? startMatch() : requestDemo());
-document.getElementById("close-evidence").addEventListener("click", clearEvidence);
+document.getElementById("close-evidence").addEventListener("click", () => clearEvidence());
 document.getElementById("demo-next").addEventListener("click", () => {
   if (state.demo.step === state.demo.stops.length - 1) startMatch();
   else requestDemo(state.demo.step + 1);

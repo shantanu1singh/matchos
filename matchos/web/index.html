@@ -21,7 +21,8 @@
         </div>
         <nav class="tabs" role="tablist">
           <button class="tab active" data-tab="watch" role="tab">Watch</button>
-          <button class="tab" data-tab="producer" role="tab">Producer</button>
+          <button class="tab" data-tab="broadcast" role="tab">Broadcast</button>
+          <button class="tab" data-tab="evaluations" role="tab">Evaluations</button>
           <button class="tab" data-tab="telemetry" role="tab">Telemetry</button>
           <button class="tab" data-tab="lab" role="tab">Lab</button>
         </nav>
@@ -124,19 +125,21 @@
         </aside>
       </section>
 
-      <section class="panel hidden" id="panel-producer">
-        <div class="producer">
-          <div class="candidate-list" id="candidates"></div>
-          <div class="candidate-detail" id="candidate-detail">
-            <p class="kicker">Current moment</p>
-            <h2>Nothing has cleared the producer yet.</h2>
-          </div>
-        </div>
-      </section>
-
       <section class="panel hidden" id="panel-telemetry">
         <div class="telemetry-toolbar"><div><p class="kicker">Execution telemetry</p><p class="note">Inspect shared evidence and each viewer’s selection, copy checks and publication outcome. Expand a stage to see its inputs and outputs.</p></div><button id="export-trace" class="trace-export" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg><span>Export JSON</span></button></div>
         <div class="telemetry-layout"><aside id="telemetry-runs" aria-label="Execution runs"></aside><div id="telemetry-detail"><p class="note">Waiting for execution traces…</p></div></div>
+        <details class="candidate-history"><summary>Candidate history · primary perspective</summary><p class="note">Stories considered for the first audience card in Watch, including held updates. Select an entry to inspect its decision and evidence. This is the former Producer view; the execution inspector above covers all perspectives.</p><div class="producer"><div class="candidate-list" id="candidates"></div><div class="candidate-detail" id="candidate-detail"><p class="kicker">Story decision</p><h2>No story decisions yet.</h2></div></div></details>
+      </section>
+      <section class="panel hidden output-panel" id="panel-broadcast">
+        <div class="output-toolbar"><div><p class="kicker">From evidence to airtime</p><h2>Broadcast output</h2><p class="note">Preview the graphics and story history published for each audience perspective.</p></div><div class="output-actions"><label class="output-field">Audience perspective<select id="output-view" aria-label="Output perspective"></select></label><button id="open-renderer" class="secondary" type="button">Open graphics window ↗</button><button id="export-packet" class="trace-export" disabled type="button">Export story JSON</button></div></div>
+        <div class="output-grid"><div><div class="broadcast-surface"><p class="kicker">Graphics preview · synthetic match</p><div id="output-clock" class="output-clock">Waiting for source</div><article id="output-preview" class="broadcast-lower-third"><p>Waiting for a published story</p></article></div><p class="note" id="output-validity">Only completed, aired stories enter this output. Graphics clear when their match-time window expires.</p><details class="packet-proof"><summary>Technical details · story JSON &amp; identifiers</summary><p class="note">Story IDs link the same published update across graphics, exports and debugging. They do not identify a person.</p><pre id="output-packet">No packet yet</pre></details></div><aside><p class="kicker">Developing stories</p><div id="story-timeline" class="story-timeline"><p class="note">Run the match or Judge demo to build an aired-story timeline.</p></div></aside></div>
+        <div class="recap-heading"><div><p class="kicker">One match · different recaps</p><h2>Your match so far</h2><p class="note">Extracted from each viewer’s aired stories. Chronology does not establish causation. No additional model calls.</p></div><button id="export-recap" class="secondary" type="button" disabled>Export recaps</button></div><div id="recap-views" class="recap-grid"></div>
+      </section>
+      <section class="panel hidden output-panel" id="panel-evaluations">
+        <div class="output-toolbar"><div><p class="kicker">Quality checks</p><h2>How well does MatchOS handle the match?</h2><p class="note">We replay known synthetic situations and check whether MatchOS shows the right kind of update, uses supported facts, and stays quiet when it should.</p></div><div class="output-actions"><label class="output-field" for="evaluation-run">Saved test run<select id="evaluation-run" aria-label="Saved test run" aria-describedby="evaluation-run-help"></select></label><button id="refresh-evaluations" class="secondary" type="button">Refresh runs</button><button id="export-evaluation" class="trace-export" type="button" disabled>Export results JSON</button></div></div>
+        <p id="evaluation-run-help" class="note">Choose a previously completed batch of tests by date and model setup. Changing this selection loads saved results; it does not test the match currently playing or call a model.</p>
+        <div class="evaluation-guide" aria-label="How to read these results"><article><b>1. A known match situation</b><p>A goal, a red card, quiet play or an update that has already aired. Each situation has an expected behavior.</p></article><article><b>2. An audience perspective</b><p>“Viewer” means an AI audience profile, not a person watching the app: a neutral Broadcaster, a Liverpool supporter or a neutral Analyst.</p></article><article><b>3. One test result per perspective</b><p>The same situation is checked separately for each profile. Eight situations × three perspectives produce 24 results, not 24 matches.</p></article></div>
+        <p id="evaluation-status" class="note" role="status">Open this tab to load saved test runs.</p><div id="evaluation-results"></div>
       </section>
       <section class="panel hidden" id="panel-lab">
         <div class="lab">
@@ -165,6 +168,7 @@
     <script src="/assets/audio.js"></script>
     <script src="/assets/telemetry.js"></script>
     <script src="/assets/demo.js"></script>
+    <script src="/assets/delivery.js"></script>
     <script src="/assets/app.js"></script>
   </body>
 </html>

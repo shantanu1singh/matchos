@@ -121,3 +121,31 @@ Model graders score 0–1 with a pass threshold of 0.8. These are configurable h
 Submission returns a queued/running run, not a passing grade. The status command saves the service's actual run response, paginated row-level scores/reasons when terminal, and the Foundry report URL. A model cannot grade errors into passing local checks. Failed/canceled cloud runs or completed runs with failed/errored rows return exit code 1; setup/auth errors return 2. Inspect `result_counts` and `output_items` for details.
 
 Grading incurs additional model charges and runs separately from match playback. There is no implicit continuous grading or scheduled cloud job. The in-app telemetry and saved reports remain useful when no Foundry project or Application Insights resource is configured.
+
+## Quality dashboard and durable scorecards
+
+The **Evaluations** tab reads saved scorecards. It never starts inference or grading from the browser. Full run JSON/Markdown/JSONL remains in Git-ignored `evals/results/`; each CLI `run` also creates an archived `matchos.quality.v1` JSON scorecard under `evals/results/reports/`. Set `MATCHOS_REPORTS_DIR` to change that local archive directory.
+
+In Azure, `MATCHOS_REPORTS_CONTAINER_URL` points to the private `evaluations` Blob container. The app identity has read-only access at container scope; the operator has Blob Data Contributor to publish reports. No account keys, SAS URLs, database or browser upload endpoint are needed. Scorecards survive app restarts and new revisions. The browser reads them through authenticated `/api/evaluations` and `/api/evaluations/{report_id}` routes, not directly from Blob Storage.
+
+```sh
+# Offline baseline, no inference charges:
+.venv/bin/python -m matchos.evaluation run --local --output evals/results/baseline.json
+# Configured providers, billable inference:
+.venv/bin/python -m matchos.evaluation run --output evals/results/azure.json
+# Publish only aggregate metrics and per-case check outcomes; no inference:
+MATCHOS_REPORTS_CONTAINER_URL=https://ACCOUNT.blob.core.windows.net/evaluations \
+  .venv/bin/python -m matchos.evaluation publish evals/results/azure.json
+```
+
+Publishing uses Entra login / DefaultAzureCredential, not model inference keys. It uploads no prompts, response prose or credentials. Cloud reports have unique IDs and cannot overwrite prior publications. Run the existing Foundry `submit` / `status` commands separately; if a sibling `.foundry.json` exists, `publish` attaches its status, judge model and available grader means/sample counts. Re-publish after grading finishes to create a new archived version. Missing scores remain absent rather than being treated as zero or perfect.
+
+Every scorecard includes mode, seed, dataset version/hash, pipeline fingerprint, model names, sample size and per-case outcomes. Ratios show numerator/denominator. Numerical fidelity and publication freshness use aired rows only. Quiet restraint requires both HOLD and no model calls; repeat and expired restraint use only their authored fixture rows. Timeout/fallback rates are per viewer row. Latency p50/p95 use nearest-rank wall-clock viewer execution (including holds), excluding checkpoint reconstruction. Publication freshness uses the actual match clock captured at commit.
+
+These are eight authored conditions across three viewers, not 24 independent matches or a general accuracy benchmark. Mechanical number checks do not prove causal/semantic correctness; Foundry model grades are separate subjective measurements. The dashboard does not invent cost estimates when complete provider usage and billing rates are unavailable; use Azure Cost Management for actual charges. The local baseline is a heuristic/template comparison, not a single-prompt LLM benchmark.
+
+The dashboard labels the selector **Saved test run**: each option is one archived batch, identified by UTC run time and whether it used an offline baseline or configured providers. “Audience perspectives” are test profiles, not site visitors. The full dataset has eight situations evaluated for three profiles, giving 24 results rather than 24 independent matches.
+
+The per-test table shows the situation and expected behavior, audience, selected story, whether it was shown or held, the check outcome, and processing time. Expand **Passed** or **Needs review** to inspect individual checks; unpublished-copy checks are **Not applicable** on held results. Correctly holding a repeated, quiet or expired story can pass. Automatic checks and optional Foundry AI reviews are explained separately; a passing rules check is not a writing-quality grade. Run IDs, seed and pipeline fingerprints remain under **Technical run details** and in the JSON export.
+
+The saved-run selector shows the latest archived publication of each execution. Publishing the same run again creates an immutable archive version with `source_run_id` pointing to the original run; it does not add another test execution to the selector. Earlier versions remain accessible by their report IDs.

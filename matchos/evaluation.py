@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
 import os
 import time
+import uuid
 from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +27,8 @@ from matchos.demo import demo_viewers, review_checkpoint
 from matchos.llm_config import load_env_files
 from matchos.observability import configure_observability, flush_observability
 from matchos.perspective import Perspective
+from matchos.quality import grading_summary, scorecard
+from matchos.report_store import ReportStore
 from matchos.schemas import PipelineResult
 from matchos.session import MatchSession
 from matchos.telemetry import safe
@@ -93,7 +97,12 @@ def score_result(case, viewer, batch, result, runs, duration_ms, *, error=None):
             if aired
             else None
         ),
-        "fresh_at_publication": (moment.expires_at_ms > batch.state.timestamp_ms if aired else None),
+        "fresh_at_publication": (
+            moment.expires_at_ms
+            > (result.published_at_ms if result.published_at_ms is not None else batch.state.timestamp_ms)
+            if aired
+            else None
+        ),
         "latency_budget": duration_ms <= case.get("max_latency_ms", 30000),
     }
     if case["id"] in {"quiet", "expired"}:
@@ -123,7 +132,19 @@ def score_result(case, viewer, batch, result, runs, duration_ms, *, error=None):
             "duration_ms": round(duration_ms, 2),
             "fallback": fallback,
             "model_calls": [
-                {"model": step["name"], "status": step["status"], "duration_ms": step["duration_ms"]}
+                {
+                    "model": step["name"],
+                    "status": step["status"],
+                    "duration_ms": step["duration_ms"],
+                    "error": next(
+                        (
+                            response.get("output", {}).get("error")
+                            for response in step.get("responses", [])
+                            if isinstance(response.get("output"), dict) and response["phase"] == "error"
+                        ),
+                        None,
+                    ),
+                }
                 for step in calls
             ],
             "error": error,
@@ -226,6 +247,15 @@ async def run_suite(cases, *, local=False):
             await session.close()
     return {
         "version": 1,
+        "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:10],
+        "dataset_sha256": hashlib.sha256(json.dumps(cases, sort_keys=True).encode()).hexdigest(),
+        "pipeline_fingerprint": hashlib.sha256(
+            b"".join(
+                path.read_bytes()
+                for directory in (ROOT / "matchos", ROOT / "matchos/decisions")
+                for path in sorted(directory.glob("*.py"))
+            )
+        ).hexdigest(),
         "created_at": datetime.now(UTC).isoformat(),
         "mode": "local-baseline" if local else "configured-providers",
         "dataset_version": cases["version"],
@@ -419,6 +449,10 @@ def main(argv=None):
     run.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     run.add_argument("--case", action="append", help="Only these case IDs (repeatable)")
     run.add_argument("--output", type=Path, default=ROOT / "evals/results/latest.json")
+    publish = commands.add_parser(
+        "publish", help="Publish a saved run scorecard to private Azure Blob storage; no inference"
+    )
+    publish.add_argument("report", type=Path)
     submit = commands.add_parser("submit", help="Submit saved outputs to Foundry cloud graders (billable)")
     submit.add_argument("report", type=Path)
     submit.add_argument("--judge-model", default=os.getenv("MATCHOS_EVAL_JUDGE_DEPLOYMENT", ""))
@@ -441,10 +475,27 @@ def main(argv=None):
             try:
                 report = asyncio.run(run_suite(cases, local=args.local))
                 write_report(report, args.output)
+                asyncio.run(ReportStore().save(scorecard(report)))
             finally:
                 flush_observability()
             print(f"Report: {args.output}\nReadable report: {args.output.with_suffix('.md')}")
             return 0 if report["summary"]["passed"] == report["summary"]["cases"] else 1
+        if args.command == "publish":
+            report = json.loads(args.report.read_text())
+            report.setdefault(
+                "run_id", datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:10]
+            )
+            grading_path = args.report.with_suffix(".foundry.json")
+            if grading_path.exists():
+                grading = json.loads(grading_path.read_text())
+                report["foundry_grading"] = grading_summary(grading)
+            card = scorecard(report)
+            # A fresh archive ID preserves earlier publications, including ungraded runs.
+            card["report_id"] = datetime.now(UTC).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:10]
+            card["source_run_id"] = report["run_id"]
+            asyncio.run(ReportStore().save(card, publish=True))
+            print(f"Published scorecard: {card['report_id']}")
+            return 0
         with ExitStack() as stack:
             client = project_client(stack)
             if args.command == "submit":

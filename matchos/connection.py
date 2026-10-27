@@ -20,6 +20,7 @@ from matchos.runtime import SendMessage
 from matchos.schemas import PipelineResult, ViewerProfile
 from matchos.session import MatchSession
 from matchos.speech import SpeechService
+from matchos.story_output import StoryOutput
 
 CandidateSink = Callable[[MatchSession, PipelineResult], Awaitable[None]]
 
@@ -75,6 +76,7 @@ class ConnectionCoordinator:
         self.perspectives: list[Perspective] = []
         self.comparison_viewers: list[ViewerProfile] = []
         self.lock = asyncio.Lock()
+        self.story_output = StoryOutput()
 
     def require_session(self) -> MatchSession:
         if self.session is None:
@@ -103,6 +105,7 @@ class ConnectionCoordinator:
             "viewer": self.handle_viewer,
             "control": self.handle_control,
             "speed": self.handle_speed,
+            "stories": self.handle_stories,
         }
         handler = handlers.get(kind)
         if handler is not None and (kind in {"start", "demo"} or self.session is not None):
@@ -151,6 +154,16 @@ class ConnectionCoordinator:
                 else:
                     await self.send({"type": "trace", "result": result.model_dump()})
             await self.send(payload)
+            result = PipelineResult.model_validate(payload["result"])
+            packet = self.story_output.publish(
+                result,
+                ViewerProfile.model_validate(payload["profile"]),
+                payload["index"],
+                current.state.timestamp_ms,
+            )
+            if packet:
+                await self.send({"type": "broadcast_packet", "packet": packet})
+                await self.handle_stories({})
             if current.demo_step is not None:
                 self.demo_results[payload["index"]] = payload
                 await self.send(
@@ -164,6 +177,7 @@ class ConnectionCoordinator:
                 )
 
         desired = [current.viewer, *self.comparison_viewers]
+        self.story_output.configure(desired)
         previous = {perspective.index: perspective for perspective in self.perspectives}
         updated = []
         for index, viewer in enumerate(desired):
@@ -178,6 +192,7 @@ class ConnectionCoordinator:
             await removed.close()
         self.perspectives[:] = updated
         current.configure_focuses(self.comparison_viewers)
+        await self.handle_stories({})
         if current.latest_candidates is not None:
             for perspective in self.perspectives:
                 perspective.offer(current.latest_candidates)
@@ -208,6 +223,7 @@ class ConnectionCoordinator:
                 }
             )
             frame = await current.seek_to(checkpoint["timestamp_ms"])
+            await self.handle_stories({})
             await self.send(
                 {
                     "type": "demo_snapshot",
@@ -296,6 +312,9 @@ class ConnectionCoordinator:
         )
         await self.stop()
         viewers = demo_viewers()
+        await self.send(
+            self.story_output.reset(retain=previous_telemetry is not None and step > self.session.demo_step)
+        )
         self.session = self.session_factory(
             "press_collapse", 47129, 1, viewers[0], running=False, demo_step=step
         )
@@ -309,6 +328,7 @@ class ConnectionCoordinator:
 
     async def handle_start(self, message: dict) -> None:
         await self.stop()
+        await self.send(self.story_output.reset())
         viewer = ViewerProfile.model_validate(message.get("viewer") or {})
         self.session = self.session_factory(
             scenario_id=str(message.get("scenario") or "press_collapse"),
@@ -336,10 +356,15 @@ class ConnectionCoordinator:
         since = int(message.get("since", 0)) if message.get("session") == current.telemetry.id else 0
         await self.send({"type": "telemetry", **current.telemetry.snapshot(since)})
 
+    async def handle_stories(self, message: dict) -> None:
+        if self.session is not None:
+            await self.send(self.story_output.snapshot(self.session.state.timestamp_ms))
+
     async def handle_seek(self, message: dict) -> None:
         previous = self.require_session()
         was_running = previous.running
         await self.stop()
+        await self.send(self.story_output.reset())
         await self.send({"type": "seeking"})
         self.session = self.session_factory(
             scenario_id=previous.scenario_id, seed=previous.seed, speed=previous.speed, viewer=previous.viewer

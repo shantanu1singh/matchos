@@ -47,7 +47,7 @@ An Agent Framework **workflow** connects typed **executors** and controls their 
 | Copy validation | Check supported numbers, units and copy constraints; replace rejected prose with localized fact-based copy. | Deterministic framework executor. |
 | Publication policy | Check freshness, duplication, cadence and the current on-air interval before writing and again before publication. | Deterministic framework executors using viewer-owned state. |
 
-There is **no verifier model, producer model or supervisor model**. Verification establishes eligible facts before selection. Decision-1 judges editorial value; publication policy handles delivery constraints and never substitutes another story. The **Producer** tab is the primary viewer's publication history. Existing `producer` result fields retain that name for compatibility.
+There is **no verifier model, producer model or supervisor model**. Verification establishes eligible facts before selection. Decision-1 judges editorial value; publication policy handles delivery constraints and never substitutes another story. **Candidate history** inside Telemetry retains the primary perspective's decision history (the former Producer tab). Existing `producer` result fields retain that name for compatibility.
 
 The writer uses a shared stateless Agent with a separate invocation and explicit profile for each viewer. It writes the card body; headlines and structured presentation metadata come from fact-based templates. Viewer history is supplied to editorial selection rather than stored as a shared conversation between writers.
 
@@ -201,3 +201,11 @@ Start with the two graph builders, then follow how the application schedules the
 | Infrastructure | [`infra/`](infra/) and [deployment instructions](DEPLOYMENT.md). |
 
 The live app, Judge demo and evaluation runner all use this shared-evidence and per-viewer workflow architecture. Publication policy has one implementation; the `producer` wire field is retained for the UI contract.
+
+## Published output and measured quality
+
+`story_output.py` receives completed AIR results and emits `matchos.insight.v1` packets with content, viewer profile, validity window, canonical facts, source events and provenance. Connection-owned histories keep up to 60 aired packets per viewer. A bounded extractive recap combines the latest routine threads with major events; it does not make additional model calls. Forward demo checkpoints preserve history, while seeks, retries, resets and changed profiles clear incompatible state. [BROADCAST.md](BROADCAST.md) defines the contract and reference renderer limits.
+
+The Broadcast tab and separate `/broadcast` page render the same packets. A same-browser BroadcastChannel carries clock updates and source heartbeats; the separate renderer has no simulator, WebSocket match session or model client. Expired and disconnected graphics clear rather than remaining indefinitely on air.
+
+`quality.py` derives scorecards from authored evaluation rows. `report_store.py` archives them as local JSON or reads/publishes a private Azure Blob container using Entra credentials. The container app has read-only Blob access; the operator publishes immutable scorecard versions. `/api/evaluations` exposes saved results behind the existing access gate. Full reports with inputs/outputs remain local; cloud scorecards contain aggregates and per-case checks, not prompt/response prose. Foundry grades can be attached on an explicit later publication. This durable archive is distinct from session-local Telemetry and live aired-story history.

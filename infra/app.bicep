@@ -15,6 +15,7 @@ param speechRegion string = 'eastus2'
 param speechModel string = 'MAI-Voice-2.1-Flash'
 param basicAuthEnabled bool = true
 param basicAuthUsername string = 'judges'
+param reportsContainerUrl string = ''
 
 resource app 'Microsoft.App/containerApps@2025-07-01' = {
   name: appName
@@ -70,6 +71,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = {
           { name: 'AZURE_SPEECH_MODEL', value: speechModel }
           { name: 'MATCHOS_BASIC_AUTH_ENABLED', value: basicAuthEnabled ? '1' : '0' }
           { name: 'MATCHOS_BASIC_AUTH_USERNAME', value: basicAuthUsername }
+          { name: 'MATCHOS_REPORTS_CONTAINER_URL', value: reportsContainerUrl }
           { name: 'MATCHOS_BASIC_AUTH_SECURE_COOKIE', value: '1' }
         ], speechEnabled ? [{ name: 'AZURE_SPEECH_KEY', secretRef: 'speech-key' }] : [],
           basicAuthEnabled ? [{ name: 'MATCHOS_BASIC_AUTH_PASSWORD', secretRef: 'access-password' }] : [])

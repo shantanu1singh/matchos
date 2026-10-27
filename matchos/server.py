@@ -21,6 +21,7 @@ from matchos.llm_config import load_env_files
 from matchos.model_logging import configure_model_logging
 from matchos.model_logging import logger as model_logger
 from matchos.observability import configure_observability, flush_observability
+from matchos.report_store import ReportStore
 from matchos.scenarios import SCENARIOS
 from matchos.session import MatchSession
 from matchos.speech import SpeechConfig, SpeechService, SpeechUnavailable
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
     if app.state.max_sessions < 0:
         raise ValueError("MATCHOS_MAX_SESSIONS must be zero (unlimited) or positive")
     app.state.active_sessions = 0
+    app.state.reports = ReportStore()
     configure_observability()
     configure_model_logging()
     try:
@@ -102,13 +104,44 @@ async def speech_audio(speech_id: str):
 async def index() -> HTMLResponse:
     # Keep markup and assets in sync across edits, including previously cached CSS.
     html = (WEB / "index.html").read_text()
-    for filename in ("styles.css", "audio.js", "telemetry.js", "demo.js", "app.js"):
+    for filename in ("styles.css", "audio.js", "telemetry.js", "demo.js", "delivery.js", "app.js"):
         path = f"/assets/{filename}"
         if path not in html:
             continue
         version = hashlib.sha256((WEB / filename).read_bytes()).hexdigest()[:12]
         html = html.replace(path, f"{path}?v={version}")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/broadcast")
+async def broadcast_reference():
+    html = (WEB / "broadcast.html").read_text()
+    for name in ("styles.css", "delivery.js"):
+        html = html.replace(
+            f"/assets/{name}",
+            f"/assets/{name}?v={hashlib.sha256((WEB / name).read_bytes()).hexdigest()[:12]}",
+        )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/evaluations")
+async def evaluations():
+    try:
+        return await app.state.reports.list()
+    except Exception:
+        raise HTTPException(
+            503, "Evaluation archive unavailable. Check storage access and configuration."
+        ) from None
+
+
+@app.get("/api/evaluations/{report_id}")
+async def evaluation_report(report_id: str):
+    try:
+        return await app.state.reports.get(report_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "Evaluation report not found") from None
+    except Exception:
+        raise HTTPException(503, "Evaluation report unavailable") from None
 
 
 @app.websocket("/ws")

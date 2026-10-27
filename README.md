@@ -22,6 +22,8 @@ Each viewer independently chooses a supported story or no interruption. They can
 - **Facts & evidence:** inspect a story's facts, checks and source events, including raw JSON. **View evidence on pitch** opens a historical event map.
 - **Producer:** review the primary viewer's aired, suppressed and rejected updates. This is a publication history, not another model.
 - **Telemetry:** inspect execution stages, model inputs and outputs, timings, errors and fallbacks; export the captured history as JSON.
+- **Broadcast:** preview/export versioned published-story packets, open a separate reference renderer, and compare viewer-specific developing stories and recaps. See [output contract](BROADCAST.md).
+- **Evaluations:** inspect saved regression scorecards with sample sizes, latency percentiles, fallback/timeout rates and attached Foundry grades. This archive is separate from live Telemetry.
 - **Lab:** choose a scenario and replay a repeatable match.
 
 Stories and spoken commentary support **English, French, Spanish and Hindi**, chosen per viewer. Application controls remain in English. **Listen** reads an aired card using Microsoft MAI-Voice models through Azure Speech; **Auto commentary** follows one selected perspective.

@@ -37,9 +37,15 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
         assert "/assets/app.js?v=" in response.text
         if credentials:
             cookie_headers = {"Cookie": f"matchos_access={client.cookies['matchos_access']}"}
-        for asset in ("app.js", "audio.js", "demo.js", "telemetry.js", "styles.css"):
+        for asset in ("app.js", "audio.js", "demo.js", "telemetry.js", "delivery.js", "styles.css"):
             response = await client.get(f"{url}/assets/{asset}")
             response.raise_for_status()
+        response = await client.get(f"{url}/broadcast")
+        response.raise_for_status()
+        assert "/assets/delivery.js?v=" in response.text
+        response = await client.get(f"{url}/api/evaluations")
+        response.raise_for_status()
+        assert response.json()["schema_version"] == "matchos.reports.v1"
     ws_url = url.replace("https://", "wss://").replace("http://", "ws://") + "/ws"
     async with websockets.connect(
         ws_url, open_timeout=30, additional_headers=cookie_headers, origin=url
@@ -50,6 +56,7 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
             await socket.send(json.dumps({"type": "demo", "step": 1, "requestId": "deployment-smoke"}))
             checkpoint_ms, frames, updates = None, [], []
             playing = False
+            packets, histories = [], []
             async with asyncio.timeout(120):
                 while True:
                     message = json.loads(await socket.recv())
@@ -59,6 +66,10 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
                         frames.append(message["frame"]["timestamp_ms"])
                     elif message["type"] == "viewer_update":
                         updates.append((message["index"], len(frames)))
+                    elif message["type"] == "broadcast_packet":
+                        packets.append(message["packet"])
+                    elif message["type"] == "story_history":
+                        histories.append(message)
                     elif message["type"] == "demo_status" and message["phase"] == "playing":
                         playing = message.get("running") is True
                     if message["type"] == "demo_status" and message["phase"] in {"ready", "error"}:
@@ -79,6 +90,13 @@ async def smoke(url, judge_demo=False, speech=False, credentials=None):
                         assert message.get("running") is False, "Judge demo did not pause after playback"
                         results = message["results"]
                         assert len(results) == 3
+                        assert {p["viewer_index"] for p in packets} == {0, 1, 2}
+                        assert all(
+                            p["schema_version"] == "matchos.insight.v1" and p["evidence"]["checks"]
+                            for p in packets
+                        )
+                        assert histories and all(view["recap"]["items"] for view in histories[-1]["views"])
+                        print("PASS: all three published output packets and personalized recaps received.")
                         for item in results:
                             result = item["result"]
                             assert result["decision"]["provider"] == "azure-foundry:Decision-1", (

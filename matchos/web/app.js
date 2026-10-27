@@ -44,8 +44,9 @@ function connect() {
   state.serverReady = false;
   const proto = location.protocol === "https:" ? "wss" : "ws";
   state.ws = new WebSocket(`${proto}://${location.host}/ws`);
-  state.ws.onopen = () => setLive("Live");
+  state.ws.onopen = () => setLive("Connecting…");
   state.ws.onclose = () => {
+    state.delivery?.disconnect();
     state.audioPlayer?.reset();
     state.speech = {available: false, message: "Reconnect to the match server to use audio."};
     renderAudioControls();
@@ -67,6 +68,7 @@ function send(payload) {
 }
 
 function onMessage(message) {
+  if (["broadcast_packet", "story_history", "story_reset"].includes(message.type)) { state.delivery?.receive(message); return; }
   if (message.type.startsWith("demo_")) { receiveDemo(message); return; }
   if (message.type === "viewer_update") {
     if (state.seeking || (state.demo.active && state.demo.phase === "preparing")) return;
@@ -122,6 +124,9 @@ function onMessage(message) {
     state.running = message.running;
     state.provider = message.languageProvider || state.provider;
     document.getElementById("pause").textContent = state.running ? "Pause" : "Resume";
+    document.getElementById("pause").disabled = state.demo.active;
+    document.getElementById("timeline").disabled = state.demo.active;
+    document.getElementById("seek-status").textContent = "Drag to rewind or jump ahead";
     setLive(state.running ? `Live · ${state.speed}×` : "Paused");
     return;
   }
@@ -133,6 +138,7 @@ function onMessage(message) {
     const nextAction = stamp(message.frame);
     const prevAction = stamp(state.frame);
     state.frame = message.frame;
+    state.delivery?.clock(message.frame);
     state.audioPlayer.check();
     state.frameAt = now;
     if (!state.prev || state.frame.timestamp_ms < state.prev.timestamp_ms || nextAction !== prevAction) state.trail = [];
@@ -258,7 +264,7 @@ function resetUiState() {
   document.getElementById("pulse").innerHTML = "";
   document.getElementById("candidate-detail").innerHTML = `
     <p class="kicker">Current moment</p>
-    <h2>Nothing has cleared the producer yet.</h2>`;
+    <h2>No story decisions yet.</h2>`;
   renderCandidates();
   renderRaw();
   renderInsight(false);
@@ -273,8 +279,12 @@ function startMatch() {
   const start = (state.scenarios.find(item => item.id === state.scenario)?.startMinute || 0) * 60000;
   document.getElementById("timeline").min = start;
   document.getElementById("timeline").value = start;
-  document.getElementById("timeline").disabled = false;
-  document.getElementById("pause").disabled = false;
+  document.getElementById("timeline").disabled = true;
+  document.getElementById("pause").disabled = true;
+  document.getElementById("pause").textContent = "Starting…";
+  document.getElementById("clock").textContent = clockOf(start);
+  document.getElementById("seek-status").textContent = "Preparing match and statistics…";
+  setLive("Starting match…");
   document.getElementById("timeline-start").textContent = clockOf(start);
   document.getElementById("timeline-time").textContent = clockOf(start);
   send({
@@ -912,6 +922,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
     document.getElementById(`panel-${tab.dataset.tab}`).classList.remove("hidden");
     if (tab.dataset.tab === "watch") requestAnimationFrame(resize);
     if (tab.dataset.tab === "telemetry") pollTelemetry();
+    if (tab.dataset.tab === "evaluations") state.delivery?.loadEvaluations();
   });
 });
 
@@ -1191,7 +1202,12 @@ document.addEventListener("click", event => {
 });
 document.getElementById("auto-commentary").addEventListener("change", event => state.audioPlayer.setAuto(event.target.checked));
 document.getElementById("audio-view").addEventListener("change", event => state.audioPlayer.selectView(event.target.value));
-window.addEventListener("pagehide", () => state.audioPlayer.reset());
+try {
+  state.delivery = window.MatchOSDelivery?.create();
+} catch (error) {
+  console.error("Broadcast output could not initialize; match playback will continue.", error);
+}
+window.addEventListener("pagehide", () => { state.audioPlayer.reset(); state.delivery?.disconnect(); });
 
 window.addEventListener("resize", resize);
 updateViewerHelp();

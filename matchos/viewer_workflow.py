@@ -245,6 +245,7 @@ class PublicationCommitExecutor(Executor):
         result.producer = runtime.publication.commit(result.moment, runtime.viewer, **_policy_state(runtime))
         if result.producer.action == "AIR":
             result.kind = "moment"
+            result.published_at_ms = runtime.dependencies.current_state().timestamp_ms
             now = time.monotonic()
             runtime.active, runtime.on_air_at = result.moment, now
             runtime.recent = (
