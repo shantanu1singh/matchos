@@ -8,10 +8,10 @@ Microsoft Voice speaks their language. The analyst focuses on tactical detail.
 
 Inspect the editorial decision and supporting facts. Then open the source events on the pitch. Every story stays connected to its evidence.
 
-Microsoft Agent Framework coordinates the pipeline. Deterministic match state produces verified candidates. Each persona asks Foundry Decision One what matters, or whether to wait. GPT six Luna writes tailored copy from selected facts. Publication guards limit repeats. The pitch runs asynchronously.
+Broadcast reuses stories that already aired. Choose an audience to preview on-screen graphics, open a separate graphics window, or see their match-so-far recap. The same published story drives each view.
 
-Telemetry exposes inputs, model calls, outputs and publication decisions. Compact traces reach Application Insights and Foundry. Separate saved-run graders assess editorial selection, persona quality, grounding and restraint, outside live playback.
+Evaluations shows saved tests, not live match updates. The dropdown chooses a test run. Each row tests one audience in one situation. Passed means the expected checks succeeded. Holding a repeated story can be correct.
 
-MatchOS runs on Azure Container Apps, with private container images, managed identity and Key Vault. Health probes, secure access and rollback support the deployment.
+Agent Framework shares evidence across independent audience workflows. Decision One chooses; GPT six Luna writes. Telemetry records each step. Azure Container Apps hosts the app.
 
-Next: licensed live feeds, deeper player perspectives, and shared state for reconnecting viewers and horizontal scale. One match. Every perspective. A useful story, grounded in evidence.
+MatchOS could extend Microsoft's Premier League partnership: personal app stories, broadcast graphics, and multilingual catch-up, built on licensed live feeds. This demo uses synthetic data. One match. Every perspective.

@@ -1,6 +1,6 @@
 # MatchOS video projects
 
-- `matchos-product-demo/`: current two-minute product walkthrough. Real Judge demo interactions, Spanish home fan and localized audio, Microsoft narration, architecture and deployment.
+- `matchos-product-demo/`: current 119-second product walkthrough. Real Judge demo interactions, Spanish fan audio, Broadcast graphics and recaps, saved Evaluations explained, agent architecture and a proposed Microsoft–Premier League extension.
 - `matchos-demo/`: earlier designed cut retained as an archive/reference.
 
 ## What belongs in Git

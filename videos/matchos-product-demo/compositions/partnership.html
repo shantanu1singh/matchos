@@ -1,0 +1,18 @@
+<template><style>
+#partnership{position:absolute;inset:0;background:var(--bg);overflow:hidden}
+#partnership .partner-brand{position:absolute;left:96px;top:74px;width:220px;height:50px;object-fit:contain}
+#partnership .partner-kicker{position:absolute;right:96px;top:87px;font:28px 'IBM Plex Mono',monospace;color:var(--gold)}
+#partnership h1{position:absolute;left:104px;top:192px;font-size:96px;line-height:1.03;letter-spacing:-.04em;margin:0;width:1650px}
+#partnership .partner-path{position:absolute;left:104px;right:104px;top:460px;display:grid;grid-template-columns:350px 70px 430px 70px 1fr;align-items:center;gap:25px}
+#partnership .partner-node{padding:32px 28px;border:1px solid #486254;border-radius:18px;background:#101c17}
+#partnership .partner-node b{font-size:38px;line-height:1.15;display:block}#partnership .partner-node p{font-size:28px;line-height:1.3;color:var(--muted);margin:16px 0 0}
+#partnership .partner-arrow{font-size:58px;color:var(--gold);text-align:center}
+#partnership .partner-out{font-size:34px;line-height:1.25;padding:15px 0;border-bottom:1px solid #365046}
+#partnership .partner-tagline{position:absolute;left:104px;top:838px;font-size:50px;letter-spacing:-.02em;margin:0;color:var(--gold)}
+#partnership .partner-note{position:absolute;left:104px;bottom:76px;font:28px 'IBM Plex Mono',monospace;color:var(--muted);margin:0}
+</style><div id="partnership" data-composition-id="partnership" data-duration="16.45" data-width="1920" data-height="1080">
+<img class="partner-brand" src="assets/brand.svg" alt="MatchOS"><div class="partner-kicker">Microsoft × Premier League / A proposed extension</div>
+<h1 id="partner-title">One match feed.<br>Personal stories across every surface.</h1>
+<div class="partner-path"><div id="partner-feed" class="partner-node"><b>Licensed<br>match feed</b><p>Future integration</p></div><div id="partner-arrow1" class="partner-arrow">→</div><div id="partner-engine" class="partner-node"><b>MatchOS</b><p>Evidence → choose → publish</p></div><div id="partner-arrow2" class="partner-arrow">→</div><div><div id="partner-app" class="partner-out">Official app / Companion</div><div id="partner-broadcast" class="partner-out">Audience-specific graphics</div><div id="partner-audio" class="partner-out">Multilingual catch-up</div></div></div>
+<p id="partner-tagline" class="partner-tagline">One match. Every perspective.</p><p class="partner-note">Independent synthetic-data prototype · official integrations are future work</p>
+</div><script>(()=>{const tl=gsap.timeline({paused:true});const show=(id,at)=>tl.fromTo(id,{opacity:0,y:20},{opacity:1,y:0,duration:.6,ease:'power3.out'},at);show('#partner-title',.3);show('#partner-feed',1.1);show('#partner-arrow1,#partner-engine',2.25);show('#partner-arrow2',4.0);show('#partner-app',4.6);show('#partner-broadcast',6.7);show('#partner-audio',8.8);show('#partner-tagline',12.0);window.__timelines=window.__timelines||{};window.__timelines.partnership=tl;})();</script></template>

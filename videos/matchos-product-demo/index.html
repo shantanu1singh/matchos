@@ -14,20 +14,20 @@
   </style>
 </head>
 <body>
-  <div data-hf-id="hf-jrvh" id="root" data-composition-id="main" data-start="0" data-duration="120" data-width="1920" data-height="1080">
+  <div data-hf-id="hf-jrvh" id="root" data-composition-id="main" data-start="0" data-duration="119" data-width="1920" data-height="1080">
     <div data-hf-id="hf-xqtu" id="walkthrough-host" class="clip scene-slot" data-composition-id="walkthrough" data-composition-src="compositions/walkthrough.html" data-start="0" data-duration="52" data-track-index="0" data-track-kind="graphics"></div>
-    <div data-hf-id="hf-tz1g" id="slot-5" class="clip scene-slot" data-composition-id="beat-5" data-composition-src="compositions/beat-5.html" data-start="51.55" data-duration="22.45" data-track-index="0"></div>
-    <div data-hf-id="hf-7scp" id="slot-6" class="clip scene-slot" data-composition-id="beat-6" data-composition-src="compositions/beat-6.html" data-start="73.55" data-duration="18.45" data-track-index="1"></div>
-    <div data-hf-id="hf-lwgz" id="slot-7" class="clip scene-slot" data-composition-id="beat-7" data-composition-src="compositions/beat-7.html" data-start="91.55" data-duration="14.45" data-track-index="0"></div>
-    <div data-hf-id="hf-46y3" id="slot-8" class="clip scene-slot" data-composition-id="beat-8" data-composition-src="compositions/beat-8.html" data-start="105.55" data-duration="14.45" data-track-index="1"></div>
+    <div id="broadcast" class="clip scene-slot" data-composition-id="broadcast" data-composition-src="compositions/broadcast.html" data-start="51.55" data-duration="18.45" data-track-index="0" data-track-kind="graphics"></div>
+    <div id="evaluations" class="clip scene-slot" data-composition-id="evaluations" data-composition-src="compositions/evaluations.html" data-start="69.55" data-duration="19.45" data-track-index="1" data-track-kind="graphics"></div>
+    <div id="architecture" class="clip scene-slot" data-composition-id="architecture" data-composition-src="compositions/architecture.html" data-start="88.55" data-duration="14.45" data-track-index="0" data-track-kind="graphics"></div>
+    <div id="partnership" class="clip scene-slot" data-composition-id="partnership" data-composition-src="compositions/partnership.html" data-start="102.55" data-duration="16.45" data-track-index="1" data-track-kind="graphics"></div>
     <audio id="spanish-commentary" src="assets/spanish-commentary.wav" data-start="29.422" data-duration="4.528" data-track-index="4" data-volume="1"></audio>
-    <audio data-hf-id="hf-79bg" id="narration" src="narration.wav" data-start="0" data-duration="120" data-track-index="3" data-volume="1"></audio>
+    <audio data-hf-id="hf-79bg" id="narration" src="narration.wav" data-start="0" data-duration="119" data-track-index="3" data-volume="1"></audio>
   </div>
   <script>
     window.__timelines = window.__timelines || {};
     const film = gsap.timeline({paused:true});
     // Scene-container crossfades are transitions; content has no exit tween.
-    const pairs=[['#walkthrough-host','#slot-5',51.55],['#slot-5','#slot-6',73.55],['#slot-6','#slot-7',91.55],['#slot-7','#slot-8',105.55]];
+    const pairs=[['#walkthrough-host','#broadcast',51.55],['#broadcast','#evaluations',69.55],['#evaluations','#architecture',88.55],['#architecture','#partnership',102.55]];
     pairs.forEach(([outgoing,incoming,at])=>{
       film.fromTo(incoming,{opacity:0},{opacity:1,duration:.45,ease:'sine.inOut',immediateRender:false},at);
       film.fromTo(outgoing,{opacity:1},{opacity:0,duration:.45,ease:'sine.inOut',immediateRender:false},at);

@@ -36,6 +36,7 @@ def main():
     voice=os.getenv('VIDEO_NARRATOR_VOICE','en-GB-Emily:MAI-Voice-2.1')
     if not re.fullmatch(r'[A-Za-z0-9:._-]+',voice):raise SystemExit('Invalid narrator voice ID')
     plan=json.loads((ROOT/'narration-plan.json').read_text())
+    film_duration=max(part['scene_end'] for part in plan)
     cache=ROOT/'.tts-cache';cache.mkdir(exist_ok=True)
     timings=[]
     with httpx.Client(timeout=90) as client:
@@ -73,7 +74,7 @@ def main():
         delay=round(item['speech_start']*1000)
         filters.append(f'[{i}:a]adelay={delay}:all=1[a{i}]')
     inputs=''.join(f'[a{i}]' for i in range(len(timings)))
-    filters.append(inputs+f'amix=inputs={len(timings)}:normalize=0,apad,atrim=duration=120[mix]')
+    filters.append(inputs+f'amix=inputs={len(timings)}:normalize=0,apad,atrim=duration={film_duration}[mix]')
     raw=ROOT/'.tts-cache/mix.wav'
     subprocess.run(cmd+['-filter_complex',';'.join(filters),'-map','[mix]','-ar','24000','-ac','1',str(raw)],check=True)
     scan=subprocess.run(['ffmpeg','-hide_banner','-i',str(raw),'-af','loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json','-f','null','-'],capture_output=True,text=True,check=True)
@@ -81,9 +82,9 @@ def main():
     filt=('loudnorm=I=-16:TP=-1.5:LRA=11:linear=false:'
           f'measured_I={levels["input_i"]}:measured_TP={levels["input_tp"]}:measured_LRA={levels["input_lra"]}:'
           f'measured_thresh={levels["input_thresh"]}:offset={levels["target_offset"]}')
-    subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(raw),'-af',filt,'-ar','24000','-ac','1','-t','120',str(ROOT/'narration.wav')],check=True)
-    assert duration(ROOT/'narration.wav')==120
-    print('Microsoft narration mastered: exactly 120 seconds.',flush=True)
+    subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(raw),'-af',filt,'-ar','24000','-ac','1','-t',str(film_duration),str(ROOT/'narration.wav')],check=True)
+    assert abs(duration(ROOT/'narration.wav')-film_duration)<0.001
+    print(f'Microsoft narration mastered: exactly {film_duration} seconds.',flush=True)
 
 
 if __name__=='__main__':main()

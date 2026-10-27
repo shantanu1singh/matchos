@@ -1,0 +1,24 @@
+{
+  "source": "Current local MatchOS UI, configured Azure Decision-1 and gpt-6-luna; synthetic press-collapse demo",
+  "broadcast": "FROM EVIDENCE TO AIRTIME\n\nBroadcast output\n\nPreview the graphics and story history published for each audience perspective.\n\nAudience perspective\nBroadcaster \u00b7 EN\nSupporter \u00b7 ES\nAnalyst \u00b7 EN\nOpen graphics window \u2197\nExport story JSON\n\nGRAPHICS PREVIEW \u00b7 SYNTHETIC MATCH\n\n64:11\n\nBROADCASTER \u00b7 EN \u00b7 ON AIR\n\nAt 1\u20131, Liverpool are building pressure\n\nLiverpool have recorded 17 final-third entries, up from 5 before.\n\nPossession 64%\nFinal third 5 \u2192 17\n\nOn air \u00b7 match-time window 64:00\u201364:40\n\nTechnical details \u00b7 story JSON & identifiers\n\nDEVELOPING STORIES\n\n64:05\nMomentum shift\nAt 1\u20131, Liverpool are building pressure\n\nONE MATCH \u00b7 DIFFERENT RECAPS\n\nYour match so far\n\nExtracted from each viewer\u2019s aired stories. Chronology does not establish causation. No additional model calls.\n\nExport recaps\n\nBROADCASTER \u00b7 EN\n\nYour match so far\n\nThrough 64:05\n\n64:05\nAt 1\u20131, Liverpool are building pressure\n\nLiverpool have recorded 17 final-third entries, up from 5 before.\n\nSUPPORTER \u00b7 ES\n\nTu partido hasta ahora\n\nThrough 64:05\n\n64:04\nLiverpool toma la iniciativa\n\nLiverpool ha elevado sus entradas en el \u00faltimo tercio de 5 a 17 y suma un 64% de posesi\u00f3n en los \u00faltimos cinco minutos.\n\nANALYST \u00b7 EN\n\nYour match so far\n\nThrough 64:05\n\n64:05\nPress effectiveness down\n\nAt 1-1 with 11 players each, Liverpool\u2019s rate of playing through Manchester City\u2019s first press line rose from 36% to 86%. City\u2019s defensive line moved from 30.46 to 27.83 metres.",
+  "evaluationOptions": [
+    "Run 2 \u00b7 26 Oct 2026, 14:08 UTC \u00b7 Configured models \u00b7 24 results",
+    "Run 1 \u00b7 26 Oct 2026, 14:04 UTC \u00b7 Offline baseline \u00b7 24 results"
+  ],
+  "exampleRow": "Update just aired\nExpected: Avoid interrupting again with stories that just aired.\n\tBroadcaster\tNo story selected\tHeld back\t\nPassed\n6 / 6 checks \u00b7 expand\nPassed\nThe workflow finished successfully\nPassed\nThe chosen story came from verified candidates, or no story was selected\nPassed\nThe story choice matched this test\u2019s expected categories\nPassed\nShowing or holding the story matched the expected behavior\nNot applicable\nThe published story had verified source evidence\nNot applicable\nThe published story matched the model\u2019s selection\nNot applicable\nThe numbers in the published copy were supported by the facts\nNot applicable\nThe audience role, team and language matched the test profile\nNot applicable\nThe story was still valid when published\nPassed\nProcessing finished within the test\u2019s time budget\nPassed\nRequested model calls completed without fallback\n\t1.23s",
+  "evaluationsRecapture": {
+    "purpose": "Fit the whole current page and compact saved-result rows inside the video frame, without expanded-column empty space or cropped text.",
+    "captured": "2026-10-27",
+    "source": "Actual local app reading the same saved Azure configured-model test run. No new model calls or grading runs.",
+    "assets": [
+      "evaluations-overview-clean.jpg",
+      "evaluations-results-clean.jpg"
+    ],
+    "size": [
+      1265,
+      712
+    ],
+    "resultDetailsExpanded": false,
+    "annotation": "A gold video outline points to the actual Broadcaster Update just aired row; data pixels are unchanged."
+  }
+}

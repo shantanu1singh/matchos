@@ -1,0 +1,26 @@
+<template>
+<!-- Browser frame adapted from the HyperFrames browser-device-stage component; actual UI pixels remain unchanged. -->
+<style>#evaluations{position:absolute;inset:0;background:var(--bg);overflow:hidden}
+.feature-copy{position:absolute;left:92px;top:208px;width:500px;z-index:3}
+.feature-copy h1{font-size:78px;line-height:1.02;letter-spacing:-.035em;margin:0 0 28px;font-weight:750}
+.feature-copy p{font-size:32px;line-height:1.35;color:var(--muted);margin:0 0 24px}
+.feature-step{border-top:2px solid var(--gold);padding-top:22px;margin-top:32px}
+.feature-step strong{font-size:38px;line-height:1.13;display:block;margin-bottom:15px}
+.feature-step p{font-size:29px;line-height:1.35}
+.feature-brand{position:absolute;left:92px;top:70px;width:220px;height:50px;object-fit:contain}
+.feature-kicker{position:absolute;right:92px;top:86px;font:28px 'IBM Plex Mono',monospace;color:var(--gold)}
+.feature-stage{position:absolute;left:662px;top:212px;width:1166px;height:716px;overflow:hidden;border:1px solid #486254;border-radius:20px;background:#0c1914}
+.feature-bar{position:absolute;inset:0 0 auto;height:52px;background:#14271d;border-bottom:1px solid #486254;display:flex;align-items:center;gap:8px;padding:0 22px;z-index:3;font:28px 'IBM Plex Mono',monospace;color:var(--muted)}
+.feature-bar i{width:8px;height:8px;border-radius:50%;background:#9aafa4;margin-right:1px}.feature-bar span{margin-left:16px}
+.feature-screen{position:absolute;inset:52px 0 0;overflow:hidden}
+.feature-screen img{position:absolute;left:0;top:0;width:100%;height:auto;max-width:none}
+.eval-row-focus{position:absolute;left:21px;right:21px;top:241px;height:73px;border:2px solid var(--gold);border-radius:7px;pointer-events:none;box-sizing:border-box}
+.feature-source{position:absolute;left:92px;right:92px;bottom:70px;font:28px/1.3 'IBM Plex Mono',monospace;color:var(--muted);margin:0}
+</style>
+<div id="evaluations" data-composition-id="evaluations" data-duration="19.45" data-width="1920" data-height="1080">
+<img class="feature-brand" src="assets/brand.svg" alt="MatchOS"><div class="feature-kicker">Evaluations / Read the saved tests</div>
+<div class="feature-copy"><h1 id="eval-title">Did it make<br>the right call?</h1><p id="eval-intro">Saved test results.<br>Not live match updates.</p><div id="eval-first" class="feature-step"><strong>Choose a saved run.</strong><p>One row = one situation<br>tested for one audience.</p></div><div id="eval-second" class="feature-step" style="position:absolute;top:274px;left:0;width:500px"><strong>Held back can pass.</strong><p>This repeated update correctly stays off air.</p></div></div>
+<div id="eval-stage" class="feature-stage" data-hold="Read the real saved run and held result" ><div class="feature-bar"><i></i><i></i><i></i><span>Actual Evaluations tab</span></div><div class="feature-screen"><img id="eval-overview" src="assets/evaluations-overview-clean.jpg" alt="Actual saved evaluation run selector and results"><img id="eval-checks" src="assets/evaluations-results-clean.jpg" alt="Compact actual test rows showing repeated updates held back and passed"><div id="eval-row-focus" class="eval-row-focus" aria-hidden="true" data-layout-ignore="Decorative outline identifies the actual Broadcaster repeated-update row"></div></div></div>
+<p class="feature-source">Actual saved Azure run · automatic checks shown · separate AI writing grades are optional</p>
+</div><script>(()=>{const tl=gsap.timeline({paused:true});gsap.set('#eval-checks,#eval-row-focus',{opacity:0});gsap.set('#eval-second',{opacity:0});tl.fromTo('#eval-title',{opacity:0,y:20},{opacity:1,y:0,duration:.6,ease:'power3.out'},.3);tl.fromTo('#eval-stage',{opacity:0,y:22},{opacity:1,y:0,duration:.7,ease:'power3.out'},.55);tl.fromTo('#eval-intro,#eval-first',{opacity:0},{opacity:1,duration:.6,stagger:.2},1);tl.to('#eval-first,#eval-overview',{opacity:0,duration:.35},9.2);tl.to('#eval-second,#eval-checks',{opacity:1,duration:.5},9.6);tl.to('#eval-row-focus',{opacity:1,duration:.35},10.3);window.__timelines=window.__timelines||{};window.__timelines.evaluations=tl;})();</script>
+</template>

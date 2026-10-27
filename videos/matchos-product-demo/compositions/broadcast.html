@@ -1,0 +1,25 @@
+<template>
+<!-- Browser frame adapted from the HyperFrames browser-device-stage component; actual UI pixels remain unchanged. -->
+<style>#broadcast{position:absolute;inset:0;background:var(--bg);overflow:hidden}
+.feature-copy{position:absolute;left:92px;top:208px;width:500px;z-index:3}
+.feature-copy h1{font-size:78px;line-height:1.02;letter-spacing:-.035em;margin:0 0 28px;font-weight:750}
+.feature-copy p{font-size:32px;line-height:1.35;color:var(--muted);margin:0 0 24px}
+.feature-step{border-top:2px solid var(--gold);padding-top:22px;margin-top:32px}
+.feature-step strong{font-size:38px;line-height:1.13;display:block;margin-bottom:15px}
+.feature-step p{font-size:29px;line-height:1.35}
+.feature-brand{position:absolute;left:92px;top:70px;width:220px;height:50px;object-fit:contain}
+.feature-kicker{position:absolute;right:92px;top:86px;font:28px 'IBM Plex Mono',monospace;color:var(--gold)}
+.feature-stage{position:absolute;left:662px;top:212px;width:1166px;height:716px;overflow:hidden;border:1px solid #486254;border-radius:20px;background:#0c1914}
+.feature-bar{position:absolute;inset:0 0 auto;height:52px;background:#14271d;border-bottom:1px solid #486254;display:flex;align-items:center;gap:8px;padding:0 22px;z-index:3;font:28px 'IBM Plex Mono',monospace;color:var(--muted)}
+.feature-bar i{width:8px;height:8px;border-radius:50%;background:#9aafa4;margin-right:1px}.feature-bar span{margin-left:16px}
+.feature-screen{position:absolute;inset:52px 0 0;overflow:hidden}
+.feature-screen img{position:absolute;left:0;top:0;width:1920px;height:1080px;max-width:none;transform-origin:0 0}
+.feature-source{position:absolute;left:92px;right:92px;bottom:70px;font:28px/1.3 'IBM Plex Mono',monospace;color:var(--muted);margin:0}
+</style>
+<div id="broadcast" data-composition-id="broadcast" data-duration="18.45" data-width="1920" data-height="1080">
+<img class="feature-brand" src="assets/brand.svg" alt="MatchOS"><div class="feature-kicker">Broadcast / Reuse the aired story</div>
+<div class="feature-copy"><h1 id="broadcast-title">One story.<br>Ready to use.</h1><p id="broadcast-intro">Turn an aired update into graphics and a match recap.</p><div id="broadcast-first" class="feature-step"><strong>Choose an audience.</strong><p>Preview the graphic.<br>Open a separate graphics window.</p></div><div id="broadcast-second" class="feature-step" style="position:absolute;top:274px;left:0;width:500px"><strong>Catch up in their language.</strong><p>Each recap reuses that audience’s published stories.</p></div></div>
+<div id="broadcast-stage" class="feature-stage" data-hold="Read the actual aired story and recap" data-layout-allow-overflow="Intentional camera crop of actual UI pixels"><div class="feature-bar"><i></i><i></i><i></i><span>Actual Broadcast tab</span></div><div class="feature-screen"><img id="broadcast-image" src="assets/broadcast-current.png" alt="Actual MatchOS Broadcast tab with an aired graphic and three language-specific recaps"></div></div>
+<p class="feature-source">Current app · live Azure models · synthetic match · same published story, no extra editorial call</p>
+</div><script>(()=>{const tl=gsap.timeline({paused:true});gsap.set('#broadcast-image',{x:-168,y:-80});gsap.set('#broadcast-second',{opacity:0});tl.fromTo('#broadcast-title',{opacity:0,y:20},{opacity:1,y:0,duration:.6,ease:'power3.out'},.3);tl.fromTo('#broadcast-stage',{opacity:0,y:22},{opacity:1,y:0,duration:.7,ease:'power3.out'},.55);tl.fromTo('#broadcast-intro,#broadcast-first',{opacity:0},{opacity:1,duration:.6,stagger:.2},1);tl.to('#broadcast-first',{opacity:0,duration:.35},8.2);tl.to('#broadcast-image',{y:-640,duration:1.25,ease:'sine.inOut'},8.3);tl.to('#broadcast-second',{opacity:1,duration:.5},8.85);window.__timelines=window.__timelines||{};window.__timelines.broadcast=tl;})();</script>
+</template>

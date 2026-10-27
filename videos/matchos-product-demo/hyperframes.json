@@ -8,5 +8,13 @@
   },
   "media": {
     "autoProxy": true
-  }
+  },
+  "registryItems": [
+    {
+      "name": "browser-device-stage",
+      "type": "hyperframes:component",
+      "target": "compositions/components/browser-device-stage.html"
+    }
+  ],
+  "authoringSkill": "hyperframes"
 }
