@@ -8,6 +8,15 @@ The demo uses a synthetic Liverpool–Manchester City match. Its published stori
 
 Microsoft Agent Framework orchestrates shared evidence generation and independent viewer workflows. Microsoft Foundry's **Decision-1** selects what is worth showing; **gpt-6-luna** writes the supporting copy. Deterministic checks establish the match facts and control when a finished story can air.
 
+## Live demo
+
+[Open the production deployment](https://matchos-prod.niceground-69655e6e.eastus2.azurecontainerapps.io).
+
+- **Username:** `judges`
+- **Password:** [Retrieve from Bitwarden Send](https://send.bitwarden.com/#JhAeAJcly0anMbTwAH2S5w/wBsTlJrvzw9kJZg0y8Qo1w)
+
+Sign in when prompted, then click **Judge demo** for the guided walkthrough.
+
 ## How this could extend Microsoft's Premier League partnership
 
 Microsoft and the Premier League already describe an ecosystem spanning the Copilot-powered Premier League Companion, personalized content, live match overlays, multilingual experiences and broadcast analysis. See the [Premier League's partnership announcement](https://www.premierleague.com/en/news/4338015) and [Microsoft's current overview](https://unlocked.microsoft.com/premier-league/).
