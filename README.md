@@ -2,9 +2,28 @@
 
 **One match. A different perspective for every viewer.**
 
-MatchOS turns a simulated football match into live, personalized stories. A broadcaster gets a concise match update, a supporter gets their team's perspective, and an analyst gets the tactical evidence—all beside the same moving pitch.
+MatchOS is a working prototype of a **live editorial engine for personalized football experiences**. It decides which supported story matters to each audience, when to interrupt, and when to stay quiet. A broadcaster gets a concise match update, a supporter gets their team's perspective, and an analyst gets the tactical evidence—all beside the same moving pitch.
+
+The demo uses a synthetic Liverpool–Manchester City match. Its published stories also power timed graphics, spoken commentary and audience-specific recaps, without repeating the editorial model calls for each output surface.
 
 Microsoft Agent Framework orchestrates shared evidence generation and independent viewer workflows. Microsoft Foundry's **Decision-1** selects what is worth showing; **gpt-6-luna** writes the supporting copy. Deterministic checks establish the match facts and control when a finished story can air.
+
+## How this could extend Microsoft's Premier League partnership
+
+Microsoft and the Premier League already describe an ecosystem spanning the Copilot-powered Premier League Companion, personalized content, live match overlays, multilingual experiences and broadcast analysis. See the [Premier League's partnership announcement](https://www.premierleague.com/en/news/4338015) and [Microsoft's current overview](https://unlocked.microsoft.com/premier-league/).
+
+**MatchOS demonstrates an editorial decision and delivery layer that could support those experiences.** The opportunity is to turn shared match evidence into appropriately timed stories for different audiences, with a record of why each story aired or was held. This is a proposed contribution to the partnership's stated goals.
+
+| Potential use within the ecosystem | What MatchOS demonstrates today |
+|---|---|
+| **Official app and Companion match experiences:** surface developments relevant to a fan's club, language and interests as play unfolds. | Independent audience workflows choose a verified story or no interruption. Recent history, duplication and freshness checks govern delivery while the pitch keeps moving. |
+| **Broadcasters and rights holders:** reuse supported insights as timely on-screen graphics. | A versioned story packet carries published copy, statistics, evidence and a match-time validity window. The Broadcast page and separate graphics window consume the same output. |
+| **Multilingual audio and catch-up:** help audiences follow the match through their preferred format. | English, French, Spanish and Hindi story/speech support, plus extractive recaps of each audience's aired stories. Recaps remain session-local and cover the match so far. |
+| **Platform and editorial operations:** inspect decisions and test changes before wider rollout. | Foundry tracing, model input/output inspection, automatic regression checks, optional separate AI grading and durable evaluation scorecards in private Azure Blob storage. |
+
+The potential value is a reusable publishing contract across fan and broadcast surfaces, audience-specific interruption control, and inspectable evidence behind each update. A partner pilot could measure story usefulness, unwanted interruptions, comprehension and delivery latency on licensed real-match data, establishing whether personalization improves the match experience.
+
+**Prototype and integration scope:** MatchOS is an independent hackathon project using synthetic events. Connections to official Premier League feeds, the Companion and commercial broadcast systems are proposed integrations. The working app is deployed on Azure Container Apps with managed identity, Key Vault and private Blob storage; see [deployment requirements and scaling limits](DEPLOYMENT.md).
 
 ## Explore the product
 
@@ -20,10 +39,9 @@ Each viewer independently chooses a supported story or no interruption. They can
 
 - **Watch:** follow the pitch, pause, change speed, or drag the timeline. Add or configure up to three viewer cards in the sidebar.
 - **Facts & evidence:** inspect a story's facts, checks and source events, including raw JSON. **View evidence on pitch** opens a historical event map.
-- **Producer:** review the primary viewer's aired, suppressed and rejected updates. This is a publication history, not another model.
-- **Telemetry:** inspect execution stages, model inputs and outputs, timings, errors and fallbacks; export the captured history as JSON.
+- **Telemetry:** inspect execution stages, model inputs and outputs, timings, errors and fallbacks; export the captured history as JSON. Expand **Candidate history · primary perspective** for the former Producer view of the first audience card's decisions.
 - **Broadcast:** preview/export versioned published-story packets, open a separate reference renderer, and compare viewer-specific developing stories and recaps. See [output contract](BROADCAST.md).
-- **Evaluations:** inspect saved regression scorecards with sample sizes, latency percentiles, fallback/timeout rates and attached Foundry grades. This archive is separate from live Telemetry.
+- **Evaluations:** choose a saved test run, understand the audience profiles and metrics, and expand each result's checks. A correctly held story can pass. Automatic checks and optional Foundry AI grades are explained separately; this archive is independent of live Telemetry.
 - **Lab:** choose a scenario and replay a repeatable match.
 
 Stories and spoken commentary support **English, French, Spanish and Hindi**, chosen per viewer. Application controls remain in English. **Listen** reads an aired card using Microsoft MAI-Voice models through Azure Speech; **Auto commentary** follows one selected perspective.
